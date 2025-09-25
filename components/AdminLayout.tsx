@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger } from "./ui/sidebar";
+import { Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger, useSidebar } from "./ui/sidebar";
 import { Button } from "./ui/button";
 import { 
   LayoutDashboard, 
@@ -30,47 +30,57 @@ const menuItems = [
   { id: "settings", label: "Settings", icon: Settings },
 ];
 
+function SidebarContentWrapper({ currentView, onViewChange }: { currentView: string; onViewChange: (view: string) => void }) {
+  const { collapsed } = useSidebar()
+  
+  return (
+    <>
+      <SidebarHeader className="p-4">
+        <div className="flex items-center space-x-2">
+          <div className="w-8 h-8 bg-violet-600 rounded-lg flex items-center justify-center flex-shrink-0">
+            <span className="text-white font-bold text-sm">SC</span>
+          </div>
+          {!collapsed && <span className="font-semibold">SmileCare Admin</span>}
+        </div>
+      </SidebarHeader>
+      
+      <SidebarContent className="p-4">
+        <SidebarMenu>
+          {menuItems.map((item) => (
+            <SidebarMenuItem key={item.id}>
+              <SidebarMenuButton
+                onClick={() => onViewChange(item.id)}
+                isActive={currentView === item.id}
+                className="w-full justify-start"
+              >
+                <item.icon className="h-4 w-4 flex-shrink-0" />
+                {!collapsed && <span>{item.label}</span>}
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          ))}
+        </SidebarMenu>
+        
+        <div className="absolute bottom-4 left-4 right-4">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50">
+                <LogOut className="h-4 w-4 flex-shrink-0" />
+                {!collapsed && <span>Logout</span>}
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </div>
+      </SidebarContent>
+    </>
+  )
+}
+
 export function AdminLayout({ currentView, onViewChange, children }: AdminLayoutProps) {
   return (
     <SidebarProvider>
       <div className="flex h-screen w-full">
         <Sidebar className="border-r">
-          <SidebarHeader className="p-4">
-            <div className="flex items-center space-x-2">
-              <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-sm">SC</span>
-              </div>
-              <span className="font-semibold">SmileCare Admin</span>
-            </div>
-          </SidebarHeader>
-          
-          <SidebarContent className="p-4">
-            <SidebarMenu>
-              {menuItems.map((item) => (
-                <SidebarMenuItem key={item.id}>
-                  <SidebarMenuButton
-                    onClick={() => onViewChange(item.id)}
-                    isActive={currentView === item.id}
-                    className="w-full justify-start"
-                  >
-                    <item.icon className="h-4 w-4" />
-                    <span>{item.label}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-            
-            <div className="absolute bottom-4 left-4 right-4">
-              <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50">
-                    <LogOut className="h-4 w-4" />
-                    <span>Logout</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
-            </div>
-          </SidebarContent>
+          <SidebarContentWrapper currentView={currentView} onViewChange={onViewChange} />
         </Sidebar>
         
         <div className="flex-1 flex flex-col">

@@ -4,33 +4,55 @@ import * as React from "react"
 import { cn } from "@/lib/utils"
 
 const SidebarContext = React.createContext<{
-  collapsed?: boolean
-  setCollapsed?: (collapsed: boolean) => void
-}>({})
+  collapsed: boolean
+  setCollapsed: (collapsed: boolean) => void
+  toggleSidebar: () => void
+}>({
+  collapsed: false,
+  setCollapsed: () => {},
+  toggleSidebar: () => {}
+})
 
 export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = React.useState(false)
   
+  const toggleSidebar = () => {
+    setCollapsed(!collapsed)
+  }
+  
   return (
-    <SidebarContext.Provider value={{ collapsed, setCollapsed }}>
+    <SidebarContext.Provider value={{ collapsed, setCollapsed, toggleSidebar }}>
       {children}
     </SidebarContext.Provider>
   )
 }
 
+export const useSidebar = () => {
+  const context = React.useContext(SidebarContext)
+  if (!context) {
+    throw new Error("useSidebar must be used within a SidebarProvider")
+  }
+  return context
+}
+
 export const Sidebar = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
-  <div
-    ref={ref}
-    className={cn(
-      "flex h-full w-64 flex-col bg-white border-r border-gray-200",
-      className
-    )}
-    {...props}
-  />
-))
+>(({ className, ...props }, ref) => {
+  const { collapsed } = useSidebar()
+  
+  return (
+    <div
+      ref={ref}
+      className={cn(
+        "flex h-full flex-col bg-white border-r border-gray-200 transition-all duration-300",
+        collapsed ? "w-16" : "w-64",
+        className
+      )}
+      {...props}
+    />
+  )
+})
 Sidebar.displayName = "Sidebar"
 
 export const SidebarHeader = React.forwardRef<
@@ -86,45 +108,62 @@ export const SidebarMenuButton = React.forwardRef<
   React.ButtonHTMLAttributes<HTMLButtonElement> & {
     isActive?: boolean
   }
->(({ className, isActive, ...props }, ref) => (
-  <button
-    ref={ref}
-    className={cn(
-      "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-normal transition-colors hover:bg-gray-100",
-      isActive && "bg-blue-50 text-blue-700 border-r-2 border-blue-700",
-      className
-    )}
-    {...props}
-  />
-))
+>(({ className, isActive, children, ...props }, ref) => {
+  const { collapsed } = useSidebar()
+  
+  return (
+    <button
+      ref={ref}
+      className={cn(
+        "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-normal transition-colors hover:bg-gray-100",
+        isActive && "bg-blue-50 text-blue-700 border-r-2 border-blue-700",
+        collapsed && "justify-center px-2",
+        className
+      )}
+      {...props}
+    >
+      {children}
+    </button>
+  )
+})
 SidebarMenuButton.displayName = "SidebarMenuButton"
 
 export const SidebarTrigger = React.forwardRef<
   HTMLButtonElement,
   React.ButtonHTMLAttributes<HTMLButtonElement>
->(({ className, ...props }, ref) => (
-  <button
-    ref={ref}
-    className={cn(
-      "inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-sm font-medium transition-colors hover:bg-gray-50",
-      className
-    )}
-    {...props}
-  >
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 15 15"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
+>(({ className, onClick, ...props }, ref) => {
+  const { toggleSidebar } = useSidebar()
+  
+  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    toggleSidebar()
+    onClick?.(e)
+  }
+  
+  return (
+    <button
+      ref={ref}
+      className={cn(
+        "inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-sm font-medium transition-colors hover:bg-gray-50",
+        className
+      )}
+      onClick={handleClick}
+      {...props}
     >
-      <path
-        d="M1.5 3C1.22386 3 1 3.22386 1 3.5C1 3.77614 1.22386 4 1.5 4H13.5C13.7761 4 14 3.77614 14 3.5C14 3.22386 13.7761 3 13.5 3H1.5ZM1 7.5C1 7.22386 1.22386 7 1.5 7H13.5C13.7761 7 14 7.22386 14 7.5C14 7.77614 13.7761 8 13.5 8H1.5C1.22386 8 1 7.77614 1 7.5ZM1 11.5C1 11.2239 1.22386 11 1.5 11H13.5C13.7761 11 14 11.2239 14 11.5C14 11.7761 13.7761 12 13.5 12H1.5C1.22386 12 1 11.7761 1 11.5Z"
-        fill="currentColor"
-        fillRule="evenodd"
-        clipRule="evenodd"
-      />
-    </svg>
-  </button>
-))
+      <svg
+        width="15"
+        height="15"
+        viewBox="0 0 15 15"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <path
+          d="M1.5 3C1.22386 3 1 3.22386 1 3.5C1 3.77614 1.22386 4 1.5 4H13.5C13.7761 4 14 3.77614 14 3.5C14 3.22386 13.7761 3 13.5 3H1.5ZM1 7.5C1 7.22386 1.22386 7 1.5 7H13.5C13.7761 7 14 7.22386 14 7.5C14 7.77614 13.7761 8 13.5 8H1.5C1.22386 8 1 7.77614 1 7.5ZM1 11.5C1 11.2239 1.22386 11 1.5 11H13.5C13.7761 11 14 11.2239 14 11.5C14 11.7761 13.7761 12 13.5 12H1.5C1.22386 12 1 11.7761 1 11.5Z"
+          fill="currentColor"
+          fillRule="evenodd"
+          clipRule="evenodd"
+        />
+      </svg>
+    </button>
+  )
+})
 SidebarTrigger.displayName = "SidebarTrigger"
