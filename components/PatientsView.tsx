@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
+import { useAppointmentModal } from "./AdminLayout";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
@@ -97,7 +98,7 @@ interface Patient {
 export function PatientsView() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
-  const [showScheduleDialog, setShowScheduleDialog] = useState(false);
+  const { openScheduleModal, openAddPatientModal } = useAppointmentModal();
 
   const filteredPatients = mockPatients.filter(patient =>
     patient.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -125,7 +126,7 @@ export function PatientsView() {
           <h1 className="text-2xl font-semibold text-gray-900">Patients</h1>
           <p className="text-muted-foreground">Manage patient information and appointments</p>
         </div>
-        <Button className="">
+        <Button variant="brand" onClick={() => openAddPatientModal()}>
           <Plus className="h-4 w-4 mr-2" />
           Add New Patient
         </Button>
@@ -236,23 +237,14 @@ export function PatientsView() {
                         </DialogContent>
                       </Dialog>
                       
-                      <Dialog open={showScheduleDialog} onOpenChange={setShowScheduleDialog}>
-                        <DialogTrigger asChild>
-                          <Button size="sm">
-                            <Calendar className="h-3 w-3 mr-1" />
-                            Schedule
-                          </Button>
-                        </DialogTrigger>
-                        <DialogContent>
-                          <DialogHeader>
-                            <DialogTitle>Schedule Appointment - {patient.name}</DialogTitle>
-                          </DialogHeader>
-                          <ScheduleAppointmentForm 
-                            patient={patient}
-                            onClose={() => setShowScheduleDialog(false)}
-                          />
-                        </DialogContent>
-                      </Dialog>
+                      <Button 
+                        variant="dark" 
+                        size="sm"
+                        onClick={() => openScheduleModal(patient.name, patient.id)}
+                      >
+                        <Calendar className="h-3 w-3 mr-1" />
+                        Schedule
+                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -267,12 +259,25 @@ export function PatientsView() {
 
 function PatientDetails({ patient }: { patient: Patient }) {
   return (
-    <Tabs defaultValue="info" className="w-full">
-      <TabsList className="grid w-full grid-cols-3">
-        <TabsTrigger value="info">Personal Info</TabsTrigger>
-        <TabsTrigger value="records">Dental Records</TabsTrigger>
-        <TabsTrigger value="history">Appointment History</TabsTrigger>
-      </TabsList>
+    <div className="space-y-4">
+      {/* Action Buttons */}
+      <div className="flex justify-end space-x-2 border-b pb-4">
+        <Button variant="outline" size="sm">
+          <Edit className="h-4 w-4 mr-2" />
+          Update Patient
+        </Button>
+        <Button variant="cancel" size="sm">
+          <AlertTriangle className="h-4 w-4 mr-2" />
+          Delete Patient
+        </Button>
+      </div>
+      
+      <Tabs defaultValue="info" className="w-full">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="info">Personal Info</TabsTrigger>
+          <TabsTrigger value="records">Dental Records</TabsTrigger>
+          <TabsTrigger value="history">Appointment History</TabsTrigger>
+        </TabsList>
       
       <TabsContent value="info" className="space-y-4">
         <Card>
@@ -362,76 +367,8 @@ function PatientDetails({ patient }: { patient: Patient }) {
           </CardContent>
         </Card>
       </TabsContent>
-    </Tabs>
-  );
-}
-
-function ScheduleAppointmentForm({ patient, onClose }: { patient: Patient; onClose: () => void }) {
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <Label>Date</Label>
-          <Input type="date" />
-        </div>
-        <div>
-          <Label>Time</Label>
-          <Select>
-            <SelectTrigger>
-              <SelectValue placeholder="Select time" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="09:00">9:00 AM</SelectItem>
-              <SelectItem value="10:00">10:00 AM</SelectItem>
-              <SelectItem value="11:00">11:00 AM</SelectItem>
-              <SelectItem value="14:00">2:00 PM</SelectItem>
-              <SelectItem value="15:00">3:00 PM</SelectItem>
-              <SelectItem value="16:00">4:00 PM</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-      
-      <div>
-        <Label>Appointment Type</Label>
-        <Select>
-          <SelectTrigger>
-            <SelectValue placeholder="Select type" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="cleaning">Routine Cleaning</SelectItem>
-            <SelectItem value="checkup">Checkup</SelectItem>
-            <SelectItem value="filling">Filling</SelectItem>
-            <SelectItem value="crown">Crown</SelectItem>
-            <SelectItem value="consultation">Consultation</SelectItem>
-            <SelectItem value="emergency">Emergency</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-      
-      <div>
-        <Label>Doctor</Label>
-        <Select>
-          <SelectTrigger>
-            <SelectValue placeholder="Select doctor" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="dr-johnson">Dr. Sarah Johnson</SelectItem>
-            <SelectItem value="dr-chen">Dr. Michael Chen</SelectItem>
-            <SelectItem value="dr-rodriguez">Dr. Emily Rodriguez</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-      
-      <div>
-        <Label>Notes</Label>
-        <Textarea placeholder="Additional notes for the appointment..." />
-      </div>
-      
-      <div className="flex justify-end space-x-2">
-        <Button variant="outline" onClick={onClose}>Cancel</Button>
-        <Button onClick={onClose}>Schedule Appointment</Button>
-      </div>
+      </Tabs>
     </div>
   );
 }
+

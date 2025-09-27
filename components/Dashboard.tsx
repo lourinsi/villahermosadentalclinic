@@ -1,7 +1,9 @@
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { Button } from "./ui/button";
 import { Users, Calendar, DollarSign, TrendingUp, Clock, CheckCircle } from "lucide-react";
+import { useAppointmentModal } from "./AdminLayout";
 import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from "recharts";
 
 const statsData = [
@@ -61,6 +63,7 @@ const recentAppointments = [
 ];
 
 export function Dashboard() {
+  const { openScheduleModal, openAddPatientModal } = useAppointmentModal();
   return (
     <div className="p-6 space-y-6">
       <div>
@@ -198,35 +201,46 @@ export function Dashboard() {
             <CardTitle>Quick Actions</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <button className="w-full p-4 text-left bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors">
+            <Button 
+              variant="outline" 
+              className="w-full p-4 text-left h-auto transform transition-all duration-200 hover:scale-105 hover:shadow-lg hover:bg-blue-50 active:scale-95"
+              onClick={() => openScheduleModal()}
+            >
               <div className="flex items-center space-x-3">
-                <Calendar className="h-6 w-6 text-blue-600" />
+                <Calendar className="h-6 w-6 text-blue-600 transition-colors duration-200 group-hover:text-blue-700" />
                 <div>
-                  <div className="font-medium">Schedule Appointment</div>
+                  <div className="font-medium transition-colors duration-200">Schedule Appointment</div>
                   <div className="text-sm text-muted-foreground">Book a new patient appointment</div>
                 </div>
               </div>
-            </button>
+            </Button>
             
-            <button className="w-full p-4 text-left bg-green-50 hover:bg-green-100 rounded-lg transition-colors">
+                        <Button
+              variant="brand"
+              className="w-full p-4 text-left h-auto transform transition-all duration-200 hover:scale-105 hover:shadow-lg active:scale-95"
+              onClick={() => openAddPatientModal()}
+            >
               <div className="flex items-center space-x-3">
-                <Users className="h-6 w-6 text-green-600" />
+                <Users className="h-6 w-6 text-white transition-transform duration-200 group-hover:scale-110" />
                 <div>
-                  <div className="font-medium">Add New Patient</div>
-                  <div className="text-sm text-muted-foreground">Register a new patient</div>
+                  <div className="font-medium text-white">Add New Patient</div>
+                  <div className="text-sm text-violet-100">Register a new patient</div>
                 </div>
               </div>
-            </button>
+            </Button>
             
-            <button className="w-full p-4 text-left bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors">
+            <Button 
+              variant="outline" 
+              className="w-full p-4 text-left h-auto transform transition-all duration-200 hover:scale-105 hover:shadow-lg hover:bg-purple-50 active:scale-95"
+            >
               <div className="flex items-center space-x-3">
-                <DollarSign className="h-6 w-6 text-purple-600" />
+                <DollarSign className="h-6 w-6 text-purple-600 transition-colors duration-200 group-hover:text-purple-700" />
                 <div>
-                  <div className="font-medium">View Reports</div>
+                  <div className="font-medium transition-colors duration-200">View Reports</div>
                   <div className="text-sm text-muted-foreground">Financial and clinical reports</div>
                 </div>
               </div>
-            </button>
+            </Button>
           </CardContent>
         </Card>
       </div>
