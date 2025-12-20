@@ -4,7 +4,9 @@ import { useState, createContext, useContext } from "react";
 import { Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, useSidebar } from "./ui/sidebar";
 import { Button } from "./ui/button";
 import { ScheduleAppointmentModal } from "./ScheduleAppointmentModal";
+import { CreateAppointmentModal } from "./CreateAppointmentModal";
 import { AddPatientModal } from "./AddPatientModal";
+import { useAppointments, type Appointment } from "../hooks/useAppointments";
 import { 
   LayoutDashboard, 
   Users, 
@@ -28,7 +30,14 @@ interface AdminLayoutProps {
 
 interface AppointmentModalContext {
   openScheduleModal: (patientName?: string, patientId?: number) => void;
+  openCreateModal: (selectedDate?: Date) => void;
   openAddPatientModal: () => void;
+  refreshPatients: () => void;
+  appointments: Appointment[];
+  addAppointment: (appointment: Omit<Appointment, "id" | "createdAt">) => void;
+  updateAppointment: (id: string, updates: Partial<Appointment>) => void;
+  deleteAppointment: (id: string) => void;
+  getUpcomingAppointments: (doctor?: string) => Appointment[];
 }
 
 const AppointmentModalContext = createContext<AppointmentModalContext | null>(null);
@@ -108,21 +117,41 @@ function SidebarContentWrapper({ currentView, onViewChange }: { currentView: str
 
 export function AdminLayout({ currentView, onViewChange, children }: AdminLayoutProps) {
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
   const [addPatientModalOpen, setAddPatientModalOpen] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState<{ name?: string; id?: number }>({});
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>();
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  
+  const { 
+    appointments, 
+    addAppointment, 
+    updateAppointment, 
+    deleteAppointment, 
+    getUpcomingAppointments 
+  } = useAppointments();
 
   const openScheduleModal = (patientName?: string, patientId?: number) => {
     setSelectedPatient({ name: patientName, id: patientId });
     setScheduleModalOpen(true);
   };
 
+  const openCreateModal = (date?: Date) => {
+    setSelectedDate(date);
+    setCreateModalOpen(true);
+  };
+
   const openAddPatientModal = () => {
     setAddPatientModalOpen(true);
   };
 
+  const refreshPatients = () => {
+    setRefreshTrigger(prev => prev + 1);
+  };
+
   return (
     <SidebarProvider>
-      <AppointmentModalContext.Provider value={{ openScheduleModal, openAddPatientModal }}>
+      <AppointmentModalContext.Provider value={{ openScheduleModal, openCreateModal, openAddPatientModal, refreshPatients, appointments, addAppointment, updateAppointment, deleteAppointment, getUpcomingAppointments }}>
         <div className="flex h-screen w-full">
           <Sidebar className="border-r">
             <SidebarContentWrapper currentView={currentView} onViewChange={onViewChange} />
@@ -169,6 +198,11 @@ export function AdminLayout({ currentView, onViewChange, children }: AdminLayout
           onOpenChange={setScheduleModalOpen}
           patientName={selectedPatient.name}
           patientId={selectedPatient.id}
+        />
+        <CreateAppointmentModal
+          open={createModalOpen}
+          onOpenChange={setCreateModalOpen}
+          selectedDate={selectedDate}
         />
         <AddPatientModal
           open={addPatientModalOpen}

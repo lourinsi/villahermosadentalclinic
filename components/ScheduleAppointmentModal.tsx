@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { useAppointmentModal } from "./AdminLayout";
+import { toast } from "sonner";
 
 interface ScheduleAppointmentModalProps {
   open: boolean;
@@ -29,21 +31,69 @@ export function ScheduleAppointmentModal({
     patientId: patientId || ""
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const { addAppointment } = useAppointmentModal();
+  const [patients, setPatients] = useState<Array<{ id: string; name: string }>>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    const fetchPatients = async () => {
+      try {
+        const res = await fetch("http://localhost:3001/api/patients");
+        const json = await res.json();
+        if (json?.success && Array.isArray(json.data)) {
+          const list = json.data.map((p: any) => ({ id: String(p.id), name: `${p.firstName} ${p.lastName}` }));
+          setPatients(list);
+        }
+      } catch (err) {
+        console.error("Failed to load patients:", err);
+      }
+    };
+
+    fetchPatients();
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("Scheduling appointment:", formData);
-    // Here you would typically make an API call
-    onOpenChange(false);
-    // Reset form
-    setFormData({
-      date: "",
-      time: "",
-      type: "",
-      doctor: "",
-      notes: "",
-      patientName: patientName || "",
-      patientId: patientId || ""
-    });
+    console.log("=== SCHEDULE APPOINTMENT SUBMIT ===");
+
+    if (!formData.patientName || !formData.date || !formData.time || !formData.type || !formData.doctor) {
+      toast.error("Please complete all required fields");
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      console.log("Creating appointment:", formData);
+      addAppointment({
+        patientName: String(formData.patientName),
+        patientId: String(formData.patientId),
+        date: formData.date,
+        time: formData.time,
+        type: formData.type,
+        doctor: formData.doctor,
+        notes: formData.notes,
+        status: "scheduled"
+      });
+
+      console.log("Appointment scheduled successfully");
+      toast.success("Appointment scheduled");
+      onOpenChange(false);
+      setFormData({
+        date: "",
+        time: "",
+        type: "",
+        doctor: "",
+        notes: "",
+        patientName: patientName || "",
+        patientId: patientId || ""
+      });
+    } catch (err) {
+      console.error("Error scheduling appointment:", err);
+      toast.error("Failed to schedule appointment");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -61,17 +111,25 @@ export function ScheduleAppointmentModal({
             <div className="space-y-2">
               <Label>Patient</Label>
               <Select
-                value={formData.patientName}
-                onValueChange={(value) => setFormData(prev => ({ ...prev, patientName: value }))}
+                value={String(formData.patientId) || ""}
+                onValueChange={(value) => {
+                  const found = patients.find(p => p.id === value);
+                  if (found) {
+                    setFormData(prev => ({ ...prev, patientId: found.id, patientName: found.name }));
+                  }
+                }}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select patient" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="john-smith">John Smith</SelectItem>
-                  <SelectItem value="sarah-davis">Sarah Davis</SelectItem>
-                  <SelectItem value="mike-johnson">Mike Johnson</SelectItem>
-                  <SelectItem value="emily-brown">Emily Brown</SelectItem>
+                  {patients.length > 0 ? (
+                    patients.map(p => (
+                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                    ))
+                  ) : (
+                    <div className="p-2 text-sm text-gray-500">No patients available</div>
+                  )}
                 </SelectContent>
               </Select>
             </div>
@@ -155,11 +213,11 @@ export function ScheduleAppointmentModal({
           </div>
           
           <div className="flex justify-end space-x-2 pt-4">
-            <Button variant="cancel" type="button" onClick={() => onOpenChange(false)}>
+            <Button variant="cancel" type="button" onClick={() => onOpenChange(false)} disabled={isLoading}>
               Cancel
             </Button>
-            <Button variant="brand" type="submit">
-              Schedule Appointment
+            <Button variant="brand" type="submit" disabled={isLoading}>
+              {isLoading ? "Scheduling..." : "Schedule Appointment"}
             </Button>
           </div>
         </form>

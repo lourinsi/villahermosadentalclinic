@@ -1,16 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { useAppointmentModal } from "./AdminLayout";
-
-const mockAppointments = [
-  { id: 1, patientName: "John Smith", time: "09:00", type: "Cleaning", doctor: "Dr. Johnson" },
-  { id: 2, patientName: "Sarah Davis", time: "10:30", type: "Checkup", doctor: "Dr. Chen" },
-  { id: 3, patientName: "Mike Johnson", time: "14:00", type: "Filling", doctor: "Dr. Rodriguez" },
-  { id: 4, patientName: "Emily Brown", time: "15:30", type: "Consultation", doctor: "Dr. Johnson" },
-];
+import { Appointment } from "../hooks/useAppointments";
+import { Badge } from "./ui/badge";
+import { EditAppointmentModal } from "./EditAppointmentModal";
 
 type ViewMode = "month" | "week" | "day";
 
@@ -18,7 +14,14 @@ export function CalendarView() {
   const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedDoctor, setSelectedDoctor] = useState("all");
-  const { openScheduleModal } = useAppointmentModal();
+  const { openScheduleModal, openCreateModal, appointments, deleteAppointment, refreshPatients } = useAppointmentModal();
+  const [editOpen, setEditOpen] = useState(false);
+  const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
+
+  // Fetch fresh patient list when calendar loads to ensure new patients show up
+  useEffect(() => {
+    refreshPatients();
+  }, []);
 
   const formatDate = (date: Date): string => {
     const options: Intl.DateTimeFormatOptions = { 
@@ -56,9 +59,11 @@ export function CalendarView() {
     }
   };
 
-  const filteredAppointments = mockAppointments.filter(appointment => {
+  const filteredAppointments = appointments.filter((appointment: Appointment) => {
     const matchesDoctor = selectedDoctor === "all" || appointment.doctor === selectedDoctor;
-    return matchesDoctor;
+    const appointmentDate = new Date(appointment.date);
+    const matchesDate = appointmentDate >= new Date();
+    return matchesDoctor && matchesDate;
   });
 
   return (
@@ -68,7 +73,7 @@ export function CalendarView() {
           <h1 className="text-2xl font-semibold text-gray-900">Calendar</h1>
           <p className="text-muted-foreground">Manage appointments and schedules</p>
         </div>
-        <Button variant="brand" onClick={() => openScheduleModal()}>
+        <Button variant="brand" onClick={() => openCreateModal(selectedDate)}>
           <Plus className="h-4 w-4 mr-2" />
           New Appointment
         </Button>
@@ -176,28 +181,38 @@ export function CalendarView() {
         <CardContent>
           <div className="space-y-3">
             {filteredAppointments.length > 0 ? (
-              filteredAppointments.map((appointment) => (
+              filteredAppointments.map((appointment: Appointment) => (
                 <div
                   key={appointment.id}
                   className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors duration-200"
                 >
                   <div className="flex items-center space-x-4">
-                    <div className="text-sm font-medium text-violet-600">
-                      {appointment.time}
+                    <div className="text-sm font-medium text-violet-600 text-center min-w-[60px]">
+                      <div>{appointment.time}</div>
+                      {viewMode !== 'day' && (
+                        <div className="text-xs text-gray-500 mt-1">
+                          {new Date(appointment.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </div>
+                      )}
                     </div>
                     <div>
                       <div className="font-medium">{appointment.patientName}</div>
-                      <div className="text-sm text-gray-500">
-                        {appointment.type} • {appointment.doctor}
+                      <div className="text-sm text-gray-500 flex items-center space-x-2">
+                        <span>{appointment.type} • {appointment.doctor}</span>
+                        <Badge variant={appointment.status === 'pending' ? 'outline' : appointment.status === 'confirmed' ? 'secondary' : 'default'}>{appointment.status}</Badge>
                       </div>
                     </div>
                   </div>
                   <div className="flex space-x-2">
-                    <Button variant="outline" size="sm">
+                    <Button variant="outline" size="sm" onClick={() => { setEditingAppointment(appointment); setEditOpen(true); }}>
                       Edit
                     </Button>
-                    <Button variant="secondary" size="sm">
-                      Complete
+                    <Button 
+                      variant="secondary" 
+                      size="sm"
+                      onClick={() => deleteAppointment(appointment.id)}
+                    >
+                      Delete
                     </Button>
                   </div>
                 </div>
@@ -210,6 +225,12 @@ export function CalendarView() {
           </div>
         </CardContent>
       </Card>
+
+      <EditAppointmentModal
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        appointment={editingAppointment}
+      />
     </div>
   );
 }

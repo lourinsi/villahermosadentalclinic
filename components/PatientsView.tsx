@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { useAppointmentModal } from "./AdminLayout";
@@ -83,25 +83,91 @@ const mockAppointmentHistory = [
 ];
 
 interface Patient {
-  id: number;
-  name: string;
+  id?: string;
+  firstName?: string;
+  lastName?: string;
+  name?: string;
   email: string;
   phone: string;
   dateOfBirth: string;
-  lastVisit: string;
-  nextAppointment: string | null;
-  status: string;
-  insurance: string;
-  balance: number;
+  lastVisit?: string;
+  nextAppointment?: string | null;
+  status?: string;
+  insurance?: string;
+  balance?: number;
 }
 
 export function PatientsView() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
-  const { openScheduleModal, openAddPatientModal } = useAppointmentModal();
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const { openScheduleModal, openAddPatientModal, refreshPatients, appointments } = useAppointmentModal();
 
-  const filteredPatients = mockPatients.filter(patient =>
-    patient.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+  const fetchPatients = async () => {
+    try {
+      setIsLoading(true);
+      const response = await fetch("http://localhost:3001/api/patients");
+      const result = await response.json();
+
+      if (result.success && result.data) {
+        // Transform API data to match display format
+        const transformedPatients = result.data.map((patient: any) => {
+          // Find nearest upcoming appointment for this patient
+          const patientAppointments = appointments.filter(
+            apt => apt.patientId === patient.id || 
+                   apt.patientName === `${patient.firstName} ${patient.lastName}`
+          );
+          
+          const upcomingAppointments = patientAppointments
+            .filter(apt => new Date(apt.date) >= new Date())
+            .sort((a, b) => {
+              if (a.date !== b.date) {
+                return new Date(a.date).getTime() - new Date(b.date).getTime();
+              }
+              return a.time.localeCompare(b.time);
+            });
+
+          const nextApt = upcomingAppointments.length > 0 
+            ? upcomingAppointments[0].date 
+            : null;
+
+          return {
+            id: patient.id,
+            name: `${patient.firstName} ${patient.lastName}`,
+            firstName: patient.firstName,
+            lastName: patient.lastName,
+            email: patient.email,
+            phone: patient.phone,
+            dateOfBirth: patient.dateOfBirth,
+            lastVisit: patient.lastVisit || "",
+            nextAppointment: nextApt,
+            status: patient.status || "active",
+            insurance: patient.insurance,
+            balance: 0
+          };
+        });
+        setPatients(transformedPatients);
+      }
+    } catch (error) {
+      console.error("Error fetching patients:", error);
+      // Fallback to empty list
+      setPatients([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Fetch patients initially and when refreshTrigger changes
+  useEffect(() => {
+    fetchPatients();
+  }, [refreshPatients, appointments]);
+
+  const handleAddPatient = () => {
+    openAddPatientModal();
+  };
+  const filteredPatients = patients.filter(patient =>
+    patient.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     patient.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
     patient.phone.includes(searchTerm)
   );
@@ -126,7 +192,7 @@ export function PatientsView() {
           <h1 className="text-2xl font-semibold text-gray-900">Patients</h1>
           <p className="text-muted-foreground">Manage patient information and appointments</p>
         </div>
-        <Button variant="brand" onClick={() => openAddPatientModal()}>
+        <Button variant="brand" onClick={handleAddPatient}>
           <Plus className="h-4 w-4 mr-2" />
           Add New Patient
         </Button>
@@ -166,12 +232,25 @@ export function PatientsView() {
           <CardTitle>Patient List ({filteredPatients.length})</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Patient</TableHead>
-                <TableHead>Contact</TableHead>
-                <TableHead>Last Visit</TableHead>
+          {isLoading ? (
+            <div className="text-center py-8 text-muted-foreground">
+              Loading patients...
+            </div>
+          ) : filteredPatients.length === 0 ? (
+            <div className="text-center py-8">
+              <p className="text-muted-foreground">
+                {patients.length === 0 
+                  ? "No patients yet. Click 'Add New Patient' to get started!" 
+                  : "No patients match your search."}
+              </p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Patient</TableHead>
+                  <TableHead>Contact</TableHead>
+                  <TableHead>Last Visit</TableHead>
                 <TableHead>Next Appointment</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Balance</TableHead>
@@ -251,6 +330,7 @@ export function PatientsView() {
               ))}
             </TableBody>
           </Table>
+          )}
         </CardContent>
       </Card>
     </div>

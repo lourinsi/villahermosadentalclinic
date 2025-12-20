@@ -5,15 +5,18 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { toast } from "sonner";
 
 interface AddPatientModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onPatientAdded?: (patient: any) => void;
 }
 
 export function AddPatientModal({ 
   open, 
-  onOpenChange
+  onOpenChange,
+  onPatientAdded
 }: AddPatientModalProps) {
   const [formData, setFormData] = useState({
     firstName: "",
@@ -31,29 +34,60 @@ export function AddPatientModal({
     allergies: "",
     notes: ""
   });
+  
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("Adding new patient:", formData);
-    // Here you would typically make an API call
-    onOpenChange(false);
-    // Reset form
-    setFormData({
-      firstName: "",
-      lastName: "",
-      email: "",
-      phone: "",
-      dateOfBirth: "",
-      address: "",
-      city: "",
-      zipCode: "",
-      insurance: "",
-      emergencyContact: "",
-      emergencyPhone: "",
-      medicalHistory: "",
-      allergies: "",
-      notes: ""
-    });
+    console.log("=== ADD PATIENT SUBMIT ===");
+    setIsLoading(true);
+    
+    try {
+      console.log("Submitting patient data:", formData);
+      const response = await fetch("http://localhost:3001/api/patients", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(formData),
+      });
+
+      console.log("Add patient response status:", response.status);
+      const result = await response.json();
+      console.log("Add patient response:", result);
+
+      if (result.success) {
+        toast.success("Patient added successfully!");
+        if (onPatientAdded && result.data) {
+          onPatientAdded(result.data);
+        }
+        onOpenChange(false);
+        // Reset form
+        setFormData({
+          firstName: "",
+          lastName: "",
+          email: "",
+          phone: "",
+          dateOfBirth: "",
+          address: "",
+          city: "",
+          zipCode: "",
+          insurance: "",
+          emergencyContact: "",
+          emergencyPhone: "",
+          medicalHistory: "",
+          allergies: "",
+          notes: ""
+        });
+      } else {
+        toast.error(result.message || "Failed to add patient");
+      }
+    } catch (error) {
+      console.error("Error adding patient:", error);
+      toast.error("Error connecting to server. Make sure the backend is running on port 3001.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -213,11 +247,11 @@ export function AddPatientModal({
           </div>
           
           <div className="flex justify-end space-x-2 pt-4 border-t">
-            <Button variant="cancel" type="button" onClick={() => onOpenChange(false)}>
+            <Button variant="cancel" type="button" onClick={() => onOpenChange(false)} disabled={isLoading}>
               Cancel
             </Button>
-            <Button variant="brand" type="submit">
-              Add Patient
+            <Button variant="brand" type="submit" disabled={isLoading}>
+              {isLoading ? "Adding..." : "Add Patient"}
             </Button>
           </div>
         </form>

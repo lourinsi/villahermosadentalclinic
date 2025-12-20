@@ -1,10 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Users, Calendar, DollarSign, TrendingUp, Clock, CheckCircle } from "lucide-react";
 import { useAppointmentModal } from "./AdminLayout";
 import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from "recharts";
+import { Badge } from "./ui/badge";
+import { Appointment } from "../hooks/useAppointments";
 
 const statsData = [
   {
@@ -63,7 +66,62 @@ const recentAppointments = [
 ];
 
 export function Dashboard() {
-  const { openScheduleModal, openAddPatientModal } = useAppointmentModal();
+  const { openScheduleModal, openAddPatientModal, appointments } = useAppointmentModal();
+  const [viewMode, setViewMode] = useState<"day" | "week" | "month">("day");
+
+  // Always use today's date - no navigation
+  const getFilteredAppointments = (): Appointment[] => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (viewMode === "day") {
+      const dayStr = today.toISOString().split("T")[0];
+      return appointments.filter(apt => apt.date === dayStr);
+    } else if (viewMode === "week") {
+      const weekStart = new Date(today);
+      weekStart.setDate(today.getDate() - today.getDay());
+      weekStart.setHours(0, 0, 0, 0);
+
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6);
+      weekEnd.setHours(23, 59, 59, 999);
+
+      return appointments.filter(apt => {
+        const aptDate = new Date(apt.date);
+        return aptDate >= weekStart && aptDate <= weekEnd;
+      });
+    } else {
+      // month - today's month
+      const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+      monthStart.setHours(0, 0, 0, 0);
+
+      const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+      monthEnd.setHours(23, 59, 59, 999);
+
+      return appointments.filter(apt => {
+        const aptDate = new Date(apt.date);
+        return aptDate >= monthStart && aptDate <= monthEnd;
+      });
+    }
+  };
+
+  const filteredAppointments = getFilteredAppointments();
+
+  const getViewTitle = (): string => {
+    const today = new Date();
+    if (viewMode === "day") {
+      return today.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+    } else if (viewMode === "week") {
+      const weekStart = new Date(today);
+      weekStart.setDate(today.getDate() - today.getDay());
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6);
+      return `${weekStart.toLocaleDateString()} - ${weekEnd.toLocaleDateString()}`;
+    } else {
+      return today.toLocaleDateString("en-US", { year: "numeric", month: "long" });
+    }
+  };
+
   return (
     <div className="p-6 space-y-6">
       <div>
@@ -153,44 +211,66 @@ export function Dashboard() {
       </div>
       
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Today's Appointments */}
+        {/* Today's Schedule / Appointments */}
         <Card>
           <CardHeader>
-            <CardTitle>Today's Schedule</CardTitle>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Schedule</CardTitle>
+                <p className="text-sm text-gray-500 mt-1">{getViewTitle()}</p>
+              </div>
+              <div className="flex items-center bg-gray-100 rounded-lg p-1">
+                {(["day", "week", "month"] as const).map((mode) => (
+                  <Button
+                    key={mode}
+                    size="sm"
+                    variant="ghost"
+                    className={`
+                      px-3 py-1 text-xs font-medium rounded transition-all duration-200 
+                      ${viewMode === mode 
+                        ? "bg-black text-white shadow-sm hover:bg-gray-800" 
+                        : "bg-transparent text-gray-600 hover:bg-gray-200 hover:text-gray-900"
+                      }
+                    `}
+                    onClick={() => setViewMode(mode)}
+                  >
+                    {mode.charAt(0).toUpperCase() + mode.slice(1)}
+                  </Button>
+                ))}
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {recentAppointments.map((appointment, index) => (
-                <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                  <div className="flex items-center space-x-3">
-                    <div className="text-sm font-medium text-gray-900">{appointment.time}</div>
-                    <div>
-                      <div className="text-sm font-medium">{appointment.patient}</div>
-                      <div className="text-xs text-muted-foreground">{appointment.type}</div>
+            <div className="space-y-3">
+              {filteredAppointments.length > 0 ? (
+                filteredAppointments.map((appointment) => (
+                  <div key={appointment.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                    <div className="flex items-center space-x-3">
+                      <div className="text-sm font-medium text-violet-600 min-w-[60px]">
+                        <div>{appointment.time}</div>
+                        {viewMode !== "day" && (
+                          <div className="text-xs text-gray-500 mt-1">
+                            {new Date(appointment.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium">{appointment.patientName}</div>
+                        <div className="text-xs text-muted-foreground flex items-center space-x-2">
+                          <span>{appointment.type} • {appointment.doctor}</span>
+                          <Badge variant={appointment.status === "pending" ? "outline" : appointment.status === "confirmed" ? "secondary" : "default"}>
+                            {appointment.status}
+                          </Badge>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    {appointment.status === "confirmed" && (
-                      <div className="flex items-center space-x-1 text-green-600">
-                        <CheckCircle className="h-4 w-4" />
-                        <span className="text-xs">Confirmed</span>
-                      </div>
-                    )}
-                    {appointment.status === "in-progress" && (
-                      <div className="flex items-center space-x-1 text-blue-600">
-                        <Clock className="h-4 w-4" />
-                        <span className="text-xs">In Progress</span>
-                      </div>
-                    )}
-                    {appointment.status === "waiting" && (
-                      <div className="flex items-center space-x-1 text-orange-600">
-                        <Clock className="h-4 w-4" />
-                        <span className="text-xs">Waiting</span>
-                      </div>
-                    )}
-                  </div>
+                ))
+              ) : (
+                <div className="text-center py-8 text-gray-500">
+                  No appointments scheduled for {viewMode === "day" ? "today" : viewMode === "week" ? "this week" : "this month"}.
                 </div>
-              ))}
+              )}
             </div>
           </CardContent>
         </Card>
