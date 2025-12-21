@@ -12,7 +12,7 @@ interface ScheduleAppointmentModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   patientName?: string;
-  patientId?: number;
+  patientId?: string | number;
 }
 
 export function ScheduleAppointmentModal({ 
@@ -27,13 +27,27 @@ export function ScheduleAppointmentModal({
     type: "",
     doctor: "",
     notes: "",
-    patientName: patientName || "",
-    patientId: patientId || ""
+    patientName: "",
+    patientId: ""
   });
 
-  const { addAppointment } = useAppointmentModal();
+  const { addAppointment, refreshAppointments } = useAppointmentModal();
   const [patients, setPatients] = useState<Array<{ id: string; name: string }>>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [dateError, setDateError] = useState("");
+
+  const { refreshTrigger } = useAppointmentModal();
+
+  // Update formData when patientName or patientId props change
+  useEffect(() => {
+    if (patientName || patientId) {
+      setFormData(prev => ({
+        ...prev,
+        patientName: patientName || prev.patientName,
+        patientId: String(patientId || "")
+      }));
+    }
+  }, [patientName, patientId, open]);
 
   useEffect(() => {
     const fetchPatients = async () => {
@@ -50,22 +64,53 @@ export function ScheduleAppointmentModal({
     };
 
     fetchPatients();
-  }, []);
+  }, [refreshTrigger]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     console.log("=== SCHEDULE APPOINTMENT SUBMIT ===");
+    console.log("Current formData:", formData);
+    console.log("PatientName prop:", patientName);
+    console.log("PatientId prop:", patientId);
 
     if (!formData.patientName || !formData.date || !formData.time || !formData.type || !formData.doctor) {
+      console.error("Validation failed - missing required fields:", {
+        patientName: formData.patientName,
+        date: formData.date,
+        time: formData.time,
+        type: formData.type,
+        doctor: formData.doctor
+      });
       toast.error("Please complete all required fields");
       return;
     }
 
+    // Check if date has error
+    if (dateError) {
+      toast.error(dateError);
+      return;
+    }
+
+    // Strict validation: Check if appointment date/time is in the past
+    const appointmentDateTime = new Date(`${formData.date}T${formData.time}`);
+    const now = new Date();
+    
+    console.log("Appointment DateTime:", appointmentDateTime);
+    console.log("Current DateTime:", now);
+    console.log("Is past?", appointmentDateTime <= now);
+    
+    if (appointmentDateTime <= now) {
+      console.error("Validation failed - appointment is in the past or current time");
+      const futureTime = new Date(now.getTime() + 60000);
+      toast.error(`Cannot schedule appointment for past date/time. Earliest available time is ${futureTime.toLocaleString()}`);
+      return;
+    }
+
     setIsLoading(true);
+    console.log("Starting appointment creation...");
 
     try {
-      console.log("Creating appointment:", formData);
-      addAppointment({
+      const appointmentData = {
         patientName: String(formData.patientName),
         patientId: String(formData.patientId),
         date: formData.date,
@@ -74,10 +119,17 @@ export function ScheduleAppointmentModal({
         doctor: formData.doctor,
         notes: formData.notes,
         status: "scheduled"
-      });
-
-      console.log("Appointment scheduled successfully");
-      toast.success("Appointment scheduled");
+      };
+      console.log("Appointment data being sent:", appointmentData);
+      
+      const result = await addAppointment(appointmentData);
+      console.log("Appointment created successfully:", result);
+      
+      toast.success("Appointment scheduled successfully!");
+      console.log("Calling refreshAppointments...");
+      refreshAppointments();
+      
+      console.log("Closing modal and resetting form...");
       onOpenChange(false);
       setFormData({
         date: "",
@@ -90,7 +142,11 @@ export function ScheduleAppointmentModal({
       });
     } catch (err) {
       console.error("Error scheduling appointment:", err);
-      toast.error("Failed to schedule appointment");
+      console.error("Error details:", {
+        message: err instanceof Error ? err.message : 'Unknown error',
+        stack: err instanceof Error ? err.stack : 'No stack trace'
+      });
+      toast.error("Failed to schedule appointment. Check console for details.");
     } finally {
       setIsLoading(false);
     }
@@ -141,9 +197,23 @@ export function ScheduleAppointmentModal({
               <Input
                 type="date"
                 value={formData.date}
-                onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
+                onChange={(e) => {
+                  const selectedDate = new Date(`${e.target.value}T00:00:00`);
+                  const today = new Date();
+                  today.setHours(0, 0, 0, 0);
+                  
+                  if (selectedDate < today) {
+                    setDateError("Cannot select a past date");
+                  } else {
+                    setDateError("");
+                  }
+                  
+                  setFormData(prev => ({ ...prev, date: e.target.value }));
+                }}
+                min={new Date().toISOString().split('T')[0]}
                 required
               />
+              {dateError && <p className="text-red-500 text-sm">{dateError}</p>}
             </div>
             <div className="space-y-2">
               <Label>Time</Label>

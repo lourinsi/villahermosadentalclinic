@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Users, Calendar, DollarSign, TrendingUp, Clock, CheckCircle } from "lucide-react";
@@ -49,13 +49,8 @@ const revenueData = [
   { month: "Jun", revenue: 48250, appointments: 220 }
 ];
 
-const appointmentTypes = [
-  { name: "Cleaning", value: 35, color: "#3b82f6" },
-  { name: "Checkup", value: 25, color: "#10b981" },
-  { name: "Filling", value: 20, color: "#f59e0b" },
-  { name: "Cosmetic", value: 15, color: "#8b5cf6" },
-  { name: "Emergency", value: 5, color: "#ef4444" }
-];
+// derive appointment types/counts from real appointments
+const colorPalette = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4", "#f97316"];
 
 const recentAppointments = [
   { time: "09:00 AM", patient: "John Smith", type: "Cleaning", status: "confirmed" },
@@ -66,8 +61,35 @@ const recentAppointments = [
 ];
 
 export function Dashboard() {
-  const { openScheduleModal, openAddPatientModal, appointments } = useAppointmentModal();
+  const { openCreateModal, openAddPatientModal, appointments } = useAppointmentModal();
   const [viewMode, setViewMode] = useState<"day" | "week" | "month">("day");
+  const [totalPatients, setTotalPatients] = useState(0);
+  const [isLoadingView, setIsLoadingView] = useState(false);
+
+  // Fetch total patients from backend
+  useEffect(() => {
+    const fetchPatientCount = async () => {
+      try {
+        const response = await fetch("http://localhost:3001/api/patients?page=1&limit=1");
+        const result = await response.json();
+        if (result.success) {
+          const total = result.meta?.total ?? (Array.isArray(result.data) ? result.data.length : 0);
+          setTotalPatients(total);
+        }
+      } catch (error) {
+        console.error("Error fetching patient count:", error);
+        setTotalPatients(0);
+      }
+    };
+    fetchPatientCount();
+  }, []);
+
+  // Show loading when view mode changes
+  useEffect(() => {
+    setIsLoadingView(true);
+    const t = setTimeout(() => setIsLoadingView(false), 300);
+    return () => clearTimeout(t);
+  }, [viewMode]);
 
   // Always use today's date - no navigation
   const getFilteredAppointments = (): Appointment[] => {
@@ -107,6 +129,38 @@ export function Dashboard() {
 
   const filteredAppointments = getFilteredAppointments();
 
+  // Build dynamic stats based on backend data
+  const dynamicStats = [
+    {
+      title: "Total Patients",
+      value: totalPatients.toString(),
+      change: "+12%",
+      icon: Users,
+      color: "text-blue-600"
+    },
+    {
+      title: viewMode === "day" ? "Today's Appointments" : viewMode === "week" ? "This Week's Appointments" : "This Month's Appointments",
+      value: filteredAppointments.length.toString(),
+      change: "+2",
+      icon: Calendar,
+      color: "text-green-600"
+    },
+    {
+      title: "Monthly Revenue",
+      value: "$48,250",
+      change: "+8.2%",
+      icon: DollarSign,
+      color: "text-purple-600"
+    },
+    {
+      title: "Patient Satisfaction",
+      value: "4.9/5",
+      change: "+0.1",
+      icon: TrendingUp,
+      color: "text-orange-600"
+    }
+  ];
+
   const getViewTitle = (): string => {
     const today = new Date();
     if (viewMode === "day") {
@@ -122,6 +176,21 @@ export function Dashboard() {
     }
   };
 
+  // compute appointment types distribution
+  const appointmentTypeCounts = appointments.reduce<Record<string, number>>((acc, apt) => {
+    const key = apt.type || "Other";
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+
+  const totalAppointments = Object.values(appointmentTypeCounts).reduce((s, v) => s + v, 0) || 1;
+
+  const appointmentTypes = Object.keys(appointmentTypeCounts).map((name, idx) => ({
+    name,
+    value: Math.round((appointmentTypeCounts[name] / totalAppointments) * 100),
+    color: colorPalette[idx % colorPalette.length]
+  }));
+
   return (
     <div className="p-6 space-y-6">
       <div>
@@ -131,7 +200,7 @@ export function Dashboard() {
       
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {statsData.map((stat, index) => (
+        {dynamicStats.map((stat, index) => (
           <Card key={index}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -242,7 +311,14 @@ export function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {filteredAppointments.length > 0 ? (
+              {isLoadingView ? (
+                <div className="text-center py-8">
+                  <div className="inline-block">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-500 mx-auto mb-2"></div>
+                    <p className="text-sm text-muted-foreground">Loading schedule...</p>
+                  </div>
+                </div>
+              ) : filteredAppointments.length > 0 ? (
                 filteredAppointments.map((appointment) => (
                   <div key={appointment.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
                     <div className="flex items-center space-x-3">
@@ -284,7 +360,7 @@ export function Dashboard() {
             <Button 
               variant="outline" 
               className="w-full p-4 text-left h-auto transform transition-all duration-200 hover:scale-105 hover:shadow-lg hover:bg-blue-50 active:scale-95"
-              onClick={() => openScheduleModal()}
+              onClick={() => openCreateModal()}
             >
               <div className="flex items-center space-x-3">
                 <Calendar className="h-6 w-6 text-blue-600 transition-colors duration-200 group-hover:text-blue-700" />

@@ -29,14 +29,16 @@ interface AdminLayoutProps {
 }
 
 interface AppointmentModalContext {
-  openScheduleModal: (patientName?: string, patientId?: number) => void;
+  openScheduleModal: (patientName?: string, patientId?: string | number) => void;
   openCreateModal: (selectedDate?: Date) => void;
   openAddPatientModal: () => void;
   refreshPatients: () => void;
+  refreshAppointments: () => void;
+  refreshTrigger: number;
   appointments: Appointment[];
-  addAppointment: (appointment: Omit<Appointment, "id" | "createdAt">) => void;
-  updateAppointment: (id: string, updates: Partial<Appointment>) => void;
-  deleteAppointment: (id: string) => void;
+  addAppointment: (appointment: Omit<Appointment, "id" | "createdAt">) => Promise<Appointment>;
+  updateAppointment: (id: string, updates: Partial<Appointment>) => Promise<Appointment>;
+  deleteAppointment: (id: string) => Promise<void>;
   getUpcomingAppointments: (doctor?: string) => Appointment[];
 }
 
@@ -119,9 +121,11 @@ export function AdminLayout({ currentView, onViewChange, children }: AdminLayout
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [addPatientModalOpen, setAddPatientModalOpen] = useState(false);
-  const [selectedPatient, setSelectedPatient] = useState<{ name?: string; id?: number }>({});
+  
+  const [selectedPatient, setSelectedPatient] = useState<{ name?: string; id?: string | number }>({});
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [appointmentRefreshTrigger, setAppointmentRefreshTrigger] = useState(0);
   
   const { 
     appointments, 
@@ -131,7 +135,7 @@ export function AdminLayout({ currentView, onViewChange, children }: AdminLayout
     getUpcomingAppointments 
   } = useAppointments();
 
-  const openScheduleModal = (patientName?: string, patientId?: number) => {
+  const openScheduleModal = (patientName?: string, patientId?: string | number) => {
     setSelectedPatient({ name: patientName, id: patientId });
     setScheduleModalOpen(true);
   };
@@ -149,9 +153,13 @@ export function AdminLayout({ currentView, onViewChange, children }: AdminLayout
     setRefreshTrigger(prev => prev + 1);
   };
 
+  const refreshAppointments = () => {
+    setAppointmentRefreshTrigger(prev => prev + 1);
+  };
+
   return (
     <SidebarProvider>
-      <AppointmentModalContext.Provider value={{ openScheduleModal, openCreateModal, openAddPatientModal, refreshPatients, appointments, addAppointment, updateAppointment, deleteAppointment, getUpcomingAppointments }}>
+      <AppointmentModalContext.Provider value={{ openScheduleModal, openCreateModal, openAddPatientModal, refreshPatients, refreshAppointments, refreshTrigger, appointments, addAppointment, updateAppointment, deleteAppointment, getUpcomingAppointments }}>
         <div className="flex h-screen w-full">
           <Sidebar className="border-r">
             <SidebarContentWrapper currentView={currentView} onViewChange={onViewChange} />
@@ -161,13 +169,13 @@ export function AdminLayout({ currentView, onViewChange, children }: AdminLayout
             <header className="border-b bg-white p-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-4">
-                  <div className="relative max-w-md">
+                  {/* <div className="relative max-w-md">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
                       placeholder="Search patients, appointments..."
                       className="pl-9 w-80"
                     />
-                  </div>
+                  </div> */}
                 </div>
                 
                 <div className="flex items-center space-x-4">
@@ -208,7 +216,7 @@ export function AdminLayout({ currentView, onViewChange, children }: AdminLayout
           open={addPatientModalOpen}
           onOpenChange={setAddPatientModalOpen}
         />
-      </AppointmentModalContext.Provider>
+        </AppointmentModalContext.Provider>
     </SidebarProvider>
   );
 }

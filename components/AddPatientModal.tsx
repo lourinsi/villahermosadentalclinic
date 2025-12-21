@@ -6,6 +6,7 @@ import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { toast } from "sonner";
+import { useAppointmentModal } from "./AdminLayout";
 
 interface AddPatientModalProps {
   open: boolean;
@@ -18,6 +19,7 @@ export function AddPatientModal({
   onOpenChange,
   onPatientAdded
 }: AddPatientModalProps) {
+  const { refreshPatients } = useAppointmentModal();
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
@@ -43,13 +45,17 @@ export function AddPatientModal({
     setIsLoading(true);
     
     try {
-      console.log("Submitting patient data:", formData);
+      const patientData = {
+        ...formData,
+        createdAt: new Date().toISOString() // Add creation timestamp
+      };
+      console.log("Submitting patient data:", patientData);
       const response = await fetch("http://localhost:3001/api/patients", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(patientData),
       });
 
       console.log("Add patient response status:", response.status);
@@ -61,6 +67,7 @@ export function AddPatientModal({
         if (onPatientAdded && result.data) {
           onPatientAdded(result.data);
         }
+        refreshPatients(); // Refresh patient list to show new patient immediately
         onOpenChange(false);
         // Reset form
         setFormData({

@@ -4,11 +4,11 @@ import { Button } from "./ui/button";
 import { useAppointmentModal } from "./AdminLayout";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
+import { toast } from "sonner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Label } from "./ui/label";
-import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { 
   Search, 
@@ -95,42 +95,59 @@ interface Patient {
   status?: string;
   insurance?: string;
   balance?: number;
+  createdAt?: string;
+  allergies?: string;
+  medicalHistory?: string;
+  treatmentPlan?: string;
+  clinicalNotes?: string;
+  address?: string;
+  city?: string;
+  zipCode?: string;
+  emergencyContact?: string;
+  emergencyPhone?: string;
+  notes?: string;
 }
 
 export function PatientsView() {
   const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
-  const [patients, setPatients] = useState<Patient[]>([]);
+  const [paginatedPatients, setPaginatedPatients] = useState<Patient[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const { openScheduleModal, openAddPatientModal, refreshPatients, appointments } = useAppointmentModal();
-
-  const fetchPatients = async () => {
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalFiltered, setTotalFiltered] = useState(0);
+  const itemsPerPage = 10;
+  const { openScheduleModal, openAddPatientModal, refreshPatients, refreshTrigger, appointments } = useAppointmentModal();
+  
+  // Fetch patients from backend with pagination, search, and status filtering
+  const fetchPatients = async (page = 1) => {
     try {
       setIsLoading(true);
-      const response = await fetch("http://localhost:3001/api/patients");
-      const result = await response.json();
+      const q = encodeURIComponent(searchTerm || "");
+      const statusParam = statusFilter || "all";
+      const res = await fetch(
+        `http://localhost:3001/api/patients?page=${page}&limit=${itemsPerPage}&search=${q}&status=${statusParam}`
+      );
+      const result = await res.json();
 
-      if (result.success && result.data) {
-        // Transform API data to match display format
-        const transformedPatients = result.data.map((patient: any) => {
-          // Find nearest upcoming appointment for this patient
+      if (result && result.success) {
+        const data = result.data || [];
+        const meta = result.meta || { total: 0, page, limit: itemsPerPage, totalPages: 1 };
+
+        const transformedPatients = data.map((patient: any) => {
           const patientAppointments = appointments.filter(
-            apt => apt.patientId === patient.id || 
-                   apt.patientName === `${patient.firstName} ${patient.lastName}`
+            (apt: any) => apt.patientId === patient.id || apt.patientName === `${patient.firstName} ${patient.lastName}`
           );
-          
+
           const upcomingAppointments = patientAppointments
-            .filter(apt => new Date(apt.date) >= new Date())
-            .sort((a, b) => {
-              if (a.date !== b.date) {
-                return new Date(a.date).getTime() - new Date(b.date).getTime();
-              }
+            .filter((apt: any) => new Date(apt.date) >= new Date())
+            .sort((a: any, b: any) => {
+              if (a.date !== b.date) return new Date(a.date).getTime() - new Date(b.date).getTime();
               return a.time.localeCompare(b.time);
             });
 
-          const nextApt = upcomingAppointments.length > 0 
-            ? upcomingAppointments[0].date 
-            : null;
+          const nextApt = upcomingAppointments.length > 0 ? upcomingAppointments[0].date : null;
 
           return {
             id: patient.id,
@@ -144,35 +161,43 @@ export function PatientsView() {
             nextAppointment: nextApt,
             status: patient.status || "active",
             insurance: patient.insurance,
-            balance: 0
+            balance: 0,
           };
         });
-        setPatients(transformedPatients);
+
+        setPaginatedPatients(transformedPatients);
+        setTotalPages(meta.totalPages || 1);
+        setTotalFiltered(meta.total || 0);
+      } else {
+        setPaginatedPatients([]);
+        setTotalPages(1);
+        setTotalFiltered(0);
       }
-    } catch (error) {
-      console.error("Error fetching patients:", error);
-      // Fallback to empty list
-      setPatients([]);
+    } catch (err) {
+      console.error("Error fetching patients:", err);
+      setPaginatedPatients([]);
+      setTotalPages(1);
+      setTotalFiltered(0);
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Fetch patients initially and when refreshTrigger changes
+  // Fetch patients when page, search, status filter, or refresh trigger changes
   useEffect(() => {
-    fetchPatients();
-  }, [refreshPatients, appointments]);
+    fetchPatients(currentPage);
+  }, [currentPage, searchTerm, statusFilter, refreshTrigger, appointments]);
 
   const handleAddPatient = () => {
     openAddPatientModal();
   };
-  const filteredPatients = patients.filter(patient =>
-    patient.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    patient.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    patient.phone.includes(searchTerm)
-  );
+  
+  // Reset to page 1 when search or filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter]);
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (status: string | undefined) => {
     switch (status) {
       case "active":
         return <Badge className="bg-green-100 text-green-800">Active</Badge>;
@@ -181,7 +206,7 @@ export function PatientsView() {
       case "inactive":
         return <Badge className="bg-gray-100 text-gray-800">Inactive</Badge>;
       default:
-        return <Badge>{status}</Badge>;
+        return <Badge>{status || "Unknown"}</Badge>;
     }
   };
 
@@ -211,7 +236,7 @@ export function PatientsView() {
                 className="pl-9"
               />
             </div>
-            <Select>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-[140px]">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
@@ -229,107 +254,144 @@ export function PatientsView() {
       {/* Patients Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Patient List ({filteredPatients.length})</CardTitle>
+          <CardTitle>Patient List ({totalFiltered})</CardTitle>
         </CardHeader>
         <CardContent>
           {isLoading ? (
             <div className="text-center py-8 text-muted-foreground">
-              Loading patients...
+              <div className="inline-block">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
+                Loading patients...
+              </div>
             </div>
-          ) : filteredPatients.length === 0 ? (
+          ) : paginatedPatients.length === 0 ? (
             <div className="text-center py-8">
               <p className="text-muted-foreground">
-                {patients.length === 0 
-                  ? "No patients yet. Click 'Add New Patient' to get started!" 
-                  : "No patients match your search."}
+                {totalFiltered === 0 && searchTerm
+                  ? `No patients match your search "${searchTerm}".`
+                  : totalFiltered === 0 && statusFilter !== "all"
+                  ? `No ${statusFilter} patients found.`
+                  : "No patients yet. Click 'Add New Patient' to get started!"}
               </p>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Patient</TableHead>
-                  <TableHead>Contact</TableHead>
-                  <TableHead>Last Visit</TableHead>
-                <TableHead>Next Appointment</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Balance</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredPatients.map((patient) => (
-                <TableRow key={patient.id}>
-                  <TableCell>
-                    <div>
-                      <div className="font-medium">{patient.name}</div>
-                      <div className="text-sm text-muted-foreground">DOB: {patient.dateOfBirth}</div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="space-y-1">
-                      <div className="flex items-center space-x-1 text-sm">
-                        <Mail className="h-3 w-3" />
-                        <span>{patient.email}</span>
-                      </div>
-                      <div className="flex items-center space-x-1 text-sm">
-                        <Phone className="h-3 w-3" />
-                        <span>{patient.phone}</span>
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>{patient.lastVisit}</TableCell>
-                  <TableCell>
-                    {patient.nextAppointment ? (
-                      <div className="flex items-center space-x-1">
-                        <Calendar className="h-3 w-3" />
-                        <span>{patient.nextAppointment}</span>
-                      </div>
-                    ) : (
-                      <span className="text-muted-foreground">None scheduled</span>
-                    )}
-                  </TableCell>
-                  <TableCell>{getStatusBadge(patient.status)}</TableCell>
-                  <TableCell>
-                    <span className={patient.balance > 0 ? "text-red-600 font-medium" : "text-green-600"}>
-                      ${patient.balance}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center space-x-2">
-                      <Dialog>
-                        <DialogTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setSelectedPatient(patient)}
-                          >
-                            <Eye className="h-3 w-3 mr-1" />
-                            View
-                          </Button>
-                        </DialogTrigger>
-                        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
-                          <DialogHeader>
-                            <DialogTitle>Patient Details - {patient.name}</DialogTitle>
-                          </DialogHeader>
-                          <PatientDetails patient={patient} />
-                        </DialogContent>
-                      </Dialog>
-                      
-                      <Button 
-                        variant="dark" 
-                        size="sm"
-                        onClick={() => openScheduleModal(patient.name, patient.id)}
-                      >
-                        <Calendar className="h-3 w-3 mr-1" />
-                        Schedule
-                      </Button>
-                    </div>
-                  </TableCell>
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Patient</TableHead>
+                    <TableHead>Contact</TableHead>
+                    <TableHead>Last Visit</TableHead>
+                  <TableHead>Next Appointment</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Balance</TableHead>
+                  <TableHead>Actions</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {paginatedPatients.map((patient) => (
+                  <TableRow key={patient.id}>
+                    <TableCell>
+                      <div>
+                        <div className="font-medium">{patient.name}</div>
+                        <div className="text-sm text-muted-foreground">DOB: {patient.dateOfBirth}</div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="space-y-1">
+                        <div className="flex items-center space-x-1 text-sm">
+                          <Mail className="h-3 w-3" />
+                          <span>{patient.email}</span>
+                        </div>
+                        <div className="flex items-center space-x-1 text-sm">
+                          <Phone className="h-3 w-3" />
+                          <span>{patient.phone}</span>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>{patient.lastVisit}</TableCell>
+                    <TableCell>
+                      {patient.nextAppointment ? (
+                        <div className="flex items-center space-x-1">
+                          <Calendar className="h-3 w-3" />
+                          <span>{patient.nextAppointment}</span>
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground">None scheduled</span>
+                      )}
+                    </TableCell>
+                    <TableCell>{getStatusBadge(patient.status)}</TableCell>
+                    <TableCell>
+                      <span className={(patient.balance ?? 0) > 0 ? "text-red-600 font-medium" : "text-green-600"}>
+                        ${patient.balance ?? 0}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center space-x-2">
+                        <Dialog>
+                          <DialogTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setSelectedPatient(patient)}
+                            >
+                              <Eye className="h-3 w-3 mr-1" />
+                              View
+                            </Button>
+                          </DialogTrigger>
+                          <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+                            <DialogHeader>
+                              <DialogTitle>Patient Details - {patient.name}</DialogTitle>
+                            </DialogHeader>
+                            <PatientDetails patient={patient} onClose={() => setSelectedPatient(null)} />
+                          </DialogContent>
+                        </Dialog>
+                        
+                        <Button 
+                          variant="dark" 
+                          size="sm"
+                          onClick={() => {
+                            const patientId = String(patient.id || '').trim();
+                            console.log("Schedule button clicked. Patient:", patient);
+                            console.log("Patient ID value:", patientId, "Type:", typeof patientId);
+                            openScheduleModal(patient.name || '', patient.id);
+                          }}
+                        >
+                          <Calendar className="h-3 w-3 mr-1" />
+                          Schedule
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+
+            {/* Pagination */}
+              <div className="flex items-center justify-between mt-4 pt-4 border-t">
+              <p className="text-sm text-muted-foreground">
+                Page {currentPage} of {totalPages || 1} | Showing {paginatedPatients.length} of {totalFiltered} patients
+              </p>
+              <div className="flex space-x-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                >
+                  Previous
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages || totalPages === 0}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+            </>
           )}
         </CardContent>
       </Card>
@@ -337,116 +399,355 @@ export function PatientsView() {
   );
 }
 
-function PatientDetails({ patient }: { patient: Patient }) {
+function PatientDetails({ patient, onClose }: { patient: Patient; onClose: () => void }) {
+  const [formData, setFormData] = useState({
+    firstName: patient.firstName || patient.name?.split(' ')[0] || '',
+    lastName: patient.lastName || patient.name?.split(' ').slice(1).join(' ') || '',
+    email: patient.email || '',
+    phone: patient.phone || '',
+    dateOfBirth: patient.dateOfBirth || '',
+    insurance: patient.insurance || '',
+    balance: patient.balance ?? 0,
+    status: patient.status || 'active',
+    createdAt: patient.createdAt || new Date().toISOString().split('T')[0],
+    allergies: patient.allergies || '',
+    medicalHistory: patient.medicalHistory || '',
+    treatmentPlan: patient.treatmentPlan || '',
+    clinicalNotes: patient.clinicalNotes || '',
+    address: patient.address || '',
+    city: patient.city || '',
+    zipCode: patient.zipCode || '',
+    emergencyContact: patient.emergencyContact || '',
+    emergencyPhone: patient.emergencyPhone || '',
+    notes: patient.notes || ''
+  });
+
+  const [isSaving, setIsSaving] = useState(false);
+  const [isModified, setIsModified] = useState(false);
+  const [patientAppointments, setPatientAppointments] = useState<any[]>([]);
+  const { refreshPatients, appointments } = useAppointmentModal();
+
+  useEffect(() => {
+    // If patient has an id, fetch the full record from the server so we show all fields (not just the transformed list values)
+    const loadFullPatient = async () => {
+      if (!patient?.id) {
+        setFormData({
+          firstName: patient.firstName || patient.name?.split(' ')[0] || '',
+          lastName: patient.lastName || patient.name?.split(' ').slice(1).join(' ') || '',
+          email: patient.email || '',
+          phone: patient.phone || '',
+          dateOfBirth: patient.dateOfBirth || '',
+          insurance: patient.insurance || '',
+          balance: patient.balance ?? 0,
+          status: patient.status || 'active',
+          createdAt: patient.createdAt || new Date().toISOString().split('T')[0],
+          allergies: patient.allergies || '',
+          medicalHistory: patient.medicalHistory || '',
+          treatmentPlan: patient.treatmentPlan || '',
+          clinicalNotes: patient.clinicalNotes || '',
+          address: patient.address || '',
+          city: patient.city || '',
+          zipCode: patient.zipCode || '',
+          emergencyContact: patient.emergencyContact || '',
+          emergencyPhone: patient.emergencyPhone || '',
+          notes: patient.notes || ''
+        });
+        return;
+      }
+
+      try {
+        const res = await fetch(`http://localhost:3001/api/patients/${patient.id}`);
+        const json = await res.json();
+        if (json?.success && json.data) {
+          const p = json.data;
+          setFormData({
+            firstName: p.firstName || p.name?.split(' ')[0] || '',
+            lastName: p.lastName || p.name?.split(' ').slice(1).join(' ') || '',
+            email: p.email || '',
+            phone: p.phone || '',
+            dateOfBirth: p.dateOfBirth || '',
+            insurance: p.insurance || '',
+            balance: p.balance ?? 0,
+            status: p.status || 'active',
+            createdAt: p.createdAt ? new Date(p.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+            allergies: p.allergies || '',
+            medicalHistory: p.medicalHistory || '',
+            treatmentPlan: p.treatmentPlan || '',
+            clinicalNotes: p.clinicalNotes || '',
+            address: p.address || '',
+            city: p.city || '',
+            zipCode: p.zipCode || '',
+            emergencyContact: p.emergencyContact || '',
+            emergencyPhone: p.emergencyPhone || '',
+            notes: p.notes || ''
+          });
+        }
+      } catch (err) {
+        console.error("Failed to load full patient data:", err);
+      }
+    };
+
+    loadFullPatient();
+  }, [patient]);
+
+  useEffect(() => {
+    const filtered = appointments.filter(apt =>
+      apt.patientId === patient.id ||
+      apt.patientName === `${patient.firstName} ${patient.lastName}` ||
+      apt.patientName === patient.name
+    ).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    setPatientAppointments(filtered);
+  }, [appointments, patient]);
+
+  const handleUpdatePatient = async () => {
+    console.log("=== UPDATE PATIENT BUTTON CLICKED ===");
+    console.log("Patient ID:", patient.id);
+    console.log("Form data:", formData);
+
+    setIsSaving(true);
+    try {
+      const response = await fetch(`http://localhost:3001/api/patients/${patient.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...formData })
+      });
+
+      const result = await response.json();
+      console.log("Update response:", result);
+      if (result.success) {
+        toast.success("Patient updated successfully");
+        refreshPatients();
+        setIsModified(false);
+      } else {
+        toast.error(result.message || "Failed to update patient");
+      }
+    } catch (err) {
+      console.error("Error updating patient:", err);
+      toast.error("Error connecting to server. Make sure the backend is running on port 3001.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeletePatient = () => {
+    (async () => {
+      if (!patient.id) {
+        toast.error("Missing patient id");
+        return;
+      }
+
+      setIsSaving(true);
+      try {
+        console.log("[DELETE PATIENT] Attempting to delete patient:", patient.id);
+        const res = await fetch(`http://localhost:3001/api/patients/${patient.id}`, {
+          method: "DELETE",
+        });
+        console.log("[DELETE PATIENT] Response status:", res.status);
+        const json = await res.json();
+        console.log("[DELETE PATIENT] Response body:", json);
+        if (res.ok && json?.success) {
+          toast.success("Patient deleted successfully");
+          refreshPatients();
+          onClose();
+        } else if (res.status === 404) {
+          toast.error("Patient not found. Server may need restart after rebuild.");
+        } else {
+          toast.error(json?.message || "Failed to delete patient");
+        }
+      } catch (err) {
+        console.error("[DELETE PATIENT] Error:", err);
+        toast.error("Error deleting patient");
+      } finally {
+        setIsSaving(false);
+      }
+    })();
+  };
+
   return (
     <div className="space-y-4">
-      {/* Action Buttons */}
-      <div className="flex justify-end space-x-2 border-b pb-4">
-        <Button variant="outline" size="sm">
-          <Edit className="h-4 w-4 mr-2" />
-          Update Patient
-        </Button>
-        <Button variant="cancel" size="sm">
+      <div className="flex justify-end space-x-2 pb-4 border-b">
+        <Button variant="destructive" size="sm" onClick={handleDeletePatient} disabled={isSaving}>
           <AlertTriangle className="h-4 w-4 mr-2" />
-          Delete Patient
+          Delete
+        </Button>
+        <Button variant="brand" size="sm" onClick={handleUpdatePatient} disabled={!isModified || isSaving}>
+          <Edit className="h-4 w-4 mr-2" />
+          {isSaving ? "Saving..." : "Update Patient"}
         </Button>
       </div>
-      
+
       <Tabs defaultValue="info" className="w-full">
         <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="info">Personal Info</TabsTrigger>
-          <TabsTrigger value="records">Dental Records</TabsTrigger>
-          <TabsTrigger value="history">Appointment History</TabsTrigger>
+<TabsTrigger
+            value="info"
+            className="data-[state=active]:bg-violet-500 data-[state=active]:text-white hover:bg-violet-100"
+          >
+            Personal Info
+          </TabsTrigger>
+          <TabsTrigger
+            value="records"
+            className="data-[state=active]:bg-violet-500 data-[state=active]:text-white hover:bg-violet-100"
+          >
+            Dental Records
+          </TabsTrigger>
+          <TabsTrigger
+            value="history"
+            className="data-[state=active]:bg-violet-500 data-[state=active]:text-white hover:bg-violet-100"
+          >
+            Appointment History
+          </TabsTrigger>
         </TabsList>
-      
-      <TabsContent value="info" className="space-y-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Personal Information</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Full Name</Label>
-                <Input value={patient.name} readOnly />
-              </div>
-              <div>
-                <Label>Date of Birth</Label>
-                <Input value={patient.dateOfBirth} readOnly />
-              </div>
-              <div>
-                <Label>Email</Label>
-                <Input value={patient.email} readOnly />
-              </div>
-              <div>
-                <Label>Phone</Label>
-                <Input value={patient.phone} readOnly />
-              </div>
-              <div>
-                <Label>Insurance Provider</Label>
-                <Input value={patient.insurance} readOnly />
-              </div>
-              <div>
-                <Label>Current Balance</Label>
-                <Input value={`$${patient.balance}`} readOnly />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </TabsContent>
-      
-      <TabsContent value="records" className="space-y-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Dental Records & Treatment Notes</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <Label>Allergies</Label>
-              <Textarea value="Penicillin allergy noted" readOnly />
-            </div>
-            <div>
-              <Label>Medical History</Label>
-              <Textarea value="Hypertension - controlled with medication. No other significant medical history." readOnly />
-            </div>
-            <div>
-              <Label>Current Treatment Plan</Label>
-              <Textarea value="1. Regular cleanings every 6 months\n2. Monitor tooth #14 filling\n3. Consider whitening treatment" readOnly />
-            </div>
-            <div>
-              <Label>Clinical Notes</Label>
-              <Textarea value="Patient maintains good oral hygiene. Last cleaning showed minimal plaque buildup. Gums healthy." readOnly />
-            </div>
-          </CardContent>
-        </Card>
-      </TabsContent>
-      
-      <TabsContent value="history" className="space-y-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Appointment History</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {mockAppointmentHistory.map((appointment, index) => (
-                <div key={index} className="flex items-center justify-between p-4 border rounded-lg">
-                  <div className="flex items-center space-x-4">
-                    <div className="text-sm">
-                      <div className="font-medium">{appointment.date}</div>
-                      <div className="text-muted-foreground">{appointment.type}</div>
-                    </div>
-                    <div className="text-sm">
-                      <div className="font-medium">{appointment.doctor}</div>
-                      <div className="text-muted-foreground">{appointment.notes}</div>
-                    </div>
-                  </div>
-                  <div className="text-sm font-medium">${appointment.cost}</div>
+
+        <TabsContent value="info" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Personal Information</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>First Name</Label>
+                  <Input value={formData.firstName} onChange={(e) => { setFormData(prev => ({ ...prev, firstName: e.target.value })); setIsModified(true); }} disabled={isSaving} />
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </TabsContent>
+                <div>
+                  <Label>Last Name</Label>
+                  <Input value={formData.lastName} onChange={(e) => { setFormData(prev => ({ ...prev, lastName: e.target.value })); setIsModified(true); }} disabled={isSaving} />
+                </div>
+
+                <div>
+                  <Label>Date of Birth</Label>
+                  <Input type="date" value={formData.dateOfBirth} onChange={(e) => { setFormData(prev => ({ ...prev, dateOfBirth: e.target.value })); setIsModified(true); }} disabled={isSaving} />
+                </div>
+                <div>
+                  <Label>Created At</Label>
+                  <Input type="date" value={formData.createdAt} onChange={(e) => { setFormData(prev => ({ ...prev, createdAt: e.target.value })); setIsModified(true); }} disabled={isSaving} />
+                </div>
+
+                <div>
+                  <Label>Email</Label>
+                  <Input type="email" value={formData.email} onChange={(e) => { setFormData(prev => ({ ...prev, email: e.target.value })); setIsModified(true); }} disabled={isSaving} />
+                </div>
+                <div>
+                  <Label>Phone</Label>
+                  <Input value={formData.phone} onChange={(e) => { setFormData(prev => ({ ...prev, phone: e.target.value })); setIsModified(true); }} disabled={isSaving} />
+                </div>
+
+                <div>
+                  <Label>Insurance Provider</Label>
+                  <Input value={formData.insurance} onChange={(e) => { setFormData(prev => ({ ...prev, insurance: e.target.value })); setIsModified(true); }} disabled={isSaving} />
+                </div>
+                <div>
+                  <Label>Current Balance</Label>
+                  <Input type="number" value={formData.balance} onChange={(e) => { setFormData(prev => ({ ...prev, balance: parseFloat(e.target.value) || 0 })); setIsModified(true); }} disabled={isSaving} />
+                </div>
+
+                <div className="col-span-2" />
+
+                <div>
+                  <Label>Address</Label>
+                  <Input value={formData.address} onChange={(e) => { setFormData(prev => ({ ...prev, address: e.target.value })); setIsModified(true); }} disabled={isSaving} />
+                </div>
+                <div>
+                  <Label>City</Label>
+                  <Input value={formData.city} onChange={(e) => { setFormData(prev => ({ ...prev, city: e.target.value })); setIsModified(true); }} disabled={isSaving} />
+                </div>
+                <div>
+                  <Label>Zip Code</Label>
+                  <Input value={formData.zipCode} onChange={(e) => { setFormData(prev => ({ ...prev, zipCode: e.target.value })); setIsModified(true); }} disabled={isSaving} />
+                </div>
+                <div>
+                  <Label>Emergency Contact Name</Label>
+                  <Input value={formData.emergencyContact} onChange={(e) => { setFormData(prev => ({ ...prev, emergencyContact: e.target.value })); setIsModified(true); }} disabled={isSaving} />
+                </div>
+                <div>
+                  <Label>Emergency Contact Phone</Label>
+                  <Input value={formData.emergencyPhone} onChange={(e) => { setFormData(prev => ({ ...prev, emergencyPhone: e.target.value })); setIsModified(true); }} disabled={isSaving} />
+                </div>
+
+                <div>
+                  <Label>Status</Label>
+                  <Select value={formData.status} onValueChange={(value) => { setFormData(prev => ({ ...prev, status: value })); setIsModified(true); }} disabled={isSaving}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="overdue">Overdue</SelectItem>
+                      <SelectItem value="inactive">Inactive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="col-span-2">
+                  <Label>General Notes</Label>
+                  <Input value={formData.notes} onChange={(e) => { setFormData(prev => ({ ...prev, notes: e.target.value })); setIsModified(true); }} disabled={isSaving} placeholder="Enter general notes about the patient..." className="h-20" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="records" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Dental Records & Treatment Notes</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label>Allergies</Label>
+                <Input value={formData.allergies} onChange={(e) => { setFormData(prev => ({ ...prev, allergies: e.target.value })); setIsModified(true); }} disabled={isSaving} placeholder="Enter any allergies or sensitivities..." className="h-24" />
+              </div>
+              <div>
+                <Label>Medical History</Label>
+                <Input value={formData.medicalHistory} onChange={(e) => { setFormData(prev => ({ ...prev, medicalHistory: e.target.value })); setIsModified(true); }} disabled={isSaving} placeholder="Enter relevant medical history..." className="h-24" />
+              </div>
+              <div>
+                <Label>Current Treatment Plan</Label>
+                <Input value={formData.treatmentPlan} onChange={(e) => { setFormData(prev => ({ ...prev, treatmentPlan: e.target.value })); setIsModified(true); }} disabled={isSaving} placeholder="Enter treatment plan..." className="h-24" />
+              </div>
+              <div>
+                <Label>Clinical Notes</Label>
+                <Input value={formData.clinicalNotes} onChange={(e) => { setFormData(prev => ({ ...prev, clinicalNotes: e.target.value })); setIsModified(true); }} disabled={isSaving} placeholder="Enter clinical observations and notes..." className="h-24" />
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="history" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Appointment History</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {patientAppointments.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">No appointments scheduled for this patient yet.</div>
+              ) : (
+                <div className="space-y-4">
+                  {patientAppointments.map((appointment, index) => (
+                    <div key={index} className="flex items-center justify-between p-4 border rounded-lg">
+                      <div className="flex items-center space-x-4">
+                        <div className="text-sm">
+                          <div className="font-medium">{appointment.date} at {appointment.time}</div>
+                          <div className="text-muted-foreground">{appointment.type}</div>
+                        </div>
+                        <div className="text-sm">
+                          <div className="font-medium">{appointment.doctor}</div>
+                          <div className="text-muted-foreground">{appointment.notes || 'No notes'}</div>
+                        </div>
+                      </div>
+                      <div className="text-sm">
+                        <span className={new Date(`${appointment.date}T${appointment.time}`) < new Date() ? 'text-gray-500' : 'text-blue-600'}>
+                          {new Date(`${appointment.date}T${appointment.time}`) < new Date() ? 'Completed' : 'Scheduled'}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
     </div>
   );

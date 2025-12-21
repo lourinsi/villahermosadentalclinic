@@ -13,22 +13,26 @@ export interface Appointment {
   createdAt?: string;
 }
 
-const STORAGE_KEY = "dental_clinic_appointments";
+const API_URL = "http://localhost:3001/api/appointments";
 
 export const useAppointments = () => {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Load appointments from localStorage on mount
+  // Load appointments from backend on mount
   useEffect(() => {
-    const loadAppointments = () => {
+    const loadAppointments = async () => {
       try {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored) {
-          setAppointments(JSON.parse(stored));
+        setIsLoading(true);
+        const response = await fetch(API_URL);
+        const result = await response.json();
+        if (result.success && result.data) {
+          setAppointments(result.data);
         }
       } catch (error) {
-        console.error("Error loading appointments:", error);
+        console.error("Error loading appointments from backend:", error);
+        // Fallback to empty list if backend is unavailable
+        setAppointments([]);
       } finally {
         setIsLoading(false);
       }
@@ -37,39 +41,64 @@ export const useAppointments = () => {
     loadAppointments();
   }, []);
 
-  // Save appointments to localStorage whenever they change
-  const saveAppointments = (newAppointments: Appointment[]) => {
+  const addAppointment = async (appointment: Omit<Appointment, "id" | "createdAt">) => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(newAppointments));
+      const response = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(appointment),
+      });
+      const result = await response.json();
+      if (result.success && result.data) {
+        const newAppointment = result.data;
+        setAppointments([...appointments, newAppointment]);
+        return newAppointment;
+      }
+      throw new Error(result.message || "Failed to add appointment");
     } catch (error) {
-      console.error("Error saving appointments:", error);
+      console.error("Error adding appointment:", error);
+      throw error;
     }
   };
 
-  const addAppointment = (appointment: Omit<Appointment, "id" | "createdAt">) => {
-    const newAppointment: Appointment = {
-      ...appointment,
-      id: Date.now().toString(),
-      createdAt: new Date().toISOString(),
-    };
-    const updated = [...appointments, newAppointment];
-    setAppointments(updated);
-    saveAppointments(updated);
-    return newAppointment;
+  const updateAppointment = async (id: string, updates: Partial<Appointment>) => {
+    try {
+      const response = await fetch(`${API_URL}/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      const result = await response.json();
+      if (result.success && result.data) {
+        const updated = appointments.map((apt) =>
+          apt.id === id ? { ...apt, ...result.data } : apt
+        );
+        setAppointments(updated);
+        return result.data;
+      }
+      throw new Error(result.message || "Failed to update appointment");
+    } catch (error) {
+      console.error("Error updating appointment:", error);
+      throw error;
+    }
   };
 
-  const updateAppointment = (id: string, updates: Partial<Appointment>) => {
-    const updated = appointments.map((apt) =>
-      apt.id === id ? { ...apt, ...updates } : apt
-    );
-    setAppointments(updated);
-    saveAppointments(updated);
-  };
-
-  const deleteAppointment = (id: string) => {
-    const updated = appointments.filter((apt) => apt.id !== id);
-    setAppointments(updated);
-    saveAppointments(updated);
+  const deleteAppointment = async (id: string) => {
+    try {
+      const response = await fetch(`${API_URL}/${id}`, {
+        method: "DELETE",
+      });
+      const result = await response.json();
+      if (result.success) {
+        const updated = appointments.filter((apt) => apt.id !== id);
+        setAppointments(updated);
+      } else {
+        throw new Error(result.message || "Failed to delete appointment");
+      }
+    } catch (error) {
+      console.error("Error deleting appointment:", error);
+      throw error;
+    }
   };
 
   const getAppointmentsByDate = (date: Date) => {

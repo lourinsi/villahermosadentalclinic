@@ -31,7 +31,7 @@ export function CreateAppointmentModal({
   onOpenChange,
   selectedDate
 }: CreateAppointmentModalProps) {
-  const { addAppointment, refreshPatients } = useAppointmentModal();
+  const { addAppointment, refreshPatients, refreshAppointments } = useAppointmentModal();
   const [formData, setFormData] = useState<AppointmentFormData>({
     patientName: "",
     patientId: "",
@@ -46,6 +46,8 @@ export function CreateAppointmentModal({
   const [showNewPatient, setShowNewPatient] = useState(false);
   const [patients, setPatients] = useState<Array<{ id: string; name: string }>>([]);
   const [isLoading, setIsLoading] = useState(false);
+
+  const { refreshTrigger } = useAppointmentModal();
 
   useEffect(() => {
     const fetchPatients = async () => {
@@ -62,7 +64,7 @@ export function CreateAppointmentModal({
     };
 
     fetchPatients();
-  }, []);
+  }, [refreshTrigger]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,6 +74,19 @@ export function CreateAppointmentModal({
     
     if (!formData.patientName || !formData.date || !formData.time || !formData.type || !formData.doctor) {
       toast.error("Please fill in all required fields");
+      return;
+    }
+
+    // Prevent scheduling appointments in the past
+    try {
+      const appointmentDateTime = new Date(`${formData.date}T${formData.time}`);
+      if (isNaN(appointmentDateTime.getTime()) || appointmentDateTime.getTime() <= Date.now()) {
+        toast.error("Cannot schedule an appointment in the past. Choose a future date/time.");
+        return;
+      }
+    } catch (err) {
+      // fallback - block if parsing fails
+      toast.error("Invalid date/time selected");
       return;
     }
 
@@ -116,7 +131,7 @@ export function CreateAppointmentModal({
           
           // Create appointment with new patient
           console.log("=== CREATING APPOINTMENT FOR NEW PATIENT ===");
-          addAppointment({
+          await addAppointment({
             patientName: fullName,
             patientId: newId,
             date: formData.date,
@@ -128,7 +143,8 @@ export function CreateAppointmentModal({
           });
           
           toast.success("Patient and appointment created!");
-          refreshPatients(); // Refresh patient list to see new patient
+          refreshPatients();
+          refreshAppointments();
           onOpenChange(false);
           
           // Reset form
@@ -162,7 +178,7 @@ export function CreateAppointmentModal({
     // Otherwise just create appointment
     console.log("=== CREATING APPOINTMENT FOR EXISTING PATIENT ===");
     try {
-      addAppointment({
+      await addAppointment({
         patientName: formData.patientName,
         patientId: formData.patientId || formData.patientName,
         date: formData.date,
@@ -175,7 +191,8 @@ export function CreateAppointmentModal({
 
       console.log("Appointment created successfully");
       toast.success("Appointment created successfully!");
-      refreshPatients(); // Refresh patient list to update next appointment
+      refreshPatients();
+      refreshAppointments();
       onOpenChange(false);
 
       // Reset form
@@ -303,6 +320,7 @@ export function CreateAppointmentModal({
                   id="date"
                   type="date"
                   value={formData.date}
+                  min={new Date().toISOString().split('T')[0]}
                   onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
                   required
                 />

@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
+import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Search } from "lucide-react";
 import { useAppointmentModal } from "./AdminLayout";
 import { Appointment } from "../hooks/useAppointments";
 import { Badge } from "./ui/badge";
@@ -13,7 +14,9 @@ type ViewMode = "month" | "week" | "day";
 export function CalendarView() {
   const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [searchTerm, setSearchTerm] = useState("");
   const [selectedDoctor, setSelectedDoctor] = useState("all");
+  const [isLoadingView, setIsLoadingView] = useState(false);
   const { openScheduleModal, openCreateModal, appointments, deleteAppointment, refreshPatients } = useAppointmentModal();
   const [editOpen, setEditOpen] = useState(false);
   const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
@@ -22,6 +25,13 @@ export function CalendarView() {
   useEffect(() => {
     refreshPatients();
   }, []);
+
+  // Show loading state when view mode changes
+  useEffect(() => {
+    setIsLoadingView(true);
+    const timer = setTimeout(() => setIsLoadingView(false), 300);
+    return () => clearTimeout(timer);
+  }, [viewMode]);
 
   const formatDate = (date: Date): string => {
     const options: Intl.DateTimeFormatOptions = { 
@@ -59,12 +69,60 @@ export function CalendarView() {
     }
   };
 
-  const filteredAppointments = appointments.filter((appointment: Appointment) => {
-    const matchesDoctor = selectedDoctor === "all" || appointment.doctor === selectedDoctor;
-    const appointmentDate = new Date(appointment.date);
-    const matchesDate = appointmentDate >= new Date();
-    return matchesDoctor && matchesDate;
+  const getViewRange = (date: Date) => {
+    const start = new Date(date);
+    const end = new Date(date);
+    start.setHours(0, 0, 0, 0);
+    end.setHours(23, 59, 59, 999);
+
+    if (viewMode === 'day') {
+      // start/end already set to the selected day
+      return { start, end };
+    }
+
+    if (viewMode === 'week') {
+      const weekStart = new Date(date);
+      weekStart.setDate(date.getDate() - date.getDay());
+      weekStart.setHours(0, 0, 0, 0);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6);
+      weekEnd.setHours(23, 59, 59, 999);
+      return { start: weekStart, end: weekEnd };
+    }
+
+    // month
+    const monthStart = new Date(date.getFullYear(), date.getMonth(), 1);
+    monthStart.setHours(0, 0, 0, 0);
+    const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+    monthEnd.setHours(23, 59, 59, 999);
+    return { start: monthStart, end: monthEnd };
+  };
+
+  const { start: viewStart, end: viewEnd } = getViewRange(selectedDate);
+
+  const searchedAppointments = appointments.filter((appointment: Appointment) => {
+    const term = searchTerm.toLowerCase();
+    return (
+      appointment.patientName.toLowerCase().includes(term) ||
+      appointment.type.toLowerCase().includes(term) ||
+      appointment.doctor.toLowerCase().includes(term)
+    );
   });
+
+  const filteredAppointments = searchedAppointments
+    .filter((appointment: Appointment) => {
+      const matchesDoctor = selectedDoctor === "all" || appointment.doctor === selectedDoctor;
+      const appointmentDate = new Date(appointment.date);
+      const inRange = appointmentDate >= viewStart && appointmentDate <= viewEnd;
+      if (searchTerm) {
+        return matchesDoctor;
+      }
+      return matchesDoctor && inRange;
+    })
+    .sort((a, b) => {
+      if (a.date !== b.date) return new Date(a.date).getTime() - new Date(b.date).getTime();
+      return a.time.localeCompare(b.time);
+    });
 
   return (
     <div className="p-6 space-y-6">
@@ -73,10 +131,22 @@ export function CalendarView() {
           <h1 className="text-2xl font-semibold text-gray-900">Calendar</h1>
           <p className="text-muted-foreground">Manage appointments and schedules</p>
         </div>
-        <Button variant="brand" onClick={() => openCreateModal(selectedDate)}>
-          <Plus className="h-4 w-4 mr-2" />
-          New Appointment
-        </Button>
+        <div className="flex items-center space-x-4">
+          <div className="relative">
+            <Input
+              icon={<Search className="h-5 w-5 text-gray-400" />}
+              type="text"
+              placeholder="Search appointments..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full"
+            />
+          </div>
+          <Button variant="brand" onClick={() => openCreateModal(selectedDate)}>
+            <Plus className="h-4 w-4 mr-2" />
+            New Appointment
+          </Button>
+        </div>
       </div>
 
       {/* Calendar Controls */}
@@ -174,13 +244,32 @@ export function CalendarView() {
       {/* Today's Appointments */}
       <Card>
         <CardHeader>
-          <CardTitle>
-            {viewMode === 'day' ? 'Appointments for Today' : 'Upcoming Appointments'}
-          </CardTitle>
+              <CardTitle>
+                {(() => {
+                  if (viewMode === 'day') {
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    const sel = new Date(selectedDate);
+                    sel.setHours(0, 0, 0, 0);
+                    const diff = Math.round((sel.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                    if (diff === 0) return "Today's Appointments";
+                    if (diff === 1) return "Tomorrow's Appointments";
+                    return `${sel.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })} Appointments`;
+                  }
+                  return 'Upcoming Appointments';
+                })()}
+              </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
-            {filteredAppointments.length > 0 ? (
+            {isLoadingView ? (
+              <div className="text-center py-8">
+                <div className="inline-block">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-500 mx-auto mb-2"></div>
+                  <p className="text-sm text-muted-foreground">Loading appointments...</p>
+                </div>
+              </div>
+            ) : filteredAppointments.length > 0 ? (
               filteredAppointments.map((appointment: Appointment) => (
                 <div
                   key={appointment.id}
