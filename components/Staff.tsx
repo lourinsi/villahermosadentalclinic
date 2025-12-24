@@ -208,7 +208,7 @@ export function StaffView() {
           </Button>
           <Dialog open={isAddStaffDialogOpen} onOpenChange={setIsAddStaffDialogOpen}>
             <DialogTrigger asChild>
-              <Button className="bg-primary hover:bg-primary/90">
+              <Button variant="brand" >
                 <UserPlus className="h-4 w-4 mr-2" />
                 Add Staff Member
               </Button>

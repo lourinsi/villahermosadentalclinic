@@ -218,9 +218,9 @@ export function FinanceView() {
             <Download className="h-4 w-4 mr-2" />
             Export Report
           </Button>
-          <Button className="bg-primary hover:bg-primary/90">
+          <Button variant="brand" >
             <FileText className="h-4 w-4 mr-2" />
-            Generate Invoice
+            Generate Invoices
           </Button>
         </div>
       </div>

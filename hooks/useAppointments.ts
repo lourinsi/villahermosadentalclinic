@@ -15,11 +15,11 @@ export interface Appointment {
 
 const API_URL = "http://localhost:3001/api/appointments";
 
-export const useAppointments = () => {
+export const useAppointments = (refreshTrigger?: number) => {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Load appointments from backend on mount
+  // Load appointments from backend on mount and when refreshTrigger changes
   useEffect(() => {
     const loadAppointments = async () => {
       try {
@@ -39,7 +39,7 @@ export const useAppointments = () => {
     };
 
     loadAppointments();
-  }, []);
+  }, [refreshTrigger]);
 
   const addAppointment = async (appointment: Omit<Appointment, "id" | "createdAt">) => {
     try {

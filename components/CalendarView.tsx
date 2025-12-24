@@ -17,17 +17,19 @@ export function CalendarView() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedDoctor, setSelectedDoctor] = useState("all");
   const [isLoadingView, setIsLoadingView] = useState(false);
-  const { openScheduleModal, openCreateModal, appointments, deleteAppointment, refreshPatients } = useAppointmentModal();
+  const { openScheduleModal, openCreateModal, appointments, deleteAppointment, refreshPatients, refreshAppointments, refreshTrigger } = useAppointmentModal();
   const [editOpen, setEditOpen] = useState(false);
   const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
 
   // Fetch fresh patient list when calendar loads to ensure new patients show up
   useEffect(() => {
-    refreshPatients();
-  }, []);
+    // refreshPatients();
+    // refreshAppointments(); // <-- ensure appointments are loaded
+  }, [refreshTrigger]);
 
-  // Show loading state when view mode changes
+  // Refresh appointments when view mode changes
   useEffect(() => {
+    refreshAppointments();
     setIsLoadingView(true);
     const timer = setTimeout(() => setIsLoadingView(false), 300);
     return () => clearTimeout(timer);
