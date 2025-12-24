@@ -21,15 +21,13 @@ export function CalendarView() {
   const [editOpen, setEditOpen] = useState(false);
   const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
 
-  // Fetch fresh patient list when calendar loads to ensure new patients show up
-  useEffect(() => {
-    // refreshPatients();
-    // refreshAppointments(); // <-- ensure appointments are loaded
-  }, [refreshTrigger]);
-
-  // Refresh appointments when view mode changes
+  // Fetch appointments when refresh trigger or view mode changes
   useEffect(() => {
     refreshAppointments();
+  }, [refreshTrigger, viewMode]);
+
+  // Show loading state when view mode changes
+  useEffect(() => {
     setIsLoadingView(true);
     const timer = setTimeout(() => setIsLoadingView(false), 300);
     return () => clearTimeout(timer);
