@@ -17,7 +17,8 @@ import {
   Bell,
   Search,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Briefcase
 } from "lucide-react";
 import { Input } from "./ui/input";
 import { Avatar, AvatarImage, AvatarFallback } from "./ui/avatar";
@@ -56,6 +57,7 @@ const menuItems = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "patients", label: "Patients", icon: Users },
   { id: "calendar", label: "Calendar", icon: Calendar },
+  { id: "staff", label: "Staff", icon: Briefcase },
   { id: "finance", label: "Finance", icon: DollarSign },
   { id: "settings", label: "Settings", icon: Settings },
 ];

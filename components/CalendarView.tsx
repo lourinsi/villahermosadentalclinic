@@ -110,13 +110,11 @@ export function CalendarView() {
   });
 
   const filteredAppointments = searchedAppointments
-    .filter((appointment: Appointment) => {
+    .filter((appointment: Appointment) => { 
       const matchesDoctor = selectedDoctor === "all" || appointment.doctor === selectedDoctor;
-      const appointmentDate = new Date(appointment.date);
+      const dateParts = appointment.date.split('-');
+      const appointmentDate = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
       const inRange = appointmentDate >= viewStart && appointmentDate <= viewEnd;
-      if (searchTerm) {
-        return matchesDoctor;
-      }
       return matchesDoctor && inRange;
     })
     .sort((a, b) => {

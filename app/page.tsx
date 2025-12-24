@@ -4,10 +4,10 @@ import { useState } from "react";
 import { Dashboard } from "../components/Dashboard";
 import { AdminLayout } from "../components/AdminLayout";
 import { PatientsView } from "../components/PatientsView";
-import { Calendar } from "lucide-react";
 import { FinanceView } from "../components/FinanceView";
 import { CalendarView } from "../components/CalendarView";
 import { SettingsView } from "../components/SettingsView";
+import { StaffView } from "../components/Staff";
 
 export default function Home() {
   const [currentView, setCurrentView] = useState("dashboard");
@@ -22,6 +22,8 @@ export default function Home() {
         return <CalendarView />
       case "finance":
         return <FinanceView />
+      case "staff":
+        return <StaffView />
       case "settings":
         return <SettingsView />;
       default:
