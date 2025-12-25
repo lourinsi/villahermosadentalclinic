@@ -29,7 +29,8 @@ import {
   Briefcase,
   CreditCard,
   CalendarRange,
-  X
+  X,
+  Eye
 }from "lucide-react";
 
 export interface Staff {
@@ -60,7 +61,7 @@ export interface StaffFinancialRecord {
 }
 
 export interface Attendance {
-  staffId: number;
+  staffId: string;
   staffName: string;
   hoursWorked: number;
   daysPresent: number;
@@ -101,6 +102,50 @@ export function StaffView() {
   const [attendanceData, setAttendanceData] = useState<Attendance[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isEditStaffDialogOpen, setIsEditStaffDialogOpen] = useState(false);
+  const [isStaffDetailsDialogOpen, setIsStaffDetailsDialogOpen] = useState(false);
+  const [isDeleteStaffDialogOpen, setIsDeleteStaffDialogOpen] = useState(false);
+  const [selectedStaff, setSelectedStaff] = useState<Staff | null>(null);
+  const [isSavingStaff, setIsSavingStaff] = useState(false);
+  const [isDeletingStaff, setIsDeletingStaff] = useState(false);
+  const [editStaffForm, setEditStaffForm] = useState({
+    name: "",
+    role: "",
+    email: "",
+    phone: "",
+    department: "",
+    employmentType: "",
+    hireDate: "",
+    baseSalary: 0,
+    specialization: "",
+    licenseNumber: "",
+    status: "active"
+  });
+  const [isAttendanceDialogOpen, setIsAttendanceDialogOpen] = useState(false);
+  const [attendanceForm, setAttendanceForm] = useState<Attendance>({
+    staffId: "",
+    staffName: "",
+    hoursWorked: 0,
+    daysPresent: 0,
+    daysAbsent: 0,
+    overtimeHours: 0,
+  });
+  const [isEditFinancialDialogOpen, setIsEditFinancialDialogOpen] = useState(false);
+  const [isDeleteFinancialDialogOpen, setIsDeleteFinancialDialogOpen] = useState(false);
+  const [editingFinancialRecord, setEditingFinancialRecord] = useState<StaffFinancialRecord | null>(null);
+  const [financialRecordToDelete, setFinancialRecordToDelete] = useState<StaffFinancialRecord | null>(null);
+  const [editFinancialForm, setEditFinancialForm] = useState({
+    staffId: "",
+    type: "",
+    amount: 0,
+    date: "",
+    status: "pending",
+    notes: "",
+    repaymentSchedule: "",
+  });
+  const [financialActionLoading, setFinancialActionLoading] = useState<string | null>(null);
+  const [isSavingFinancialRecord, setIsSavingFinancialRecord] = useState(false);
+  const [isDeletingFinancialRecord, setIsDeletingFinancialRecord] = useState(false);
 
   const fetchAllStaffData = async () => {
     setIsLoading(true);
@@ -145,6 +190,118 @@ export function StaffView() {
     fetchAllStaffData();
   }, []); // Empty dependency array means this effect runs once on mount
 
+  const getStaffIdentifier = (staff: Staff) => String(staff.id || staff.email || staff.name);
+
+  const openStaffDetails = (staff: Staff) => {
+    setSelectedStaff(staff);
+    setIsStaffDetailsDialogOpen(true);
+  };
+
+  const openEditStaffDialog = (staff: Staff) => {
+    setSelectedStaff(staff);
+    setEditStaffForm({
+      name: staff.name,
+      role: staff.role,
+      email: staff.email,
+      phone: staff.phone,
+      department: staff.department,
+      employmentType: staff.employmentType,
+      hireDate: staff.hireDate,
+      baseSalary: staff.baseSalary,
+      specialization: staff.specialization,
+      licenseNumber: staff.licenseNumber,
+      status: staff.status,
+    });
+    setIsEditStaffDialogOpen(true);
+  };
+
+  const handleUpdateStaff = async () => {
+    if (!selectedStaff?.id) return;
+    setIsSavingStaff(true);
+    try {
+      const response = await fetch(`http://localhost:3001/api/staff/${selectedStaff.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...editStaffForm, baseSalary: Number(editStaffForm.baseSalary) }),
+      });
+      if (!response.ok) throw new Error("Failed to update staff member");
+      toast.success("Staff member updated successfully");
+      setIsEditStaffDialogOpen(false);
+      fetchAllStaffData();
+    } catch (error) {
+      console.error("Error updating staff member:", error);
+      toast.error("Failed to update staff member");
+    } finally {
+      setIsSavingStaff(false);
+    }
+  };
+
+  const openDeleteStaffDialog = (staff: Staff) => {
+    setSelectedStaff(staff);
+    setIsDeleteStaffDialogOpen(true);
+  };
+
+  const handleDeleteStaff = async () => {
+    if (!selectedStaff?.id) return;
+    setIsDeletingStaff(true);
+    try {
+      const response = await fetch(`http://localhost:3001/api/staff/${selectedStaff.id}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) throw new Error("Failed to delete staff member");
+      toast.success("Staff member removed");
+      setIsDeleteStaffDialogOpen(false);
+      fetchAllStaffData();
+    } catch (error) {
+      console.error("Error deleting staff member:", error);
+      toast.error("Failed to delete staff member");
+    } finally {
+      setIsDeletingStaff(false);
+    }
+  };
+
+  const openAttendanceModal = (record: Attendance) => {
+    setAttendanceForm(record);
+    setIsAttendanceDialogOpen(true);
+  };
+
+  const handleAttendanceSave = () => {
+    if (!attendanceForm.staffId) return;
+    setAttendanceData((prev) => {
+      const index = prev.findIndex((item) => item.staffId === attendanceForm.staffId);
+      if (index >= 0) {
+        const updated = [...prev];
+        updated[index] = attendanceForm;
+        return updated;
+      }
+      return [...prev, attendanceForm];
+    });
+    toast.success("Attendance updated");
+    setIsAttendanceDialogOpen(false);
+  };
+
+  const derivedAttendanceRecords = staffData.map((staff) => {
+    const identifier = getStaffIdentifier(staff);
+    const existing = attendanceData.find((record) => record.staffId === identifier);
+    if (existing) {
+      return existing;
+    }
+    return {
+      staffId: identifier,
+      staffName: staff.name,
+      hoursWorked: 0,
+      daysPresent: 0,
+      daysAbsent: 0,
+      overtimeHours: 0,
+    };
+  });
+
+  const orphanAttendanceRecords = attendanceData.filter(
+    (record) => !derivedAttendanceRecords.some((entry) => entry.staffId === record.staffId)
+  );
+
+  const attendanceTableRows = [...derivedAttendanceRecords, ...orphanAttendanceRecords];
+
   const handleAddStaff = async () => {
     try {
       const response = await fetch("http://localhost:3001/api/staff", {
@@ -188,6 +345,123 @@ export function StaffView() {
     } catch (error) {
       console.error("Error adding financial record:", error);
       toast.error("An unexpected error occurred.");
+    }
+  };
+
+  const openEditFinancialRecord = (record: StaffFinancialRecord) => {
+    setEditingFinancialRecord(record);
+    setEditFinancialForm({
+      staffId: record.staffId,
+      type: record.type,
+      amount: record.amount,
+      date: record.date,
+      status: record.status,
+      notes: record.notes,
+      repaymentSchedule: record.repaymentSchedule,
+    });
+    setIsEditFinancialDialogOpen(true);
+  };
+
+  const handleFinancialEditDialogChange = (open: boolean) => {
+    setIsEditFinancialDialogOpen(open);
+    if (!open) {
+      setEditingFinancialRecord(null);
+      setEditFinancialForm({
+        staffId: "",
+        type: "",
+        amount: 0,
+        date: "",
+        status: "pending",
+        notes: "",
+        repaymentSchedule: "",
+      });
+    }
+  };
+
+  const handleDeleteFinancialDialogChange = (open: boolean) => {
+    setIsDeleteFinancialDialogOpen(open);
+    if (!open) {
+      setFinancialRecordToDelete(null);
+    }
+  };
+
+  const handleApproveFinancialRecord = async (recordId: string) => {
+    try {
+      setFinancialActionLoading(recordId);
+      const response = await fetch(`http://localhost:3001/api/staff/financials/${recordId}/approve`, {
+        method: "PUT",
+      });
+      const result = await response.json();
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.message || "Failed to approve financial record");
+      }
+      toast.success("Financial record approved");
+      fetchAllStaffData();
+    } catch (error) {
+      console.error("Error approving financial record:", error);
+      toast.error("Failed to approve financial record");
+    } finally {
+      setFinancialActionLoading(null);
+    }
+  };
+
+  const handleUpdateFinancialRecord = async () => {
+    if (!editingFinancialRecord) return;
+    if (!editFinancialForm.staffId || !editFinancialForm.type || !editFinancialForm.date) {
+      toast.error("Please complete all required fields");
+      return;
+    }
+    setIsSavingFinancialRecord(true);
+    try {
+      const response = await fetch(`http://localhost:3001/api/staff/financials/${editingFinancialRecord.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...editFinancialForm,
+          amount: Number(editFinancialForm.amount),
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.message || "Failed to update financial record");
+      }
+      toast.success("Financial record updated");
+      handleFinancialEditDialogChange(false);
+      fetchAllStaffData();
+    } catch (error) {
+      console.error("Error updating financial record:", error);
+      toast.error("Failed to update financial record");
+    } finally {
+      setIsSavingFinancialRecord(false);
+    }
+  };
+
+  const openDeleteFinancialRecord = (record: StaffFinancialRecord) => {
+    setFinancialRecordToDelete(record);
+    setIsDeleteFinancialDialogOpen(true);
+  };
+
+  const handleDeleteFinancialRecord = async () => {
+    if (!financialRecordToDelete) return;
+    setIsDeletingFinancialRecord(true);
+    try {
+      const response = await fetch(`http://localhost:3001/api/staff/financials/${financialRecordToDelete.id}`, {
+        method: "DELETE",
+      });
+      const result = await response.json();
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.message || "Failed to delete financial record");
+      }
+      toast.success("Financial record removed");
+      handleDeleteFinancialDialogChange(false);
+      fetchAllStaffData();
+    } catch (error) {
+      console.error("Error deleting financial record:", error);
+      toast.error("Failed to delete financial record");
+    } finally {
+      setIsDeletingFinancialRecord(false);
     }
   };
 
@@ -510,11 +784,14 @@ export function StaffView() {
                           </TableCell>
                           <TableCell>
                             <div className="flex space-x-2">
-                              <Button variant="outline" size="sm">
+                              <Button variant="outline" size="sm" onClick={() => openStaffDetails(staff)}>
+                                <Eye className="h-3 w-3" />
+                              </Button>
+                              <Button variant="outline" size="sm" onClick={() => openEditStaffDialog(staff)}>
                                 <Edit className="h-3 w-3" />
                               </Button>
-                              <Button variant="outline" size="sm">
-                                <MoreVertical className="h-3 w-3" />
+                              <Button variant="outline" size="sm" onClick={() => openDeleteStaffDialog(staff)}>
+                                <Trash2 className="h-3 w-3" />
                               </Button>
                             </div>
                           </TableCell>
@@ -707,10 +984,28 @@ export function StaffView() {
                           <TableCell>
                             <div className="flex space-x-2">
                               {record.status === "pending" && (
-                                <Button variant="outline" size="sm">Approve</Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleApproveFinancialRecord(record.id)}
+                                  disabled={financialActionLoading === record.id}
+                                >
+                                  {financialActionLoading === record.id ? "Approving..." : "Approve"}
+                                </Button>
                               )}
-                              <Button variant="outline" size="sm">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => openEditFinancialRecord(record)}
+                              >
                                 <Edit className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => openDeleteFinancialRecord(record)}
+                              >
+                                <Trash2 className="h-3 w-3" />
                               </Button>
                             </div>
                           </TableCell>
@@ -770,16 +1065,17 @@ export function StaffView() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {attendanceData.length === 0 ? (
+                    {attendanceTableRows.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                           No attendance data available.
                         </TableCell>
                       </TableRow>
                     ) : (
-                      attendanceData.map((attendance) => {
+                      attendanceTableRows.map((attendance) => {
                         const totalDays = attendance.daysPresent + attendance.daysAbsent;
-                        const attendanceRate = ((attendance.daysPresent / totalDays) * 100).toFixed(1);
+                        const attendanceRateValue = totalDays > 0 ? (attendance.daysPresent / totalDays) * 100 : 0;
+                        const attendanceRate = attendanceRateValue.toFixed(1);
                         
                         return (
                           <TableRow key={attendance.staffId}>
@@ -799,14 +1095,14 @@ export function StaffView() {
                                 <div className="flex-1 bg-gray-200 rounded-full h-2">
                                   <div 
                                     className="bg-green-600 h-2 rounded-full" 
-                                    style={{ width: `${attendanceRate}%` }}
+                                    style={{ width: `${attendanceRateValue}%` }}
                                   />
                                 </div>
                                 <span className="text-sm font-medium">{attendanceRate}%</span>
                               </div>
                             </TableCell>
                             <TableCell>
-                              <Button variant="outline" size="sm">View Details</Button>
+                              <Button variant="outline" size="sm" onClick={() => openAttendanceModal(attendance)}>Manage</Button>
                             </TableCell>
                           </TableRow>
                         );
@@ -819,6 +1115,359 @@ export function StaffView() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={isStaffDetailsDialogOpen} onOpenChange={setIsStaffDetailsDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Staff Details</DialogTitle>
+          </DialogHeader>
+          {selectedStaff ? (
+            <div className="space-y-4 py-4 text-sm">
+              <div>
+                <p className="text-xs text-muted-foreground">Name</p>
+                <p className="font-medium">{selectedStaff.name}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs text-muted-foreground">Role</p>
+                  <p className="font-medium">{selectedStaff.role}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Department</p>
+                  <p className="font-medium">{selectedStaff.department}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs text-muted-foreground">Email</p>
+                  <p className="font-medium break-all">{selectedStaff.email}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Phone</p>
+                  <p className="font-medium">{selectedStaff.phone}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs text-muted-foreground">Hire Date</p>
+                  <p className="font-medium">{selectedStaff.hireDate}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Status</p>
+                  <p className="font-medium">{selectedStaff.status}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs text-muted-foreground">Employment Type</p>
+                  <p className="font-medium">{selectedStaff.employmentType}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Base Salary</p>
+                  <p className="font-medium">${selectedStaff.baseSalary.toLocaleString()}</p>
+                </div>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Specialization</p>
+                <p className="font-medium">{selectedStaff.specialization}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">License Number</p>
+                <p className="font-medium">{selectedStaff.licenseNumber}</p>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No staff selected.</p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsStaffDetailsDialogOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isEditStaffDialogOpen} onOpenChange={setIsEditStaffDialogOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Edit Staff Member</DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-name">Full Name</Label>
+              <Input id="edit-name" value={editStaffForm.name} onChange={(e) => setEditStaffForm({ ...editStaffForm, name: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-role">Role</Label>
+              <Input id="edit-role" value={editStaffForm.role} onChange={(e) => setEditStaffForm({ ...editStaffForm, role: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-email">Email</Label>
+              <Input id="edit-email" type="email" value={editStaffForm.email} onChange={(e) => setEditStaffForm({ ...editStaffForm, email: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-phone">Phone</Label>
+              <Input id="edit-phone" value={editStaffForm.phone} onChange={(e) => setEditStaffForm({ ...editStaffForm, phone: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-department">Department</Label>
+              <Select value={editStaffForm.department} onValueChange={(value) => setEditStaffForm({ ...editStaffForm, department: value })}>
+                <SelectTrigger id="edit-department">
+                  <SelectValue placeholder="Select department" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Dentistry">Dentistry</SelectItem>
+                  <SelectItem value="Hygiene">Hygiene</SelectItem>
+                  <SelectItem value="Assistance">Assistance</SelectItem>
+                  <SelectItem value="Administration">Administration</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-employment">Employment Type</Label>
+              <Select value={editStaffForm.employmentType} onValueChange={(value) => setEditStaffForm({ ...editStaffForm, employmentType: value })}>
+                <SelectTrigger id="edit-employment">
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Full-time">Full-time</SelectItem>
+                  <SelectItem value="Part-time">Part-time</SelectItem>
+                  <SelectItem value="Contract">Contract</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-hire-date">Hire Date</Label>
+              <Input id="edit-hire-date" type="date" value={editStaffForm.hireDate} onChange={(e) => setEditStaffForm({ ...editStaffForm, hireDate: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-status">Status</Label>
+              <Select value={editStaffForm.status} onValueChange={(value) => setEditStaffForm({ ...editStaffForm, status: value })}>
+                <SelectTrigger id="edit-status">
+                  <SelectValue placeholder="Select status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="inactive">Inactive</SelectItem>
+                  <SelectItem value="onleave">On Leave</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-salary">Base Salary</Label>
+              <Input id="edit-salary" type="number" value={editStaffForm.baseSalary} onChange={(e) => setEditStaffForm({ ...editStaffForm, baseSalary: Number(e.target.value) })} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-specialization">Specialization</Label>
+              <Input id="edit-specialization" value={editStaffForm.specialization} onChange={(e) => setEditStaffForm({ ...editStaffForm, specialization: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-license">License Number</Label>
+              <Input id="edit-license" value={editStaffForm.licenseNumber} onChange={(e) => setEditStaffForm({ ...editStaffForm, licenseNumber: e.target.value })} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditStaffDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleUpdateStaff} disabled={isSavingStaff}>
+              {isSavingStaff ? "Saving..." : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isDeleteStaffDialogOpen} onOpenChange={setIsDeleteStaffDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Remove Staff Member</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {selectedStaff ? `Are you sure you want to remove ${selectedStaff.name}?` : "Are you sure you want to remove this staff member?"}
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDeleteStaffDialogOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDeleteStaff} disabled={isDeletingStaff}>
+              {isDeletingStaff ? "Removing..." : "Remove"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isEditFinancialDialogOpen} onOpenChange={handleFinancialEditDialogChange}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Edit Financial Record</DialogTitle>
+          </DialogHeader>
+          {editingFinancialRecord ? (
+            <div className="grid grid-cols-2 gap-4 py-4">
+              <div className="space-y-2 col-span-2">
+                <Label htmlFor="edit-financial-staff">Staff Member</Label>
+                <Select
+                  value={editFinancialForm.staffId}
+                  onValueChange={(value) => setEditFinancialForm({ ...editFinancialForm, staffId: value })}
+                >
+                  <SelectTrigger id="edit-financial-staff">
+                    <SelectValue placeholder="Select staff member" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {staffData.map((staff) => (
+                      <SelectItem key={staff.id} value={staff.id.toString()}>
+                        {staff.name} - {staff.role}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-financial-type">Transaction Type</Label>
+                <Select
+                  value={editFinancialForm.type}
+                  onValueChange={(value) => setEditFinancialForm({ ...editFinancialForm, type: value })}
+                >
+                  <SelectTrigger id="edit-financial-type">
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cash_advance">Cash Advance</SelectItem>
+                    <SelectItem value="bonus">Bonus</SelectItem>
+                    <SelectItem value="salary_adjustment">Salary Adjustment</SelectItem>
+                    <SelectItem value="deduction">Deduction</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-financial-status">Status</Label>
+                <Select
+                  value={editFinancialForm.status}
+                  onValueChange={(value) => setEditFinancialForm({ ...editFinancialForm, status: value })}
+                >
+                  <SelectTrigger id="edit-financial-status">
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="approved">Approved</SelectItem>
+                    <SelectItem value="paid">Paid</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-financial-amount">Amount</Label>
+                <Input
+                  id="edit-financial-amount"
+                  type="number"
+                  value={editFinancialForm.amount}
+                  onChange={(e) => setEditFinancialForm({ ...editFinancialForm, amount: Number(e.target.value) })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-financial-date">Date</Label>
+                <Input
+                  id="edit-financial-date"
+                  type="date"
+                  value={editFinancialForm.date}
+                  onChange={(e) => setEditFinancialForm({ ...editFinancialForm, date: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-financial-repayment">Repayment Schedule</Label>
+                <Input
+                  id="edit-financial-repayment"
+                  placeholder="e.g., 2 months"
+                  value={editFinancialForm.repaymentSchedule}
+                  onChange={(e) => setEditFinancialForm({ ...editFinancialForm, repaymentSchedule: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2 col-span-2">
+                <Label htmlFor="edit-financial-notes">Notes</Label>
+                <Textarea
+                  id="edit-financial-notes"
+                  value={editFinancialForm.notes}
+                  onChange={(e) => setEditFinancialForm({ ...editFinancialForm, notes: e.target.value })}
+                />
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No financial record selected.</p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => handleFinancialEditDialogChange(false)}>Cancel</Button>
+            <Button onClick={handleUpdateFinancialRecord} disabled={isSavingFinancialRecord || !editingFinancialRecord}>
+              {isSavingFinancialRecord ? "Saving..." : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isDeleteFinancialDialogOpen} onOpenChange={handleDeleteFinancialDialogChange}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Remove Financial Record</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {financialRecordToDelete ? `Remove ${financialRecordToDelete.staffName}'s ${financialRecordToDelete.type.replace(/_/g, " ")} record?` : "Remove this financial record?"}
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => handleDeleteFinancialDialogChange(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDeleteFinancialRecord} disabled={isDeletingFinancialRecord}>
+              {isDeletingFinancialRecord ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isAttendanceDialogOpen} onOpenChange={setIsAttendanceDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Update Attendance</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div>
+              <p className="text-xs text-muted-foreground">Staff Member</p>
+              <p className="font-medium">{attendanceForm.staffName}</p>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="attendance-hours">Hours Worked</Label>
+                <Input
+                  id="attendance-hours"
+                  type="number"
+                  value={attendanceForm.hoursWorked}
+                  onChange={(e) => setAttendanceForm({ ...attendanceForm, hoursWorked: Number(e.target.value) })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="attendance-overtime">Overtime Hours</Label>
+                <Input
+                  id="attendance-overtime"
+                  type="number"
+                  value={attendanceForm.overtimeHours}
+                  onChange={(e) => setAttendanceForm({ ...attendanceForm, overtimeHours: Number(e.target.value) })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="attendance-present">Days Present</Label>
+                <Input
+                  id="attendance-present"
+                  type="number"
+                  value={attendanceForm.daysPresent}
+                  onChange={(e) => setAttendanceForm({ ...attendanceForm, daysPresent: Number(e.target.value) })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="attendance-absent">Days Absent</Label>
+                <Input
+                  id="attendance-absent"
+                  type="number"
+                  value={attendanceForm.daysAbsent}
+                  onChange={(e) => setAttendanceForm({ ...attendanceForm, daysAbsent: Number(e.target.value) })}
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAttendanceDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleAttendanceSave}>Save Attendance</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

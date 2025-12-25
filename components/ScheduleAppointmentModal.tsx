@@ -7,6 +7,7 @@ import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { useAppointmentModal } from "./AdminLayout";
 import { toast } from "sonner";
+import { useDoctors } from "../hooks/useDoctors";
 
 interface ScheduleAppointmentModalProps {
   open: boolean;
@@ -31,12 +32,11 @@ export function ScheduleAppointmentModal({
     patientId: ""
   });
 
-  const { addAppointment, refreshAppointments } = useAppointmentModal();
+  const { addAppointment, refreshAppointments, refreshTrigger } = useAppointmentModal();
   const [patients, setPatients] = useState<Array<{ id: string; name: string }>>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [dateError, setDateError] = useState("");
-
-  const { refreshTrigger } = useAppointmentModal();
+  const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors();
 
   // Update formData when patientName or patientId props change
   useEffect(() => {
@@ -65,6 +65,12 @@ export function ScheduleAppointmentModal({
 
     fetchPatients();
   }, [refreshTrigger]);
+
+  useEffect(() => {
+    if (open) {
+      reloadDoctors();
+    }
+  }, [open, reloadDoctors]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -261,14 +267,23 @@ export function ScheduleAppointmentModal({
             <Select
               value={formData.doctor}
               onValueChange={(value) => setFormData(prev => ({ ...prev, doctor: value }))}
+              disabled={isLoadingDoctors}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Select doctor" />
+                <SelectValue placeholder={isLoadingDoctors ? "Loading doctors..." : doctors.length === 0 ? "No doctors available" : "Select doctor"} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="dr-johnson">Dr. Sarah Johnson</SelectItem>
-                <SelectItem value="dr-chen">Dr. Michael Chen</SelectItem>
-                <SelectItem value="dr-rodriguez">Dr. Emily Rodriguez</SelectItem>
+                {isLoadingDoctors ? (
+                  <div className="p-2 text-sm text-gray-500">Loading doctors...</div>
+                ) : doctors.length > 0 ? (
+                  doctors.map((doctor) => (
+                    <SelectItem key={doctor.id} value={doctor.name}>
+                      {doctor.name}
+                    </SelectItem>
+                  ))
+                ) : (
+                  <div className="p-2 text-sm text-gray-500">No doctors available</div>
+                )}
               </SelectContent>
             </Select>
           </div>

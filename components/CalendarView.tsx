@@ -8,6 +8,7 @@ import { useAppointmentModal } from "./AdminLayout";
 import { Appointment } from "../hooks/useAppointments";
 import { Badge } from "./ui/badge";
 import { EditAppointmentModal } from "./EditAppointmentModal";
+import { useDoctors } from "../hooks/useDoctors";
 
 type ViewMode = "month" | "week" | "day";
 
@@ -20,6 +21,7 @@ export function CalendarView() {
   const { openScheduleModal, openCreateModal, appointments, deleteAppointment, refreshPatients, refreshAppointments, refreshTrigger } = useAppointmentModal();
   const [editOpen, setEditOpen] = useState(false);
   const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
+  const { doctors, isLoadingDoctors } = useDoctors();
 
   // Fetch appointments when refresh trigger or view mode changes
   useEffect(() => {
@@ -172,13 +174,21 @@ export function CalendarView() {
 
               <Select value={selectedDoctor} onValueChange={setSelectedDoctor}>
                 <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder="Filter by doctor" />
+                  <SelectValue placeholder={isLoadingDoctors ? "Loading doctors..." : "Filter by doctor"} />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Doctors</SelectItem>
-                  <SelectItem value="Dr. Johnson">Dr. Johnson</SelectItem>
-                  <SelectItem value="Dr. Chen">Dr. Chen</SelectItem>
-                  <SelectItem value="Dr. Rodriguez">Dr. Rodriguez</SelectItem>
+                  {isLoadingDoctors ? (
+                    <div className="p-2 text-sm text-gray-500">Loading doctors...</div>
+                  ) : doctors.length > 0 ? (
+                    doctors.map((doctor) => (
+                      <SelectItem key={doctor.id} value={doctor.name}>
+                        {doctor.name}
+                      </SelectItem>
+                    ))
+                  ) : (
+                    <div className="p-2 text-sm text-gray-500">No doctors available</div>
+                  )}
                 </SelectContent>
               </Select>
             </div>

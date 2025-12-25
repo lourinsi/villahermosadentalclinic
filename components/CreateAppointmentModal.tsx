@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Calendar, Clock, User, Stethoscope } from "lucide-react";
 import { useAppointmentModal } from "./AdminLayout";
 import { toast } from "sonner";
+import { useDoctors } from "../hooks/useDoctors";
 
 interface CreateAppointmentModalProps {
   open: boolean;
@@ -48,6 +49,7 @@ export function CreateAppointmentModal({
   const [isLoading, setIsLoading] = useState(false);
 
   const { refreshTrigger } = useAppointmentModal();
+  const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors();
 
   useEffect(() => {
     const fetchPatients = async () => {
@@ -65,6 +67,12 @@ export function CreateAppointmentModal({
 
     fetchPatients();
   }, [refreshTrigger]);
+
+  useEffect(() => {
+    if (open) {
+      reloadDoctors();
+    }
+  }, [open, reloadDoctors]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -391,15 +399,23 @@ export function CreateAppointmentModal({
                 <Select
                   value={formData.doctor}
                   onValueChange={(value) => setFormData(prev => ({ ...prev, doctor: value }))}
+                  disabled={isLoadingDoctors}
                 >
                   <SelectTrigger id="doctor">
-                    <SelectValue placeholder="Select doctor" />
+                    <SelectValue placeholder={isLoadingDoctors ? "Loading doctors..." : doctors.length === 0 ? "No doctors available" : "Select doctor"} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="dr-johnson">Dr. Sarah Johnson</SelectItem>
-                    <SelectItem value="dr-chen">Dr. Michael Chen</SelectItem>
-                    <SelectItem value="dr-rodriguez">Dr. Emily Rodriguez</SelectItem>
-                    <SelectItem value="dr-williams">Dr. James Williams</SelectItem>
+                    {isLoadingDoctors ? (
+                      <div className="p-2 text-sm text-gray-500">Loading doctors...</div>
+                    ) : doctors.length > 0 ? (
+                      doctors.map((doctor) => (
+                        <SelectItem key={doctor.id} value={doctor.name}>
+                          {doctor.name}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <div className="p-2 text-sm text-gray-500">No doctors available</div>
+                    )}
                   </SelectContent>
                 </Select>
               </div>

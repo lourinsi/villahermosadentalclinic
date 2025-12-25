@@ -9,6 +9,7 @@ import { Clock, User, Stethoscope } from "lucide-react";
 import { useAppointmentModal } from "./AdminLayout";
 import { toast } from "sonner";
 import { Appointment } from "../hooks/useAppointments";
+import { useDoctors } from "../hooks/useDoctors";
 
 interface EditAppointmentModalProps {
   open: boolean;
@@ -21,6 +22,7 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
   const [form, setForm] = useState<Partial<Appointment>>({});
   const [patients, setPatients] = useState<Array<{ id: string; name: string }>>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors();
 
   useEffect(() => {
     if (appointment) {
@@ -42,6 +44,12 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
     };
     fetchPatients();
   }, []);
+
+  useEffect(() => {
+    if (open) {
+      reloadDoctors();
+    }
+  }, [open, reloadDoctors]);
 
   if (!appointment) return null;
 
@@ -134,14 +142,29 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
             </div>
             <div className="space-y-2">
               <Label>Doctor</Label>
-              <Select value={String(form.doctor || '')} onValueChange={(v) => setForm(prev => ({ ...prev, doctor: v }))}>
+              <Select
+                value={String(form.doctor || '')}
+                onValueChange={(v) => setForm(prev => ({ ...prev, doctor: v }))}
+                disabled={isLoadingDoctors}
+              >
                 <SelectTrigger>
-                  <SelectValue placeholder="Doctor" />
+                  <SelectValue placeholder={isLoadingDoctors ? "Loading doctors..." : doctors.length === 0 ? "No doctors available" : "Doctor"} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="dr-johnson">Dr. Sarah Johnson</SelectItem>
-                  <SelectItem value="dr-chen">Dr. Michael Chen</SelectItem>
-                  <SelectItem value="dr-rodriguez">Dr. Emily Rodriguez</SelectItem>
+                  {isLoadingDoctors ? (
+                    <div className="p-2 text-sm text-gray-500">Loading doctors...</div>
+                  ) : doctors.length > 0 ? (
+                    doctors.map((doctor) => (
+                      <SelectItem key={doctor.id} value={doctor.name}>
+                        {doctor.name}
+                      </SelectItem>
+                    ))
+                  ) : (
+                    <div className="p-2 text-sm text-gray-500">No doctors available</div>
+                  )}
+                  {!isLoadingDoctors && form.doctor && !doctors.some((doctor) => doctor.name === form.doctor) ? (
+                    <SelectItem value={String(form.doctor)}>{form.doctor}</SelectItem>
+                  ) : null}
                 </SelectContent>
               </Select>
             </div>
