@@ -636,7 +636,7 @@ export function StaffView() {
         </Card>
       </div>
 
-      <Tabs defaultValue="staff" className="space-y-6">
+      <Tabs defaultValue="staff" className="space-y-6" onValueChange={() => fetchAllStaffData()}>
         <TabsList>
           <TabsTrigger value="staff" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white">Staff Directory</TabsTrigger>
           <TabsTrigger value="financial" className="data-[state=active]:bg-violet-600 data-[state=active]:text-white">Financial Records</TabsTrigger>
@@ -716,7 +716,7 @@ export function StaffView() {
               {isLoading ? (
                 <div className="text-center py-8 text-muted-foreground">
                   <div className="inline-block">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-600 mx-auto mb-2"></div>
                     Loading staff...
                   </div>
                 </div>
@@ -930,7 +930,7 @@ export function StaffView() {
               {isLoading ? (
                 <div className="text-center py-8 text-muted-foreground">
                   <div className="inline-block">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-600 mx-auto mb-2"></div>
                     Loading financial records...
                   </div>
                 </div>
@@ -1047,7 +1047,7 @@ export function StaffView() {
               {isLoading ? (
                 <div className="text-center py-8 text-muted-foreground">
                   <div className="inline-block">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-600 mx-auto mb-2"></div>
                     Loading attendance data...
                   </div>
                 </div>

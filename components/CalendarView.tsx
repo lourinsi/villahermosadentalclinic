@@ -273,7 +273,7 @@ export function CalendarView() {
             {isLoadingView ? (
               <div className="text-center py-8">
                 <div className="inline-block">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-500 mx-auto mb-2"></div>
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-600 mx-auto mb-2"></div>
                   <p className="text-sm text-muted-foreground">Loading appointments...</p>
                 </div>
               </div>
