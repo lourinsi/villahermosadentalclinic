@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Users, Calendar, DollarSign, TrendingUp, Clock, CheckCircle } from "lucide-react";
@@ -61,7 +61,7 @@ const recentAppointments = [
 ];
 
 export function Dashboard() {
-  const { openCreateModal, openAddPatientModal, appointments } = useAppointmentModal();
+  const { openCreateModal, openAddPatientModal, appointments, refreshTrigger } = useAppointmentModal();
   const [viewMode, setViewMode] = useState<"day" | "week" | "month">("day");
   const [totalPatients, setTotalPatients] = useState(0);
   const [isLoadingView, setIsLoadingView] = useState(false);
@@ -82,7 +82,7 @@ export function Dashboard() {
       }
     };
     fetchPatientCount();
-  }, []);
+  }, [refreshTrigger]);
 
   // Show loading when view mode changes
   useEffect(() => {
@@ -91,8 +91,7 @@ export function Dashboard() {
     return () => clearTimeout(t);
   }, [viewMode]);
 
-  // Always use today's date - no navigation
-  const getFilteredAppointments = (): Appointment[] => {
+  const filteredAppointments = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -125,9 +124,7 @@ export function Dashboard() {
         return aptDate >= monthStart && aptDate <= monthEnd;
       });
     }
-  };
-
-  const filteredAppointments = getFilteredAppointments();
+  }, [appointments, viewMode]);
 
   // Build dynamic stats based on backend data
   const dynamicStats = [
@@ -314,7 +311,7 @@ export function Dashboard() {
               {isLoadingView ? (
                 <div className="text-center py-8">
                   <div className="inline-block">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-500 mx-auto mb-2"></div>
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-600 mx-auto mb-2"></div>
                     <p className="text-sm text-muted-foreground">Loading schedule...</p>
                   </div>
                 </div>

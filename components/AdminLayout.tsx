@@ -6,7 +6,8 @@ import { Button } from "./ui/button";
 import { ScheduleAppointmentModal } from "./ScheduleAppointmentModal";
 import { CreateAppointmentModal } from "./CreateAppointmentModal";
 import { AddPatientModal } from "./AddPatientModal";
-import { useAppointments, type Appointment } from "../hooks/useAppointments";
+import { AddTransactionModal } from "./AddTransactionModal"; // Import AddTransactionModal // Import AddStaffModal
+import { useAppointments, type Appointment, type AppointmentFilters } from "../hooks/useAppointments";
 import { 
   LayoutDashboard, 
   Users, 
@@ -17,10 +18,12 @@ import {
   Bell,
   Search,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Briefcase
 } from "lucide-react";
 import { Input } from "./ui/input";
 import { Avatar, AvatarImage, AvatarFallback } from "./ui/avatar";
+import { StaffView } from "./Staff";
 
 interface AdminLayoutProps {
   currentView: string;
@@ -32,14 +35,17 @@ interface AppointmentModalContext {
   openScheduleModal: (patientName?: string, patientId?: string | number) => void;
   openCreateModal: (selectedDate?: Date) => void;
   openAddPatientModal: () => void;
+  openAddStaffModal: () => void;
+  openAddTransactionModal: () => void; // New: function to open AddTransactionModal // New: function to open AddStaffModal
   refreshPatients: () => void;
-  refreshAppointments: () => void;
+  refreshAppointments: (filters?: AppointmentFilters) => void;
   refreshTrigger: number;
   appointments: Appointment[];
   addAppointment: (appointment: Omit<Appointment, "id" | "createdAt">) => Promise<Appointment>;
   updateAppointment: (id: string, updates: Partial<Appointment>) => Promise<Appointment>;
   deleteAppointment: (id: string) => Promise<void>;
   getUpcomingAppointments: (doctor?: string) => Appointment[];
+  refreshFinanceData: () => void; // New: function to trigger finance data refresh
 }
 
 const AppointmentModalContext = createContext<AppointmentModalContext | null>(null);
@@ -56,6 +62,7 @@ const menuItems = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "patients", label: "Patients", icon: Users },
   { id: "calendar", label: "Calendar", icon: Calendar },
+  { id: "staff", label: "Staff", icon: Briefcase },
   { id: "finance", label: "Finance", icon: DollarSign },
   { id: "settings", label: "Settings", icon: Settings },
 ];
@@ -121,11 +128,14 @@ export function AdminLayout({ currentView, onViewChange, children }: AdminLayout
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [addPatientModalOpen, setAddPatientModalOpen] = useState(false);
+  const [addStaffModalOpen, setAddStaffModalOpen] = useState(false);
+  const [addTransactionModalOpen, setAddTransactionModalOpen] = useState(false); // New state for AddTransactionModal // New state for AddStaffModal
   
   const [selectedPatient, setSelectedPatient] = useState<{ name?: string; id?: string | number }>({});
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [appointmentRefreshTrigger, setAppointmentRefreshTrigger] = useState(0);
+  const [appointmentFilters, setAppointmentFilters] = useState<AppointmentFilters>({});
   
   const { 
     appointments, 
@@ -133,7 +143,7 @@ export function AdminLayout({ currentView, onViewChange, children }: AdminLayout
     updateAppointment, 
     deleteAppointment, 
     getUpcomingAppointments 
-  } = useAppointments();
+  } = useAppointments(appointmentRefreshTrigger, appointmentFilters);
 
   const openScheduleModal = (patientName?: string, patientId?: string | number) => {
     setSelectedPatient({ name: patientName, id: patientId });
@@ -149,17 +159,32 @@ export function AdminLayout({ currentView, onViewChange, children }: AdminLayout
     setAddPatientModalOpen(true);
   };
 
+  const openAddStaffModal = () => { 
+    setAddStaffModalOpen(true);
+  };
+
+  const openAddTransactionModal = () => { // New function to open AddTransactionModal
+    setAddTransactionModalOpen(true);
+  };
+
   const refreshPatients = () => {
     setRefreshTrigger(prev => prev + 1);
   };
 
-  const refreshAppointments = () => {
+  const refreshAppointments = (filters?: AppointmentFilters) => {
+    if (filters) {
+      setAppointmentFilters(filters);
+    }
     setAppointmentRefreshTrigger(prev => prev + 1);
+  };
+
+  const refreshFinanceData = () => { // New function for finance data refresh
+    setRefreshTrigger(prev => prev + 1);
   };
 
   return (
     <SidebarProvider>
-      <AppointmentModalContext.Provider value={{ openScheduleModal, openCreateModal, openAddPatientModal, refreshPatients, refreshAppointments, refreshTrigger, appointments, addAppointment, updateAppointment, deleteAppointment, getUpcomingAppointments }}>
+      <AppointmentModalContext.Provider value={{ openScheduleModal, openCreateModal, openAddPatientModal, openAddStaffModal, openAddTransactionModal, refreshPatients, refreshAppointments, refreshTrigger, appointments, addAppointment, updateAppointment, deleteAppointment, getUpcomingAppointments, refreshFinanceData }}>
         <div className="flex h-screen w-full">
           <Sidebar className="border-r">
             <SidebarContentWrapper currentView={currentView} onViewChange={onViewChange} />
@@ -195,7 +220,7 @@ export function AdminLayout({ currentView, onViewChange, children }: AdminLayout
             </header>
             
             <main className="flex-1 overflow-auto bg-gray-50">
-              {children}
+              {currentView === "staff" ? <StaffView /> : children}
             </main>
           </div>
         </div>
@@ -215,6 +240,10 @@ export function AdminLayout({ currentView, onViewChange, children }: AdminLayout
         <AddPatientModal
           open={addPatientModalOpen}
           onOpenChange={setAddPatientModalOpen}
+        />
+        <AddTransactionModal // New AddTransactionModal
+          open={addTransactionModalOpen}
+          onOpenChange={setAddTransactionModalOpen}
         />
         </AppointmentModalContext.Provider>
     </SidebarProvider>
