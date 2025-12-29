@@ -15,16 +15,28 @@ export interface Appointment {
 
 const API_URL = "http://localhost:3001/api/appointments";
 
-export const useAppointments = (refreshTrigger?: number) => {
+export interface AppointmentFilters {
+  startDate?: string;
+  endDate?: string;
+  search?: string;
+}
+
+export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFilters) => {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Load appointments from backend on mount and when refreshTrigger changes
+  // Load appointments from backend on mount and when refreshTrigger or filters change
   useEffect(() => {
     const loadAppointments = async () => {
       try {
         setIsLoading(true);
-        const response = await fetch(API_URL);
+        const queryParams = new URLSearchParams();
+        if (filters?.startDate) queryParams.append("startDate", filters.startDate);
+        if (filters?.endDate) queryParams.append("endDate", filters.endDate);
+        if (filters?.search) queryParams.append("search", filters.search);
+
+        const url = queryParams.toString() ? `${API_URL}?${queryParams.toString()}` : API_URL;
+        const response = await fetch(url);
         const result = await response.json();
         if (result.success && result.data) {
           setAppointments(result.data);
@@ -39,7 +51,7 @@ export const useAppointments = (refreshTrigger?: number) => {
     };
 
     loadAppointments();
-  }, [refreshTrigger]);
+  }, [refreshTrigger, filters?.startDate, filters?.endDate, filters?.search]);
 
   const addAppointment = async (appointment: Omit<Appointment, "id" | "createdAt">) => {
     try {

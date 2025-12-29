@@ -5,10 +5,11 @@ import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { ChevronLeft, ChevronRight, Plus, Search } from "lucide-react";
 import { useAppointmentModal } from "./AdminLayout";
-import { Appointment } from "../hooks/useAppointments";
+import { Appointment, AppointmentFilters } from "../hooks/useAppointments";
 import { Badge } from "./ui/badge";
 import { EditAppointmentModal } from "./EditAppointmentModal";
 import { useDoctors } from "../hooks/useDoctors";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 
 type ViewMode = "month" | "week" | "day";
 
@@ -18,22 +19,47 @@ export function CalendarView() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedDoctor, setSelectedDoctor] = useState("all");
   const [isLoadingView, setIsLoadingView] = useState(false);
+  const [fetchedRange, setFetchedRange] = useState({ start: "", end: "" });
   const { openScheduleModal, openCreateModal, appointments, deleteAppointment, refreshPatients, refreshAppointments, refreshTrigger } = useAppointmentModal();
   const [editOpen, setEditOpen] = useState(false);
   const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [appointmentToDelete, setAppointmentToDelete] = useState<string | null>(null);
   const { doctors, isLoadingDoctors } = useDoctors();
 
-  // Fetch appointments when refresh trigger or view mode changes
+  // Fetch appointments only when needed
   useEffect(() => {
-    refreshAppointments();
-  }, [refreshTrigger, viewMode]);
+    const { start, end } = getViewRange(selectedDate);
+    const startStr = start.toISOString().split('T')[0];
+    const endStr = end.toISOString().split('T')[0];
+    
+    // Check if we need to fetch:
+    // 1. Search term is present (global search)
+    // 2. Month changed
+    // 3. Range crosses into a new month and we haven't fetched this range yet
+    const startMonth = startStr.substring(0, 7);
+    const endMonth = endStr.substring(0, 7);
+    const isNewMonthRange = startMonth !== fetchedRange.start.substring(0, 7) || endMonth !== fetchedRange.end.substring(0, 7);
+    
+    if (searchTerm !== "" || isNewMonthRange || refreshTrigger > 0) {
+      const filters: AppointmentFilters = {
+        startDate: startStr,
+        endDate: endStr,
+        search: searchTerm
+      };
+      
+      setIsLoadingView(true);
+      refreshAppointments(filters);
+      setFetchedRange({ start: startStr, end: endStr });
+      
+      // Auto-turn off loading after a delay (simulating network)
+      const timer = setTimeout(() => setIsLoadingView(false), 500);
+      return () => clearTimeout(timer);
+    }
+  }, [refreshTrigger, viewMode, selectedDate, searchTerm]);
 
-  // Show loading state when view mode changes
-  useEffect(() => {
-    setIsLoadingView(true);
-    const timer = setTimeout(() => setIsLoadingView(false), 300);
-    return () => clearTimeout(timer);
-  }, [viewMode]);
+  // Remove the old viewMode specific loading effect if it exists
+  // The logic is now integrated above with condition-based loading
 
   const formatDate = (date: Date): string => {
     const options: Intl.DateTimeFormatOptions = { 
@@ -102,17 +128,17 @@ export function CalendarView() {
 
   const { start: viewStart, end: viewEnd } = getViewRange(selectedDate);
 
-  const searchedAppointments = appointments.filter((appointment: Appointment) => {
-    const term = searchTerm.toLowerCase();
-    return (
-      appointment.patientName.toLowerCase().includes(term) ||
-      appointment.type.toLowerCase().includes(term) ||
-      appointment.doctor.toLowerCase().includes(term)
-    );
-  });
+  const filteredAppointments = appointments
+    .filter((appointment: Appointment) => {
+      const term = searchTerm.toLowerCase();
+      const matchesSearch = searchTerm === "" || 
+        appointment.patientName.toLowerCase().includes(term) ||
+        appointment.type.toLowerCase().includes(term) ||
+        appointment.doctor.toLowerCase().includes(term);
+      
+      // If searching, ignore other filters
+      if (searchTerm !== "") return matchesSearch;
 
-  const filteredAppointments = searchedAppointments
-    .filter((appointment: Appointment) => { 
       const matchesDoctor = selectedDoctor === "all" || appointment.doctor === selectedDoctor;
       const dateParts = appointment.date.split('-');
       const appointmentDate = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
@@ -239,7 +265,9 @@ export function CalendarView() {
                     ${isSelected ? 'bg-violet-600 text-white' : ''}
                     ${isCurrentMonth && !isSelected && !isToday ? 'hover:bg-gray-100' : ''}
                   `}
-                  onClick={() => setSelectedDate(date)}
+                  onClick={() => {
+                    setSelectedDate(date);
+                  }}
                 >
                   {date.getDate()}
                 </div>
@@ -307,7 +335,10 @@ export function CalendarView() {
                     <Button 
                       variant="secondary" 
                       size="sm"
-                      onClick={() => deleteAppointment(appointment.id)}
+                      onClick={() => {
+                        setAppointmentToDelete(appointment.id);
+                        setIsDeleteDialogOpen(true);
+                      }}
                     >
                       Delete
                     </Button>
@@ -328,6 +359,36 @@ export function CalendarView() {
         onOpenChange={setEditOpen}
         appointment={editingAppointment}
       />
+
+      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete Appointment</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground">
+              Are you sure you want to delete this appointment? This action cannot be undone.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={() => {
+                if (appointmentToDelete) {
+                  deleteAppointment(appointmentToDelete);
+                  setIsDeleteDialogOpen(false);
+                  setAppointmentToDelete(null);
+                }
+              }}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

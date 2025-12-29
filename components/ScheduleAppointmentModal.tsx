@@ -256,8 +256,12 @@ export function ScheduleAppointmentModal({
                 <SelectItem value="checkup">Checkup</SelectItem>
                 <SelectItem value="filling">Filling</SelectItem>
                 <SelectItem value="crown">Crown</SelectItem>
+                <SelectItem value="root-canal">Root Canal</SelectItem>
+                <SelectItem value="extraction">Extraction</SelectItem>
                 <SelectItem value="consultation">Consultation</SelectItem>
                 <SelectItem value="emergency">Emergency</SelectItem>
+                <SelectItem value="whitening">Teeth Whitening</SelectItem>
+                <SelectItem value="implant">Implant</SelectItem>
               </SelectContent>
             </Select>
           </div>

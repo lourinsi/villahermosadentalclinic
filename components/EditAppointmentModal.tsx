@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -20,8 +20,8 @@ interface EditAppointmentModalProps {
 export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAppointmentModalProps) {
   const { updateAppointment, deleteAppointment } = useAppointmentModal();
   const [form, setForm] = useState<Partial<Appointment>>({});
-  const [patients, setPatients] = useState<Array<{ id: string; name: string }>>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors();
 
   useEffect(() => {
@@ -29,21 +29,6 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
       setForm({ ...appointment });
     }
   }, [appointment]);
-
-  useEffect(() => {
-    const fetchPatients = async () => {
-      try {
-        const res = await fetch("http://localhost:3001/api/patients");
-        const json = await res.json();
-        if (json?.success && Array.isArray(json.data)) {
-          setPatients(json.data.map((p: any) => ({ id: String(p.id), name: `${p.firstName} ${p.lastName}` })));
-        }
-      } catch (err) {
-        console.error("Failed loading patients", err);
-      }
-    };
-    fetchPatients();
-  }, []);
 
   useEffect(() => {
     if (open) {
@@ -73,13 +58,18 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
     }
   };
 
-  const handleDelete = async () => {
+  const handleDelete = () => {
+    setIsDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = async () => {
     if (!appointment.id) return;
     setIsLoading(true);
     try {
       console.log("=== DELETING APPOINTMENT ===", appointment.id);
       deleteAppointment(appointment.id);
       toast.success("Appointment deleted");
+      setIsDeleteDialogOpen(false);
       onOpenChange(false);
     } catch (err) {
       console.error("Error deleting appointment:", err);
@@ -90,6 +80,7 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
   };
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
@@ -99,17 +90,11 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
         <div className="space-y-4">
           <div className="space-y-2">
             <Label>Patient</Label>
-            <Select value={String(form.patientId || '')} onValueChange={(v) => {
-              const found = patients.find(p => p.id === v);
-              setForm(prev => ({ ...prev, patientId: v, patientName: found ? found.name : prev?.patientName }));
-            }}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select patient" />
-              </SelectTrigger>
-              <SelectContent>
-                {patients.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <Input 
+              value={form.patientName || ''} 
+              readOnly 
+              className="bg-muted"
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -135,8 +120,12 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
                   <SelectItem value="checkup">Checkup</SelectItem>
                   <SelectItem value="filling">Filling</SelectItem>
                   <SelectItem value="crown">Crown</SelectItem>
+                  <SelectItem value="root-canal">Root Canal</SelectItem>
+                  <SelectItem value="extraction">Extraction</SelectItem>
                   <SelectItem value="consultation">Consultation</SelectItem>
                   <SelectItem value="emergency">Emergency</SelectItem>
+                  <SelectItem value="whitening">Teeth Whitening</SelectItem>
+                  <SelectItem value="implant">Implant</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -204,5 +193,27 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
         </div>
       </DialogContent>
     </Dialog>
+
+    <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete Appointment</DialogTitle>
+        </DialogHeader>
+        <div className="py-4">
+          <p className="text-sm text-muted-foreground">
+            Are you sure you want to delete this appointment? This action cannot be undone.
+          </p>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} disabled={isLoading}>
+            Cancel
+          </Button>
+          <Button variant="destructive" onClick={confirmDelete} disabled={isLoading}>
+            {isLoading ? "Deleting..." : "Delete"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }

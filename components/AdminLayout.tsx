@@ -7,7 +7,7 @@ import { ScheduleAppointmentModal } from "./ScheduleAppointmentModal";
 import { CreateAppointmentModal } from "./CreateAppointmentModal";
 import { AddPatientModal } from "./AddPatientModal";
 import { AddTransactionModal } from "./AddTransactionModal"; // Import AddTransactionModal // Import AddStaffModal
-import { useAppointments, type Appointment } from "../hooks/useAppointments";
+import { useAppointments, type Appointment, type AppointmentFilters } from "../hooks/useAppointments";
 import { 
   LayoutDashboard, 
   Users, 
@@ -38,7 +38,7 @@ interface AppointmentModalContext {
   openAddStaffModal: () => void;
   openAddTransactionModal: () => void; // New: function to open AddTransactionModal // New: function to open AddStaffModal
   refreshPatients: () => void;
-  refreshAppointments: () => void;
+  refreshAppointments: (filters?: AppointmentFilters) => void;
   refreshTrigger: number;
   appointments: Appointment[];
   addAppointment: (appointment: Omit<Appointment, "id" | "createdAt">) => Promise<Appointment>;
@@ -135,6 +135,7 @@ export function AdminLayout({ currentView, onViewChange, children }: AdminLayout
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [appointmentRefreshTrigger, setAppointmentRefreshTrigger] = useState(0);
+  const [appointmentFilters, setAppointmentFilters] = useState<AppointmentFilters>({});
   
   const { 
     appointments, 
@@ -142,7 +143,7 @@ export function AdminLayout({ currentView, onViewChange, children }: AdminLayout
     updateAppointment, 
     deleteAppointment, 
     getUpcomingAppointments 
-  } = useAppointments(appointmentRefreshTrigger);
+  } = useAppointments(appointmentRefreshTrigger, appointmentFilters);
 
   const openScheduleModal = (patientName?: string, patientId?: string | number) => {
     setSelectedPatient({ name: patientName, id: patientId });
@@ -170,7 +171,10 @@ export function AdminLayout({ currentView, onViewChange, children }: AdminLayout
     setRefreshTrigger(prev => prev + 1);
   };
 
-  const refreshAppointments = () => {
+  const refreshAppointments = (filters?: AppointmentFilters) => {
+    if (filters) {
+      setAppointmentFilters(filters);
+    }
     setAppointmentRefreshTrigger(prev => prev + 1);
   };
 

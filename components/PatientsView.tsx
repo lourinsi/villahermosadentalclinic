@@ -6,7 +6,7 @@ import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
 import { toast } from "sonner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "./ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Label } from "./ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
@@ -23,6 +23,8 @@ import {
   CheckCircle,
   AlertTriangle
 } from "lucide-react";
+import { EditAppointmentModal } from "./EditAppointmentModal";
+import { Appointment } from "../hooks/useAppointments";
 
 const mockPatients = [
   {
@@ -117,6 +119,11 @@ export function PatientsView() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalFiltered, setTotalFiltered] = useState(0);
+  const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isPatientDeleteDialogOpen, setIsPatientDeleteDialogOpen] = useState(false);
+  const [patientToDelete, setPatientToDelete] = useState<Patient | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const itemsPerPage = 10;
   const { openScheduleModal, openAddPatientModal, refreshPatients, refreshTrigger, appointments } = useAppointmentModal();
   
@@ -147,7 +154,24 @@ export function PatientsView() {
               return a.time.localeCompare(b.time);
             });
 
+          const completedAppointments = patientAppointments
+            .filter((apt: any) => apt.status === "completed")
+            .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
           const nextApt = upcomingAppointments.length > 0 ? upcomingAppointments[0].date : null;
+          const lastVisitFromApt = completedAppointments.length > 0 ? completedAppointments[0].date : null;
+          const effectiveLastVisit = lastVisitFromApt || patient.lastVisit || "";
+
+          // Automatic Inactive Status: more than a year since last visit
+          let status = patient.status || "active";
+          if (effectiveLastVisit) {
+            const lastVisitDate = new Date(effectiveLastVisit);
+            const oneYearAgo = new Date();
+            oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+            if (lastVisitDate < oneYearAgo) {
+              status = "inactive";
+            }
+          }
 
           return {
             id: patient.id,
@@ -157,9 +181,9 @@ export function PatientsView() {
             email: patient.email,
             phone: patient.phone,
             dateOfBirth: patient.dateOfBirth,
-            lastVisit: patient.lastVisit || "",
+            lastVisit: effectiveLastVisit,
             nextAppointment: nextApt,
-            status: patient.status || "active",
+            status: status,
             insurance: patient.insurance,
             balance: 0,
           };
@@ -196,6 +220,36 @@ export function PatientsView() {
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, statusFilter]);
+
+  const handleConfirmDeletePatient = async () => {
+    if (!patientToDelete?.id) {
+      toast.error("Missing patient id");
+      return;
+    }
+
+    setIsDeleting(true);
+    try {
+      console.log("[DELETE PATIENT] Attempting to delete patient:", patientToDelete.id);
+      const res = await fetch(`http://localhost:3001/api/patients/${patientToDelete.id}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        toast.success("Patient deleted successfully");
+        setIsPatientDeleteDialogOpen(false);
+        setPatientToDelete(null);
+        refreshPatients();
+        setSelectedPatient(null);
+      } else {
+        const json = await res.json();
+        toast.error(json?.message || "Failed to delete patient");
+      }
+    } catch (err) {
+      console.error("[DELETE PATIENT] Error:", err);
+      toast.error("Error deleting patient");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const getStatusBadge = (status: string | undefined) => {
     switch (status) {
@@ -339,13 +393,24 @@ export function PatientsView() {
                               View
                             </Button>
                           </DialogTrigger>
-                          <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
-                            <DialogHeader>
-                              <DialogTitle>Patient Details - {patient.name}</DialogTitle>
-                            </DialogHeader>
-                            <PatientDetails patient={patient} onClose={() => setSelectedPatient(null)} />
-                          </DialogContent>
-                        </Dialog>
+                            <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+                              <DialogHeader>
+                                <DialogTitle>Patient Details - {patient.name}</DialogTitle>
+                              </DialogHeader>
+                              <PatientDetails 
+                                patient={patient} 
+                                onClose={() => setSelectedPatient(null)} 
+                                onEditAppointment={(apt) => {
+                                  setEditingAppointment(apt);
+                                  setIsEditModalOpen(true);
+                                }}
+                                onDeletePatient={(p) => {
+                                  setPatientToDelete(p);
+                                  setIsPatientDeleteDialogOpen(true);
+                                }}
+                              />
+                            </DialogContent>
+                          </Dialog>
                         
                         <Button 
                           variant="dark" 
@@ -395,11 +460,48 @@ export function PatientsView() {
           )}
         </CardContent>
       </Card>
+
+      <EditAppointmentModal 
+        open={isEditModalOpen} 
+        onOpenChange={setIsEditModalOpen} 
+        appointment={editingAppointment} 
+      />
+
+      <Dialog open={isPatientDeleteDialogOpen} onOpenChange={setIsPatientDeleteDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete Patient</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground">
+              {patientToDelete ? `Are you sure you want to delete ${patientToDelete.name}? This action cannot be undone.` : "Are you sure you want to delete this patient? This action cannot be undone."}
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsPatientDeleteDialogOpen(false)} disabled={isDeleting}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleConfirmDeletePatient} disabled={isDeleting}>
+              {isDeleting ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-function PatientDetails({ patient, onClose }: { patient: Patient; onClose: () => void }) {
+function PatientDetails({ 
+  patient, 
+  onClose, 
+  onEditAppointment,
+  onDeletePatient
+}: { 
+  patient: Patient; 
+  onClose: () => void;
+  onEditAppointment: (apt: Appointment) => void;
+  onDeletePatient: (p: Patient) => void;
+}) {
   const [formData, setFormData] = useState({
     firstName: patient.firstName || patient.name?.split(' ')[0] || '',
     lastName: patient.lastName || patient.name?.split(' ').slice(1).join(' ') || '',
@@ -531,37 +633,7 @@ function PatientDetails({ patient, onClose }: { patient: Patient; onClose: () =>
   };
 
   const handleDeletePatient = () => {
-    (async () => {
-      if (!patient.id) {
-        toast.error("Missing patient id");
-        return;
-      }
-
-      setIsSaving(true);
-      try {
-        console.log("[DELETE PATIENT] Attempting to delete patient:", patient.id);
-        const res = await fetch(`http://localhost:3001/api/patients/${patient.id}`, {
-          method: "DELETE",
-        });
-        console.log("[DELETE PATIENT] Response status:", res.status);
-        const json = await res.json();
-        console.log("[DELETE PATIENT] Response body:", json);
-        if (res.ok && json?.success) {
-          toast.success("Patient deleted successfully");
-          refreshPatients();
-          onClose();
-        } else if (res.status === 404) {
-          toast.error("Patient not found. Server may need restart after rebuild.");
-        } else {
-          toast.error(json?.message || "Failed to delete patient");
-        }
-      } catch (err) {
-        console.error("[DELETE PATIENT] Error:", err);
-        toast.error("Error deleting patient");
-      } finally {
-        setIsSaving(false);
-      }
-    })();
+    onDeletePatient(patient);
   };
 
   return (
@@ -736,10 +808,21 @@ function PatientDetails({ patient, onClose }: { patient: Patient; onClose: () =>
                           <div className="text-muted-foreground">{appointment.notes || 'No notes'}</div>
                         </div>
                       </div>
-                      <div className="text-sm">
+                      <div className="text-sm flex items-center space-x-4">
                         <span className={new Date(`${appointment.date}T${appointment.time}`) < new Date() ? 'text-gray-500' : 'text-blue-600'}>
                           {new Date(`${appointment.date}T${appointment.time}`) < new Date() ? 'Completed' : 'Scheduled'}
                         </span>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="h-8 w-8 p-0"
+                          onClick={() => {
+                            onEditAppointment(appointment);
+                          }}
+                        >
+                          <Eye className="h-4 w-4" />
+                          <span className="sr-only">View Appointment</span>
+                        </Button>
                       </div>
                     </div>
                   ))}
