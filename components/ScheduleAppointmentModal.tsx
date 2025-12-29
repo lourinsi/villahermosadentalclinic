@@ -124,7 +124,7 @@ export function ScheduleAppointmentModal({
         type: formData.type,
         doctor: formData.doctor,
         notes: formData.notes,
-        status: "scheduled"
+        status: "scheduled" as const
       };
       console.log("Appointment data being sent:", appointmentData);
       
@@ -144,7 +144,7 @@ export function ScheduleAppointmentModal({
         doctor: "",
         notes: "",
         patientName: patientName || "",
-        patientId: patientId || ""
+        patientId: String(patientId || "")
       });
     } catch (err) {
       console.error("Error scheduling appointment:", err);
