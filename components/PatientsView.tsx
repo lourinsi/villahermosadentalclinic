@@ -142,15 +142,17 @@ export function PatientsView() {
         const data = result.data || [];
         const meta = result.meta || { total: 0, page, limit: itemsPerPage, totalPages: 1 };
 
+        const todayStr = new Date().toISOString().split('T')[0];
+
         const transformedPatients = data.map((patient: any) => {
           const patientAppointments = appointments.filter(
             (apt: any) => apt.patientId === patient.id || apt.patientName === `${patient.firstName} ${patient.lastName}`
           );
 
           const upcomingAppointments = patientAppointments
-            .filter((apt: any) => new Date(apt.date) >= new Date())
+            .filter((apt: any) => apt.date >= todayStr && apt.status !== "completed" && apt.status !== "cancelled")
             .sort((a: any, b: any) => {
-              if (a.date !== b.date) return new Date(a.date).getTime() - new Date(b.date).getTime();
+              if (a.date !== b.date) return a.date.localeCompare(b.date);
               return a.time.localeCompare(b.time);
             });
 

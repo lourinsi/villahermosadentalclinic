@@ -14,6 +14,7 @@ interface CreateAppointmentModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   selectedDate?: Date;
+  selectedTime?: string;
 }
 
 interface AppointmentFormData {
@@ -21,6 +22,7 @@ interface AppointmentFormData {
   patientId: string;
   date: string;
   time: string;
+  duration: number;
   type: string;
   doctor: string;
   notes: string;
@@ -38,6 +40,7 @@ export function CreateAppointmentModal({
     patientId: "",
     date: selectedDate ? selectedDate.toISOString().split('T')[0] : "",
     time: "",
+    duration: 60,
     type: "",
     doctor: "",
     notes: "",
@@ -144,6 +147,7 @@ export function CreateAppointmentModal({
             patientId: newId,
             date: formData.date,
             time: formData.time,
+            duration: formData.duration,
             type: formData.type,
             doctor: formData.doctor,
             notes: formData.notes,
@@ -161,6 +165,7 @@ export function CreateAppointmentModal({
             patientId: "",
             date: selectedDate ? selectedDate.toISOString().split('T')[0] : "",
             time: "",
+            duration: 60,
             type: "",
             doctor: "",
             notes: "",
@@ -191,6 +196,7 @@ export function CreateAppointmentModal({
         patientId: formData.patientId || formData.patientName,
         date: formData.date,
         time: formData.time,
+        duration: formData.duration,
         type: formData.type,
         doctor: formData.doctor,
         notes: formData.notes,
@@ -209,6 +215,7 @@ export function CreateAppointmentModal({
         patientId: "",
         date: selectedDate ? selectedDate.toISOString().split('T')[0] : "",
         time: "",
+        duration: 60,
         type: "",
         doctor: "",
         notes: "",
@@ -393,7 +400,27 @@ export function CreateAppointmentModal({
                   </SelectContent>
                 </Select>
               </div>
-              
+
+              <div className="space-y-2">
+                <Label htmlFor="duration">Duration (minutes)</Label>
+                <Select
+                  value={String(formData.duration)}
+                  onValueChange={(value) => setFormData(prev => ({ ...prev, duration: parseInt(value) }))}
+                >
+                  <SelectTrigger id="duration">
+                    <SelectValue placeholder="Select duration" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="15">15 mins</SelectItem>
+                    <SelectItem value="30">30 mins</SelectItem>
+                    <SelectItem value="45">45 mins</SelectItem>
+                    <SelectItem value="60">1 hour</SelectItem>
+                    <SelectItem value="90">1.5 hours</SelectItem>
+                    <SelectItem value="120">2 hours</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="doctor">Doctor/Provider</Label>
                 <Select
@@ -419,24 +446,24 @@ export function CreateAppointmentModal({
                   </SelectContent>
                 </Select>
               </div>
-            </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="status">Status</Label>
-              <Select
-                value={formData.status}
-                onValueChange={(value) => setFormData(prev => ({ ...prev, status: value }))}
-              >
-                <SelectTrigger id="status">
-                  <SelectValue placeholder="Select status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="scheduled">Scheduled</SelectItem>
-                  <SelectItem value="confirmed">Confirmed</SelectItem>
-                  <SelectItem value="pending">Pending</SelectItem>
-                  <SelectItem value="tentative">Tentative</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="space-y-2">
+                <Label htmlFor="status">Status</Label>
+                <Select
+                  value={formData.status}
+                  onValueChange={(value) => setFormData(prev => ({ ...prev, status: value }))}
+                >
+                  <SelectTrigger id="status">
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="scheduled">Scheduled</SelectItem>
+                    <SelectItem value="confirmed">Confirmed</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="tentative">Tentative</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
 

@@ -1,17 +1,49 @@
-import { useState, useEffect } from "react";
+"use client";
+
+import { useState, useEffect, useMemo } from "react";
+import { DateRange } from "react-day-picker";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { ChevronLeft, ChevronRight, Plus, Search } from "lucide-react";
+import { 
+  ChevronLeft, 
+  ChevronRight, 
+  Plus, 
+  Search, 
+  Calendar as CalendarIcon, 
+  CalendarRange, 
+  Edit, 
+  Trash2, 
+  Clock,
+  X,
+  Users as UsersIcon
+} from "lucide-react";
 import { useAppointmentModal } from "./AdminLayout";
 import { Appointment, AppointmentFilters } from "../hooks/useAppointments";
 import { Badge } from "./ui/badge";
 import { EditAppointmentModal } from "./EditAppointmentModal";
 import { useDoctors } from "../hooks/useDoctors";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "./ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { Calendar } from "./ui/calendar";
+import { Label } from "./ui/label";
 
-type ViewMode = "month" | "week" | "day";
+type ViewMode = "month" | "week" | "day" | "custom";
+
+const appointmentColors: Record<string, { bg: string; text: string; border: string }> = {
+  "Cleaning": { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" },
+  "Checkup": { bg: "bg-green-50", text: "text-green-700", border: "border-green-200" },
+  "Filling": { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200" },
+  "Root Canal": { bg: "bg-purple-50", text: "text-purple-700", border: "border-purple-200" },
+  "Extraction": { bg: "bg-red-50", text: "text-red-700", border: "border-red-200" },
+  "Whitening": { bg: "bg-indigo-50", text: "text-indigo-700", border: "border-indigo-200" },
+  "Crown": { bg: "bg-orange-50", text: "text-orange-700", border: "border-orange-200" },
+  "Consultation": { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200" },
+  "Emergency": { bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200" },
+  "Implant": { bg: "bg-cyan-50", text: "text-cyan-700", border: "border-cyan-200" },
+  "Routine Cleaning": { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" },
+};
 
 export function CalendarView() {
   const [viewMode, setViewMode] = useState<ViewMode>("month");
@@ -19,83 +51,23 @@ export function CalendarView() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedDoctor, setSelectedDoctor] = useState("all");
   const [isLoadingView, setIsLoadingView] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
   const [fetchedRange, setFetchedRange] = useState({ start: "", end: "" });
-  const { openScheduleModal, openCreateModal, appointments, deleteAppointment, refreshPatients, refreshAppointments, refreshTrigger } = useAppointmentModal();
+  
+  const { 
+    openCreateModal, 
+    appointments, 
+    deleteAppointment, 
+    refreshAppointments, 
+    refreshTrigger 
+  } = useAppointmentModal();
+  
   const [editOpen, setEditOpen] = useState(false);
   const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [appointmentToDelete, setAppointmentToDelete] = useState<string | null>(null);
   const { doctors, isLoadingDoctors } = useDoctors();
-
-  // Fetch appointments only when needed
-  useEffect(() => {
-    const { start, end } = getViewRange(selectedDate);
-    const startStr = start.toISOString().split('T')[0];
-    const endStr = end.toISOString().split('T')[0];
-    
-    // Check if we need to fetch:
-    // 1. Search term is present (global search)
-    // 2. Month changed
-    // 3. Range crosses into a new month and we haven't fetched this range yet
-    const startMonth = startStr.substring(0, 7);
-    const endMonth = endStr.substring(0, 7);
-    const isNewMonthRange = startMonth !== fetchedRange.start.substring(0, 7) || endMonth !== fetchedRange.end.substring(0, 7);
-    
-    if (searchTerm !== "" || isNewMonthRange || refreshTrigger > 0) {
-      const filters: AppointmentFilters = {
-        startDate: startStr,
-        endDate: endStr,
-        search: searchTerm
-      };
-      
-      setIsLoadingView(true);
-      refreshAppointments(filters);
-      setFetchedRange({ start: startStr, end: endStr });
-      
-      // Auto-turn off loading after a delay (simulating network)
-      const timer = setTimeout(() => setIsLoadingView(false), 500);
-      return () => clearTimeout(timer);
-    }
-  }, [refreshTrigger, viewMode, selectedDate, searchTerm]);
-
-  // Remove the old viewMode specific loading effect if it exists
-  // The logic is now integrated above with condition-based loading
-
-  const formatDate = (date: Date): string => {
-    const options: Intl.DateTimeFormatOptions = { 
-      weekday: 'long', 
-      year: 'numeric', 
-      month: 'long', 
-      day: 'numeric' 
-    };
-    return date.toLocaleDateString('en-US', options);
-  };
-
-  const navigateDate = (direction: 'prev' | 'next') => {
-    const newDate = new Date(selectedDate);
-    if (viewMode === 'day') {
-      newDate.setDate(selectedDate.getDate() + (direction === 'next' ? 1 : -1));
-    } else if (viewMode === 'week') {
-      newDate.setDate(selectedDate.getDate() + (direction === 'next' ? 7 : -7));
-    } else {
-      newDate.setMonth(selectedDate.getMonth() + (direction === 'next' ? 1 : -1));
-    }
-    setSelectedDate(newDate);
-  };
-
-  const getViewTitle = (): string => {
-    if (viewMode === 'day') {
-      return formatDate(selectedDate);
-    } else if (viewMode === 'week') {
-      const weekStart = new Date(selectedDate);
-      weekStart.setDate(selectedDate.getDate() - selectedDate.getDay());
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekStart.getDate() + 6);
-      return `${weekStart.toLocaleDateString()} - ${weekEnd.toLocaleDateString()}`;
-    } else {
-      return selectedDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long' });
-    }
-  };
 
   const getViewRange = (date: Date) => {
     const start = new Date(date);
@@ -104,7 +76,6 @@ export function CalendarView() {
     end.setHours(23, 59, 59, 999);
 
     if (viewMode === 'day') {
-      // start/end already set to the selected day
       return { start, end };
     }
 
@@ -118,237 +89,685 @@ export function CalendarView() {
       return { start: weekStart, end: weekEnd };
     }
 
-    // month
-    const monthStart = new Date(date.getFullYear(), date.getMonth(), 1);
-    monthStart.setHours(0, 0, 0, 0);
-    const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 0);
-    monthEnd.setHours(23, 59, 59, 999);
-    return { start: monthStart, end: monthEnd };
+    if (viewMode === 'month') {
+      const monthStart = new Date(date.getFullYear(), date.getMonth(), 1);
+      monthStart.setHours(0, 0, 0, 0);
+      const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+      monthEnd.setHours(23, 59, 59, 999);
+      return { start: monthStart, end: monthEnd };
+    }
+
+    if (viewMode === 'custom' && dateRange?.from && dateRange?.to) {
+      const start = new Date(dateRange.from);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(dateRange.to);
+      end.setHours(23, 59, 59, 999);
+      return { start, end };
+    }
+
+    return { start, end };
   };
 
-  const { start: viewStart, end: viewEnd } = getViewRange(selectedDate);
-
-  const filteredAppointments = appointments
-    .filter((appointment: Appointment) => {
-      const term = searchTerm.toLowerCase();
-      const matchesSearch = searchTerm === "" || 
-        appointment.patientName.toLowerCase().includes(term) ||
-        appointment.type.toLowerCase().includes(term) ||
-        appointment.doctor.toLowerCase().includes(term);
+  useEffect(() => {
+    const { start, end } = getViewRange(selectedDate);
+    
+    // For normal navigation (no search), we fetch by month
+    if (searchTerm === "") {
+      const monthStart = new Date(start.getFullYear(), start.getMonth(), 1);
+      const monthEnd = new Date(end.getFullYear(), end.getMonth() + 1, 0);
+      monthEnd.setHours(23, 59, 59, 999);
       
-      // If searching, ignore other filters
-      if (searchTerm !== "") return matchesSearch;
+      const fetchStartStr = monthStart.toISOString().split('T')[0];
+      const fetchEndStr = monthEnd.toISOString().split('T')[0];
+      
+      const isNewMonthRange = fetchStartStr !== fetchedRange.start || fetchEndStr !== fetchedRange.end;
+      
+      if (isNewMonthRange || refreshTrigger > 0) {
+        setIsLoadingView(true);
+        refreshAppointments({
+          startDate: fetchStartStr,
+          endDate: fetchEndStr,
+          search: ""
+        });
+        setFetchedRange({ start: fetchStartStr, end: fetchEndStr });
+        const timer = setTimeout(() => setIsLoadingView(false), 500);
+        return () => clearTimeout(timer);
+      }
+    } else {
+      // Global Search: Ignore date filters
+      setIsLoadingView(true);
+      refreshAppointments({
+        search: searchTerm
+      });
+      // Clear fetched range so we re-fetch when coming back from search
+      setFetchedRange({ start: "", end: "" });
+      const timer = setTimeout(() => setIsLoadingView(false), 500);
+      return () => clearTimeout(timer);
+    }
+  }, [refreshTrigger, viewMode, selectedDate, searchTerm, dateRange]);
 
-      const matchesDoctor = selectedDoctor === "all" || appointment.doctor === selectedDoctor;
-      const dateParts = appointment.date.split('-');
-      const appointmentDate = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
-      const inRange = appointmentDate >= viewStart && appointmentDate <= viewEnd;
-      return matchesDoctor && inRange;
-    })
-    .sort((a, b) => {
-      if (a.date !== b.date) return new Date(a.date).getTime() - new Date(b.date).getTime();
-      return a.time.localeCompare(b.time);
+  const generateTimeSlots = () => {
+    const slots = [];
+    for (let hour = 8; hour < 18; hour++) {
+      slots.push(`${hour.toString().padStart(2, '0')}:00`);
+      slots.push(`${hour.toString().padStart(2, '0')}:30`);
+    }
+    return slots;
+  };
+
+  const timeSlots = generateTimeSlots();
+
+  const formatTime = (time: string) => {
+    const [hours, minutes] = time.split(':');
+    const hour = parseInt(hours);
+    const period = hour >= 12 ? 'PM' : 'AM';
+    const displayHour = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
+    return `${displayHour}:${minutes} ${period}`;
+  };
+
+  const formatDateLabel = (date: Date) => {
+    if (viewMode === "day") {
+      return date.toLocaleDateString('en-US', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      });
+    } else if (viewMode === "week") {
+      const weekStart = new Date(date);
+      weekStart.setDate(date.getDate() - date.getDay());
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6);
+      return `${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+    } else if (viewMode === "month") {
+      return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    } else {
+      if (dateRange?.from && dateRange?.to) {
+        return `${dateRange.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${dateRange.to.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+      }
+      return "Select Range";
+    }
+  };
+
+  const navigateDate = (direction: 'prev' | 'next') => {
+    setSearchTerm("");
+    const newDate = new Date(selectedDate);
+    if (viewMode === 'day') {
+      newDate.setDate(selectedDate.getDate() + (direction === 'next' ? 1 : -1));
+    } else if (viewMode === 'week') {
+      newDate.setDate(selectedDate.getDate() + (direction === 'next' ? 7 : -7));
+    } else if (viewMode === 'month') {
+      newDate.setMonth(selectedDate.getMonth() + (direction === 'next' ? 1 : -1));
+    } else if (viewMode === 'custom' && dateRange?.from && dateRange?.to) {
+      const diffTime = Math.abs(dateRange.to.getTime() - dateRange.from.getTime());
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+      const shift = direction === 'next' ? diffDays : -diffDays;
+      
+      const newFrom = new Date(dateRange.from);
+      newFrom.setDate(newFrom.getDate() + shift);
+      const newTo = new Date(dateRange.to);
+      newTo.setDate(newTo.getDate() + shift);
+      
+      setDateRange({ from: newFrom, to: newTo });
+      setSelectedDate(newFrom); // Keep selectedDate in sync with the start of the range
+      return;
+    }
+    setSelectedDate(newDate);
+  };
+
+  const goToToday = () => {
+    setSelectedDate(new Date());
+    setViewMode("day");
+  };
+
+  const getWeekDays = (date: Date) => {
+    const weekStart = new Date(date);
+    weekStart.setDate(date.getDate() - date.getDay());
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const day = new Date(weekStart);
+      day.setDate(weekStart.getDate() + i);
+      days.push(day);
+    }
+    return days;
+  };
+
+  const getAppointmentsForDate = (date: Date) => {
+    const dateStr = date.toISOString().split('T')[0];
+    return appointments.filter(apt => {
+      const matchesDate = apt.date === dateStr;
+      const matchesDoctor = selectedDoctor === "all" || apt.doctor === selectedDoctor;
+      const matchesSearch = searchTerm === "" || 
+        apt.patientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        apt.type.toLowerCase().includes(searchTerm.toLowerCase());
+      return matchesDate && matchesDoctor && matchesSearch;
     });
+  };
+
+  const getAppointmentsAtTime = (time: string, date: Date) => {
+    const appointmentsOnDate = getAppointmentsForDate(date);
+    return appointmentsOnDate.filter(apt => apt.time === time);
+  };
+
+  const getColorForType = (type: string) => {
+    return appointmentColors[type] || appointmentColors["Checkup"];
+  };
+
+  const calculateAppointmentStyle = (duration: number = 60) => {
+    const slotHeight = 60; // pixels per 30-minute slot
+    const slotsOccupied = duration / 30;
+    return {
+      height: `${slotHeight * slotsOccupied - 4}px`
+    };
+  };
+
+  const renderDayView = () => {
+    const renderedSlots = new Set<string>();
+
+    return (
+      <div className="space-y-0">
+        {timeSlots.map((timeSlot) => {
+          if (renderedSlots.has(timeSlot)) {
+            return null;
+          }
+
+          const appointment = getAppointmentsAtTime(timeSlot, selectedDate)[0];
+          
+          if (appointment) {
+            const duration = appointment.duration || 60;
+            const slotsOccupied = duration / 30;
+            for (let i = 0; i < slotsOccupied; i++) {
+              const slotIndex = timeSlots.indexOf(timeSlot) + i;
+              if (slotIndex < timeSlots.length) {
+                renderedSlots.add(timeSlots[slotIndex]);
+              }
+            }
+          }
+
+          const colors = appointment ? getColorForType(appointment.type) : null;
+          
+          return (
+            <div key={timeSlot} className="flex items-start min-h-[60px] border-b border-gray-100">
+              <div className="w-28 pl-4 pt-2 text-sm text-muted-foreground font-medium">
+                {formatTime(timeSlot)}
+              </div>
+              <div className="flex-1 ml-6 py-1 pr-4">
+                {appointment ? (
+                  <>
+                    <div 
+                      className={`${colors?.bg} ${colors?.text} ${colors?.border} border-l-4 rounded-lg p-4 shadow-sm hover:shadow-md transition-all cursor-pointer`}
+                      style={calculateAppointmentStyle(appointment.duration)}
+                      onClick={() => { setEditingAppointment(appointment); setEditOpen(true); }}
+                    >
+                      <div className="flex items-start justify-between h-full">
+                        <div className="flex-1">
+                          <div className="font-semibold text-sm mb-1">{appointment.patientName}</div>
+                          <div className="text-xs opacity-90">
+                            {appointment.type} • {appointment.duration || 60}min
+                          </div>
+                          <div className="text-xs opacity-80 mt-1">
+                            {appointment.doctor}
+                          </div>
+                        </div>
+                        <div className="flex space-x-1">
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="h-6 w-6 p-0 hover:bg-white/20"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingAppointment(appointment);
+                              setEditOpen(true);
+                            }}
+                          >
+                            <Edit className="h-3 w-3" />
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="h-6 w-6 p-0 hover:bg-white/20"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setAppointmentToDelete(appointment.id);
+                              setIsDeleteDialogOpen(true);
+                            }}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex justify-center py-1">
+                        <Button variant="ghost" size="icon" className="h-7 w-7 rounded-full" onClick={() => openCreateModal(selectedDate)}>
+                            <Plus className="h-4 w-4" />
+                        </Button>
+                    </div>
+                  </>
+                ) : (
+                  <div 
+                    className="h-[56px] flex items-center justify-center text-muted-foreground text-sm hover:bg-gray-50 rounded transition-colors cursor-pointer"
+                    onClick={() => openCreateModal(selectedDate)}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderWeekView = () => {
+    const weekDays = getWeekDays(selectedDate);
+    
+    return (
+      <div className="overflow-x-auto">
+        <div className="min-w-[800px]">
+          <div className="flex border-b-2 border-gray-200 sticky top-0 bg-white z-10">
+            <div className="w-20 flex-shrink-0"></div>
+            {weekDays.map((day, idx) => (
+              <div key={idx} className="flex-1 text-center py-3 border-l border-gray-100">
+                <div className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">
+                  {day.toLocaleDateString('en-US', { weekday: 'short' })}
+                </div>
+                <div className={`text-lg font-bold mt-1 ${
+                  day.toDateString() === new Date().toDateString() 
+                    ? 'text-violet-600' 
+                    : 'text-gray-900'
+                }`}>
+                  {day.getDate()}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="relative">
+            {timeSlots.map((timeSlot) => (
+              <div key={timeSlot} className="flex min-h-[60px] border-b border-gray-50">
+                <div className="w-20 flex-shrink-0 pt-2 pr-4 text-right text-xs font-medium text-muted-foreground">
+                  {formatTime(timeSlot)}
+                </div>
+                {weekDays.map((day, idx) => {
+                  const appointment = getAppointmentsAtTime(timeSlot, day)[0];
+                  const colors = appointment ? getColorForType(appointment.type) : null;
+                  
+                  return (
+                    <div 
+                      key={idx} 
+                      className="flex-1 border-l border-gray-100 p-1 hover:bg-gray-50/50 transition-colors cursor-pointer"
+                      onClick={() => !appointment && openCreateModal(day)}
+                    >
+                      {appointment && (
+                        <div 
+                          className={`${colors?.bg} ${colors?.text} ${colors?.border} border-l-2 rounded px-2 py-1 text-xs cursor-pointer hover:shadow-md transition-all h-full`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingAppointment(appointment);
+                            setEditOpen(true);
+                          }}
+                        >
+                          <div className="font-bold truncate">{appointment.patientName}</div>
+                          <div className="opacity-90 truncate text-[10px]">{appointment.type}</div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderMonthView = () => {
+    const startOfMonth = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
+    const endOfMonth = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0);
+    const startDay = startOfMonth.getDay();
+    const daysInMonth = endOfMonth.getDate();
+    
+    const prevMonthEnd = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 0).getDate();
+    
+    const days = [];
+    // Previous month days
+    for (let i = startDay - 1; i >= 0; i--) {
+      days.push({ day: prevMonthEnd - i, currentMonth: false, date: new Date(selectedDate.getFullYear(), selectedDate.getMonth() - 1, prevMonthEnd - i) });
+    }
+    // Current month days
+    for (let i = 1; i <= daysInMonth; i++) {
+      days.push({ day: i, currentMonth: true, date: new Date(selectedDate.getFullYear(), selectedDate.getMonth(), i) });
+    }
+    // Next month days
+    const remainingSlots = 42 - days.length;
+    for (let i = 1; i <= remainingSlots; i++) {
+      days.push({ day: i, currentMonth: false, date: new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, i) });
+    }
+
+    return (
+      <div className="grid grid-cols-7 border-t border-l border-gray-200">
+        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+          <div key={day} className="p-3 text-center text-xs font-bold text-gray-500 bg-gray-50 border-r border-b border-gray-200 uppercase tracking-wider">
+            {day}
+          </div>
+        ))}
+        {days.map((item, idx) => {
+          const dayAppointments = getAppointmentsForDate(item.date);
+          const isToday = item.date.toDateString() === new Date().toDateString();
+          
+          return (
+            <div 
+              key={idx} 
+              className={`min-h-[120px] p-2 border-r border-b border-gray-200 transition-colors cursor-pointer ${
+                item.currentMonth ? 'bg-white hover:bg-gray-50' : 'bg-gray-50/50 text-gray-400'
+              }`}
+              onClick={() => {
+                setSelectedDate(item.date);
+                setViewMode("day");
+              }}
+            >
+              <div className="flex justify-between items-start mb-2">
+                <span className={`text-sm font-semibold p-1 rounded-full w-7 h-7 flex items-center justify-center ${
+                  isToday ? 'bg-violet-600 text-white' : ''
+                }`}>
+                  {item.day}
+                </span>
+                {dayAppointments.length > 0 && (
+                  <Badge variant="secondary" className="text-[10px] h-5 px-1.5">
+                    {dayAppointments.length}
+                  </Badge>
+                )}
+              </div>
+              <div className="space-y-1">
+                {dayAppointments.slice(0, 3).map((apt) => (
+                  <div 
+                    key={apt.id} 
+                    className={`text-[10px] p-1 rounded truncate border-l-2 ${getColorForType(apt.type).bg} ${getColorForType(apt.type).text} ${getColorForType(apt.type).border}`}
+                  >
+                    {apt.time} {apt.patientName}
+                  </div>
+                ))}
+                {dayAppointments.length > 3 && (
+                  <div className="text-[10px] text-muted-foreground pl-1 font-medium">
+                    + {dayAppointments.length - 3} more
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderCustomView = () => {
+    // Filter by doctor if one is selected
+    const filtered = appointments
+      .filter(a => selectedDoctor === 'all' || a.doctor === selectedDoctor)
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    
+    return (
+      <div className="space-y-4 p-4">
+        {filtered.length === 0 ? (
+          <div className="text-center py-12 text-muted-foreground bg-gray-50 rounded-lg border-2 border-dashed">
+            <CalendarIcon className="h-12 w-12 mx-auto mb-4 opacity-20" />
+            <p>No appointments found in this range.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filtered.map(apt => {
+              const colors = getColorForType(apt.type);
+              return (
+                <Card key={apt.id} className="overflow-hidden hover:shadow-md transition-shadow cursor-pointer" onClick={() => { setEditingAppointment(apt); setEditOpen(true); }}>
+                  <div className={`h-1 ${colors.bg.replace('bg-', 'bg-').split(' ')[0]}`} />
+                  <CardContent className="p-4">
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="font-bold text-lg">{apt.patientName}</div>
+                      <Badge className={`${colors.bg} ${colors.text} border-none`}>{apt.type}</Badge>
+                    </div>
+                    <div className="space-y-2 text-sm text-muted-foreground">
+                      <div className="flex items-center gap-2">
+                        <CalendarIcon className="h-4 w-4" />
+                        <span>{new Date(apt.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} at {apt.time}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Clock className="h-4 w-4" />
+                        <span>{apt.duration || 60} minutes</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <UsersIcon className="h-4 w-4" />
+                        <span>{apt.doctor}</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Calendar</h1>
-          <p className="text-muted-foreground">Manage appointments and schedules</p>
+          <h1 className="text-2xl font-bold text-gray-900">Appointment Calendar</h1>
+          <p className="text-muted-foreground">Manage clinic schedules and patient bookings</p>
         </div>
         <div className="flex items-center space-x-4">
           <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input
-              icon={<Search className="h-5 w-5 text-gray-400" />}
               type="text"
               placeholder="Search appointments..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full"
+              className="pl-9 pr-9 w-64 h-10 shadow-sm"
             />
+            {searchTerm && (
+              <button 
+                onClick={() => setSearchTerm("")}
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
           </div>
-          <Button variant="brand" onClick={() => openCreateModal(selectedDate)}>
+          <Button variant="brand" onClick={() => openCreateModal(selectedDate)} className="h-10">
             <Plus className="h-4 w-4 mr-2" />
             New Appointment
           </Button>
         </div>
       </div>
 
-      {/* Calendar Controls */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
+      <Card className="shadow-sm border-none bg-white">
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between flex-wrap gap-4">
             <div className="flex items-center space-x-4">
-              <div className="flex items-center space-x-2">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => navigateDate('prev')}
-                >
+              <div className="flex items-center bg-gray-50 rounded-lg p-1 border">
+                <Button variant="ghost" size="sm" onClick={() => navigateDate('prev')} className="h-8 w-8 p-0">
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
-                <h2 className="text-lg font-semibold min-w-[200px] text-center">{getViewTitle()}</h2>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => navigateDate('next')}
-                >
+                <Button variant="ghost" size="sm" onClick={() => navigateDate('next')} className="h-8 w-8 p-0">
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
-
-              <Select value={selectedDoctor} onValueChange={setSelectedDoctor}>
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder={isLoadingDoctors ? "Loading doctors..." : "Filter by doctor"} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Doctors</SelectItem>
-                  {isLoadingDoctors ? (
-                    <div className="p-2 text-sm text-gray-500">Loading doctors...</div>
-                  ) : doctors.length > 0 ? (
-                    doctors.map((doctor) => (
-                      <SelectItem key={doctor.id} value={doctor.name}>
-                        {doctor.name}
-                      </SelectItem>
-                    ))
-                  ) : (
-                    <div className="p-2 text-sm text-gray-500">No doctors available</div>
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* View Toggle Buttons */}
-            <div className="flex items-center bg-gray-100 rounded-lg p-1">
-              {(["day", "week", "month"] as const).map((mode) => (
-                <Button
-                  key={mode}
-                  size="sm"
-                  variant="ghost"
-                  className={`
-                    px-4 py-2 text-sm font-medium rounded-md transition-all duration-200 
-                    ${viewMode === mode 
-                      ? "bg-black text-white shadow-sm hover:bg-gray-800" 
-                      : "bg-transparent text-gray-600 hover:bg-gray-200 hover:text-gray-900"
-                    }
-                  `}
-                  onClick={() => setViewMode(mode)}
-                >
-                  {mode.charAt(0).toUpperCase() + mode.slice(1)}
-                </Button>
-              ))}
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {/* Calendar Grid - simplified for demo */}
-          <div className="grid grid-cols-7 gap-1 mb-4">
-            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-              <div key={day} className="p-2 text-center text-sm font-medium text-gray-500">
-                {day}
-              </div>
-            ))}
-            {Array.from({ length: 35 }, (_, i) => {
-              const date = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), i - 6);
-              const isCurrentMonth = date.getMonth() === selectedDate.getMonth();
-              const isToday = date.toDateString() === new Date().toDateString();
-              const isSelected = date.toDateString() === selectedDate.toDateString();
               
-              return (
-                <div
-                  key={i}
-                  className={`
-                    p-2 text-center text-sm cursor-pointer rounded-md transition-colors duration-200
-                    ${!isCurrentMonth ? 'text-gray-400' : 'text-gray-900'}
-                    ${isToday ? 'bg-violet-100 text-violet-900 font-semibold' : ''}
-                    ${isSelected ? 'bg-violet-600 text-white' : ''}
-                    ${isCurrentMonth && !isSelected && !isToday ? 'hover:bg-gray-100' : ''}
-                  `}
-                  onClick={() => {
-                    setSelectedDate(date);
-                  }}
-                >
-                  {date.getDate()}
-                </div>
-              );
-            })}
+              <Popover open={showDatePicker} onOpenChange={setShowDatePicker}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="h-10 gap-2 font-semibold shadow-sm px-4">
+                    <CalendarRange className="h-4 w-4 text-violet-600" />
+                    <span>{formatDateLabel(selectedDate)}</span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0 shadow-2xl border-none" align="start">
+                  <div className="p-4 space-y-4 bg-white rounded-xl">
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase tracking-wider text-gray-400">View Mode</Label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {(["day", "week", "month", "custom"] as const).map((mode) => (
+                          <Button
+                            key={mode}
+                            variant={viewMode === mode ? "brand" : "outline"}
+                            size="sm"
+                            className="h-9 capitalize font-medium"
+                            onClick={() => {
+                              setSearchTerm("");
+                              setViewMode(mode);
+                              if (mode === "week") {
+                                setSelectedDate(new Date());
+                              }
+                              if (mode !== "custom") setShowDatePicker(false);
+                            }}
+                          >
+                            {mode}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="border-t pt-4">
+                      <Label className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3 block">
+                        {viewMode === "custom" ? "Select Date Range" : "Select Date"}
+                      </Label>
+                      {viewMode === "custom" ? (
+                        <Calendar
+                          mode="range"
+                          selected={dateRange}
+                          onSelect={(range: DateRange | undefined) => {
+                            setSearchTerm("");
+                            setDateRange(range);
+                          }}
+                          numberOfMonths={2}
+                          className="rounded-md border shadow-sm"
+                          components={{
+                            MonthCaption: ({ calendarMonth, displayIndex, ...props }: any) => (
+                              <div {...props}>
+                                <span 
+                                  className="hover:text-violet-600 transition-colors cursor-pointer text-sm font-medium"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSearchTerm("");
+                                    setSelectedDate(calendarMonth.date);
+                                    setViewMode("month");
+                                    setShowDatePicker(false);
+                                  }}
+                                >
+                                  {calendarMonth.date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                                </span>
+                              </div>
+                            )
+                          }}
+                        />
+                      ) : (
+                        <Calendar
+                          mode="single"
+                          selected={selectedDate}
+                          onSelect={(date: Date | undefined) => {
+                            if (date) {
+                              setSearchTerm("");
+                              setSelectedDate(date);
+                              setViewMode("day");
+                              setShowDatePicker(false);
+                            }
+                          }}
+                          className="rounded-md border shadow-sm"
+                          components={{
+                            MonthCaption: ({ calendarMonth, displayIndex, ...props }: any) => (
+                              <div {...props}>
+                                <span 
+                                  className="hover:text-violet-600 transition-colors cursor-pointer text-sm font-medium"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSearchTerm("");
+                                    setSelectedDate(calendarMonth.date);
+                                    setViewMode("month");
+                                    setShowDatePicker(false);
+                                  }}
+                                >
+                                  {calendarMonth.date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                                </span>
+                              </div>
+                            )
+                          }}
+                        />
+                      )}
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
+            
+            <div className="flex items-center space-x-3">
+              <div className="flex items-center gap-2">
+                <Users className="h-4 w-4 text-gray-400" />
+                <Select value={selectedDoctor} onValueChange={(val) => {
+                  setSearchTerm("");
+                  setSelectedDoctor(val);
+                }}>
+                  <SelectTrigger className="w-[180px] h-10 shadow-sm">
+                    <SelectValue placeholder={isLoadingDoctors ? "Loading..." : "Filter by doctor"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Doctors</SelectItem>
+                    {doctors.map((doctor) => (
+                      <SelectItem key={doctor.id} value={doctor.name}>{doctor.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <Badge variant="secondary" className="bg-violet-50 text-violet-700 border-violet-100 h-10 px-4 rounded-lg font-semibold flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-violet-600 animate-pulse" />
+                {searchTerm !== "" ? "Search Results" : (viewMode === "day" ? "Day View" : viewMode === "week" ? "Week View" : viewMode === "month" ? "Month View" : "Custom Range")}
+              </Badge>
+            </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Today's Appointments */}
-      <Card>
-        <CardHeader>
-              <CardTitle>
-                {(() => {
-                  if (viewMode === 'day') {
-                    const today = new Date();
-                    today.setHours(0, 0, 0, 0);
-                    const sel = new Date(selectedDate);
-                    sel.setHours(0, 0, 0, 0);
-                    const diff = Math.round((sel.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-                    if (diff === 0) return "Today's Appointments";
-                    if (diff === 1) return "Tomorrow's Appointments";
-                    return `${sel.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })} Appointments`;
-                  }
-                  return 'Upcoming Appointments';
-                })()}
-              </CardTitle>
+      <Card className="shadow-xl border-none overflow-hidden bg-white">
+        <CardHeader className="border-b bg-gray-50/50 py-4">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-lg font-bold flex items-center gap-2">
+              {viewMode === "day" && <Clock className="h-5 w-5 text-violet-600" />}
+              {viewMode === "week" && <CalendarRange className="h-5 w-5 text-violet-600" />}
+              {viewMode === "month" && <CalendarIcon className="h-5 w-5 text-violet-600" />}
+              {viewMode === "custom" && <Search className="h-5 w-5 text-violet-600" />}
+              {searchTerm !== "" ? "Search Results" : (viewMode === "day" ? "Schedule" : "Appointment Overview")}
+            </CardTitle>
+            <div className="flex items-center gap-4 flex-wrap">
+              {Object.entries(appointmentColors).slice(0, 5).map(([type, colors]) => (
+                <div key={type} className="flex items-center gap-1.5">
+                  <div className={`w-3 h-3 rounded-full ${colors.bg.replace('bg-', 'bg-').split(' ')[0]} border ${colors.border}`} />
+                  <span className="text-[10px] font-bold text-gray-500 uppercase tracking-tighter">{type}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
+        <CardContent className="p-0">
+          <div className="max-h-[700px] overflow-y-auto">
             {isLoadingView ? (
-              <div className="text-center py-8">
-                <div className="inline-block">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-600 mx-auto mb-2"></div>
-                  <p className="text-sm text-muted-foreground">Loading appointments...</p>
-                </div>
+              <div className="flex flex-col items-center justify-center py-24 space-y-4">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-violet-600"></div>
+                <p className="text-sm font-medium text-muted-foreground animate-pulse">Loading schedule...</p>
               </div>
-            ) : filteredAppointments.length > 0 ? (
-              filteredAppointments.map((appointment: Appointment) => (
-                <div
-                  key={appointment.id}
-                  className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors duration-200"
-                >
-                  <div className="flex items-center space-x-4">
-                    <div className="text-sm font-medium text-violet-600 text-center min-w-[60px]">
-                      <div>{appointment.time}</div>
-                      {viewMode !== 'day' && (
-                        <div className="text-xs text-gray-500 mt-1">
-                          {new Date(appointment.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                        </div>
-                      )}
-                    </div>
-                    <div>
-                      <div className="font-medium">{appointment.patientName}</div>
-                      <div className="text-sm text-gray-500 flex items-center space-x-2">
-                        <span>{appointment.type} • {appointment.doctor}</span>
-                        <Badge variant={appointment.status === 'pending' ? 'outline' : appointment.status === 'confirmed' ? 'secondary' : 'default'}>{appointment.status}</Badge>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex space-x-2">
-                    <Button variant="outline" size="sm" onClick={() => { setEditingAppointment(appointment); setEditOpen(true); }}>
-                      Edit
-                    </Button>
-                    <Button 
-                      variant="secondary" 
-                      size="sm"
-                      onClick={() => {
-                        setAppointmentToDelete(appointment.id);
-                        setIsDeleteDialogOpen(true);
-                      }}
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                </div>
-              ))
             ) : (
-              <div className="text-center py-8 text-gray-500">
-                No appointments found for the selected criteria.
-              </div>
+              <>
+                {searchTerm !== "" ? renderCustomView() : (
+                  <>
+                    {viewMode === "day" && renderDayView()}
+                    {viewMode === "week" && renderWeekView()}
+                    {viewMode === "month" && renderMonthView()}
+                    {viewMode === "custom" && renderCustomView()}
+                  </>
+                )}
+              </>
             )}
           </div>
         </CardContent>
@@ -365,17 +784,21 @@ export function CalendarView() {
           <DialogHeader>
             <DialogTitle>Delete Appointment</DialogTitle>
           </DialogHeader>
-          <div className="py-4">
+          <div className="py-4 text-center">
+            <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Trash2 className="h-8 w-8" />
+            </div>
             <p className="text-sm text-muted-foreground">
               Are you sure you want to delete this appointment? This action cannot be undone.
             </p>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
+          <DialogFooter className="sm:justify-center">
+            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} className="px-8">
               Cancel
             </Button>
             <Button 
               variant="destructive" 
+              className="px-8"
               onClick={() => {
                 if (appointmentToDelete) {
                   deleteAppointment(appointmentToDelete);
@@ -390,5 +813,38 @@ export function CalendarView() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// Dummy component to replace the missing one from snippet
+function NewAppointmentForm({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="p-4 text-center">
+      <p>Please use the "New Appointment" button in the header.</p>
+      <Button onClick={onClose} className="mt-4">Close</Button>
+    </div>
+  );
+}
+
+// Missing icon used in the snippet for custom view
+function Users({ className }: { className?: string }) {
+  return (
+    <svg 
+      xmlns="http://www.w3.org/2000/svg" 
+      width="24" 
+      height="24" 
+      viewBox="0 0 24 24" 
+      fill="none" 
+      stroke="currentColor" 
+      strokeWidth="2" 
+      strokeLinecap="round" 
+      strokeLinejoin="round" 
+      className={className}
+    >
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
   );
 }

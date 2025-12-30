@@ -8,6 +8,7 @@ export interface Appointment {
   time: string;
   type: string;
   doctor: string;
+  duration?: number;
   notes: string;
   status: "scheduled" | "confirmed" | "pending" | "tentative" | "completed" | "cancelled";
   createdAt?: string;

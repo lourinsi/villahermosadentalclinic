@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, createContext, useContext } from "react";
+import { useState, useEffect, createContext, useContext } from "react";
 import { Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, useSidebar } from "./ui/sidebar";
 import { Button } from "./ui/button";
 import { ScheduleAppointmentModal } from "./ScheduleAppointmentModal";
@@ -33,7 +33,7 @@ interface AdminLayoutProps {
 
 interface AppointmentModalContext {
   openScheduleModal: (patientName?: string, patientId?: string | number) => void;
-  openCreateModal: (selectedDate?: Date) => void;
+  openCreateModal: (selectedDate?: Date, selectedTime?: string) => void;
   openAddPatientModal: () => void;
   openAddStaffModal: () => void;
   openAddTransactionModal: () => void; // New: function to open AddTransactionModal // New: function to open AddStaffModal
@@ -133,6 +133,7 @@ export function AdminLayout({ currentView, onViewChange, children }: AdminLayout
   
   const [selectedPatient, setSelectedPatient] = useState<{ name?: string; id?: string | number }>({});
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
+  const [selectedTime, setSelectedTime] = useState<string | undefined>();
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [appointmentRefreshTrigger, setAppointmentRefreshTrigger] = useState(0);
   const [appointmentFilters, setAppointmentFilters] = useState<AppointmentFilters>({});
@@ -145,13 +146,21 @@ export function AdminLayout({ currentView, onViewChange, children }: AdminLayout
     getUpcomingAppointments 
   } = useAppointments(appointmentRefreshTrigger, appointmentFilters);
 
+  // Clear filters when switching away from calendar to ensure other views see all appointments
+  useEffect(() => {
+    if (currentView !== 'calendar' && (appointmentFilters.startDate || appointmentFilters.endDate || appointmentFilters.search)) {
+      setAppointmentFilters({});
+    }
+  }, [currentView, appointmentFilters]);
+
   const openScheduleModal = (patientName?: string, patientId?: string | number) => {
     setSelectedPatient({ name: patientName, id: patientId });
     setScheduleModalOpen(true);
   };
 
-  const openCreateModal = (date?: Date) => {
+  const openCreateModal = (date?: Date, time?: string) => {
     setSelectedDate(date);
+    setSelectedTime(time);
     setCreateModalOpen(true);
   };
 
@@ -236,6 +245,7 @@ export function AdminLayout({ currentView, onViewChange, children }: AdminLayout
           open={createModalOpen}
           onOpenChange={setCreateModalOpen}
           selectedDate={selectedDate}
+          selectedTime={selectedTime}
         />
         <AddPatientModal
           open={addPatientModalOpen}
