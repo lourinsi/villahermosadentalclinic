@@ -254,7 +254,7 @@ export function CalendarView() {
   };
 
   const calculateAppointmentStyle = (duration: number = 60) => {
-    const slotHeight = 60; // pixels per 30-minute slot
+    const slotHeight = 80; // pixels per 30-minute slot
     const slotsOccupied = duration / 30;
     return {
       height: `${slotHeight * slotsOccupied - 4}px`
@@ -271,11 +271,11 @@ export function CalendarView() {
             return null;
           }
 
-          const appointment = getAppointmentsAtTime(timeSlot, selectedDate)[0];
+          const appointmentsForSlot = getAppointmentsAtTime(timeSlot, selectedDate);
           
-          if (appointment) {
-            const duration = appointment.duration || 60;
-            const slotsOccupied = duration / 30;
+          if (appointmentsForSlot.length > 0) {
+            const maxDuration = Math.max(...appointmentsForSlot.map(a => a.duration || 30));
+            const slotsOccupied = Math.ceil(maxDuration / 30);
             for (let i = 0; i < slotsOccupied; i++) {
               const slotIndex = timeSlots.indexOf(timeSlot) + i;
               if (slotIndex < timeSlots.length) {
@@ -283,8 +283,6 @@ export function CalendarView() {
               }
             }
           }
-
-          const colors = appointment ? getColorForType(appointment.type) : null;
           
           return (
             <div key={timeSlot} className="flex items-start min-h-[60px] border-b border-gray-100">
@@ -292,53 +290,61 @@ export function CalendarView() {
                 {formatTime(timeSlot)}
               </div>
               <div className="flex-1 ml-6 py-1 pr-4">
-                {appointment ? (
+                {appointmentsForSlot.length > 0 ? (
                   <>
-                    <div 
-                      className={`${colors?.bg} ${colors?.text} ${colors?.border} border-l-4 rounded-lg p-4 shadow-sm hover:shadow-md transition-all cursor-pointer`}
-                      style={calculateAppointmentStyle(appointment.duration)}
-                      onClick={() => { setEditingAppointment(appointment); setEditOpen(true); }}
-                    >
-                      <div className="flex items-start justify-between h-full">
-                        <div className="flex-1">
-                          <div className="font-semibold text-sm mb-1">{appointment.patientName}</div>
-                          <div className="text-xs opacity-90">
-                            {appointment.type} • {appointment.duration || 60}min
-                          </div>
-                          <div className="text-xs opacity-80 mt-1">
-                            {appointment.doctor}
-                          </div>
-                        </div>
-                        <div className="flex space-x-1">
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            className="h-6 w-6 p-0 hover:bg-white/20"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditingAppointment(appointment);
-                              setEditOpen(true);
-                            }}
+                    <div className="flex flex-wrap gap-2">
+                      {appointmentsForSlot.map((appointment) => {
+                        const colors = getColorForType(appointment.type);
+                        return (
+                          <div 
+                            key={appointment.id}
+                            className={`${colors?.bg} ${colors?.text} ${colors?.border} border-l-4 rounded-lg p-4 shadow-sm hover:shadow-md transition-all cursor-pointer flex-1 min-w-[200px]`}
+                            style={calculateAppointmentStyle(appointment.duration)}
+                            onClick={() => { setEditingAppointment(appointment); setEditOpen(true); }}
                           >
-                            <Edit className="h-3 w-3" />
-                          </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            className="h-6 w-6 p-0 hover:bg-white/20"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setAppointmentToDelete(appointment.id);
-                              setIsDeleteDialogOpen(true);
-                            }}
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      </div>
+                            <div className="flex items-start justify-between h-full">
+                              <div className="flex-1">
+                                <div className="font-semibold text-sm mb-1">{appointment.patientName}</div>
+                                <div className="text-xs opacity-90">
+                                  {appointment.type} • {appointment.duration || 30}min
+                                </div>
+                                <div className="text-xs opacity-80 mt-1">
+                                  {appointment.doctor}
+                                </div>
+                              </div>
+                              <div className="flex space-x-1">
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  className="h-6 w-6 p-0 hover:bg-white/20"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingAppointment(appointment);
+                                    setEditOpen(true);
+                                  }}
+                                >
+                                  <Edit className="h-3 w-3" />
+                                </Button>
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  className="h-6 w-6 p-0 hover:bg-white/20"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setAppointmentToDelete(appointment.id);
+                                    setIsDeleteDialogOpen(true);
+                                  }}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                     <div className="flex justify-center py-1">
-                        <Button variant="ghost" size="icon" className="h-7 w-7 rounded-full" onClick={() => openCreateModal(selectedDate)}>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 rounded-full" onClick={() => openCreateModal(selectedDate, timeSlot)}>
                             <Plus className="h-4 w-4" />
                         </Button>
                     </div>
@@ -346,7 +352,7 @@ export function CalendarView() {
                 ) : (
                   <div 
                     className="h-[56px] flex items-center justify-center text-muted-foreground text-sm hover:bg-gray-50 rounded transition-colors cursor-pointer"
-                    onClick={() => openCreateModal(selectedDate)}
+                    onClick={() => openCreateModal(selectedDate, timeSlot)}
                   >
                     <Plus className="h-4 w-4" />
                   </div>
@@ -364,7 +370,7 @@ export function CalendarView() {
     
     return (
       <div className="overflow-x-auto">
-        <div className="min-w-[800px]">
+        <div className="min-w-[1000px]">
           <div className="flex border-b-2 border-gray-200 sticky top-0 bg-white z-10">
             <div className="w-20 flex-shrink-0"></div>
             {weekDays.map((day, idx) => (
@@ -390,28 +396,33 @@ export function CalendarView() {
                   {formatTime(timeSlot)}
                 </div>
                 {weekDays.map((day, idx) => {
-                  const appointment = getAppointmentsAtTime(timeSlot, day)[0];
-                  const colors = appointment ? getColorForType(appointment.type) : null;
+                  const appointmentsForSlot = getAppointmentsAtTime(timeSlot, day);
                   
                   return (
                     <div 
                       key={idx} 
                       className="flex-1 border-l border-gray-100 p-1 hover:bg-gray-50/50 transition-colors cursor-pointer"
-                      onClick={() => !appointment && openCreateModal(day)}
+                      onClick={() => openCreateModal(day, timeSlot)}
                     >
-                      {appointment && (
-                        <div 
-                          className={`${colors?.bg} ${colors?.text} ${colors?.border} border-l-2 rounded px-2 py-1 text-xs cursor-pointer hover:shadow-md transition-all h-full`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingAppointment(appointment);
-                            setEditOpen(true);
-                          }}
-                        >
-                          <div className="font-bold truncate">{appointment.patientName}</div>
-                          <div className="opacity-90 truncate text-[10px]">{appointment.type}</div>
-                        </div>
-                      )}
+                      <div className="space-y-1 h-full">
+                        {appointmentsForSlot.map(appointment => {
+                          const colors = getColorForType(appointment.type);
+                          return (
+                            <div 
+                              key={appointment.id}
+                              className={`${colors?.bg} ${colors?.text} ${colors?.border} border-l-2 rounded px-2 py-1 text-xs cursor-pointer hover:shadow-md transition-all`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingAppointment(appointment);
+                                setEditOpen(true);
+                              }}
+                            >
+                              <div className="font-bold truncate">{appointment.patientName}</div>
+                              <div className="opacity-90 truncate text-[10px]">{appointment.type}</div>
+                            </div>
+                          )
+                        })}
+                      </div>
                     </div>
                   );
                 })}

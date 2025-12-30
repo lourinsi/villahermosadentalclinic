@@ -32,15 +32,16 @@ interface AppointmentFormData {
 export function CreateAppointmentModal({ 
   open, 
   onOpenChange,
-  selectedDate
+  selectedDate,
+  selectedTime
 }: CreateAppointmentModalProps) {
   const { addAppointment, refreshPatients, refreshAppointments } = useAppointmentModal();
   const [formData, setFormData] = useState<AppointmentFormData>({
     patientName: "",
     patientId: "",
-    date: selectedDate ? selectedDate.toISOString().split('T')[0] : "",
+    date: "",
     time: "",
-    duration: 60,
+    duration: 30,
     type: "",
     doctor: "",
     notes: "",
@@ -73,22 +74,46 @@ export function CreateAppointmentModal({
 
   useEffect(() => {
     if (open) {
+      let dateStr = "";
+      if (selectedDate) {
+        const year = selectedDate.getFullYear();
+        const month = (selectedDate.getMonth() + 1).toString().padStart(2, '0');
+        const day = selectedDate.getDate().toString().padStart(2, '0');
+        dateStr = `${year}-${month}-${day}`;
+      }
+
+      const newFormData = {
+        patientName: "",
+        patientId: "",
+        date: dateStr,
+        time: selectedTime || "",
+        duration: 30,
+        type: "",
+        doctor: "",
+        notes: "",
+        status: "scheduled"
+      };
+
+      console.log("CreateAppointmentModal Details:", {
+        selectedDate: selectedDate,
+        selectedTime: selectedTime,
+        formData: newFormData
+      });
+      
+      setFormData(newFormData);
+      setShowNewPatient(false);
       reloadDoctors();
     }
-  }, [open, reloadDoctors]);
+  }, [open, selectedDate, selectedTime, reloadDoctors]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("=== SUBMIT CALLED ===");
-    console.log("showNewPatient:", showNewPatient);
-    console.log("formData:", formData);
     
     if (!formData.patientName || !formData.date || !formData.time || !formData.type || !formData.doctor) {
       toast.error("Please fill in all required fields");
       return;
     }
 
-    // Prevent scheduling appointments in the past
     try {
       const appointmentDateTime = new Date(`${formData.date}T${formData.time}`);
       if (isNaN(appointmentDateTime.getTime()) || appointmentDateTime.getTime() <= Date.now()) {
@@ -96,23 +121,17 @@ export function CreateAppointmentModal({
         return;
       }
     } catch (err) {
-      // fallback - block if parsing fails
       toast.error("Invalid date/time selected");
       return;
     }
 
     setIsLoading(true);
 
-    // If admin created a new patient inline, create the patient first
     if (showNewPatient && formData.patientName) {
-      console.log("=== CREATING NEW PATIENT ===");
       try {
         const names = formData.patientName.trim().split(" ");
         const firstName = names.shift() || formData.patientName;
         const lastName = names.join(" ") || "";
-        
-        console.log("firstName:", firstName);
-        console.log("lastName:", lastName);
         
         const res = await fetch("http://localhost:3001/api/patients", {
           method: "POST",
@@ -120,28 +139,20 @@ export function CreateAppointmentModal({
           body: JSON.stringify({ firstName, lastName, email: "", phone: "" })
         });
         
-        console.log("Patient creation response status:", res.status);
-        
         if (!res.ok) {
-          console.error("Patient creation failed with status:", res.status);
           toast.error("Failed to create patient");
           setIsLoading(false);
           return;
         }
         
         const json = await res.json();
-        console.log("Patient creation response:", json);
         
         if (json?.success && json.data) {
           const newId = String(json.data.id);
           const fullName = `${firstName} ${lastName}`.trim();
-          console.log("New patient created with ID:", newId, "Name:", fullName);
           
-          // add to local patients list
           setPatients(prev => [{ id: newId, name: fullName }, ...prev]);
           
-          // Create appointment with new patient
-          console.log("=== CREATING APPOINTMENT FOR NEW PATIENT ===");
           await addAppointment({
             patientName: fullName,
             patientId: newId,
@@ -158,24 +169,8 @@ export function CreateAppointmentModal({
           refreshPatients();
           refreshAppointments();
           onOpenChange(false);
-          
-          // Reset form
-          setFormData({
-            patientName: "",
-            patientId: "",
-            date: selectedDate ? selectedDate.toISOString().split('T')[0] : "",
-            time: "",
-            duration: 60,
-            type: "",
-            doctor: "",
-            notes: "",
-            status: "scheduled"
-          });
-          setShowNewPatient(false);
-          setIsLoading(false);
           return;
         } else {
-          console.error("Patient creation failed:", json);
           toast.error("Failed to create patient");
           setIsLoading(false);
           return;
@@ -188,8 +183,6 @@ export function CreateAppointmentModal({
       }
     }
 
-    // Otherwise just create appointment
-    console.log("=== CREATING APPOINTMENT FOR EXISTING PATIENT ===");
     try {
       await addAppointment({
         patientName: formData.patientName,
@@ -203,25 +196,10 @@ export function CreateAppointmentModal({
         status: formData.status as "scheduled" | "confirmed" | "pending" | "tentative" | "completed" | "cancelled"
       });
 
-      console.log("Appointment created successfully");
       toast.success("Appointment created successfully!");
       refreshPatients();
       refreshAppointments();
       onOpenChange(false);
-
-      // Reset form
-      setFormData({
-        patientName: "",
-        patientId: "",
-        date: selectedDate ? selectedDate.toISOString().split('T')[0] : "",
-        time: "",
-        duration: 60,
-        type: "",
-        doctor: "",
-        notes: "",
-        status: "scheduled"
-      });
-      setShowNewPatient(false);
     } catch (error) {
       console.error("Error creating appointment:", error);
       toast.error("Failed to create appointment");
@@ -342,29 +320,13 @@ export function CreateAppointmentModal({
               </div>
               <div className="space-y-2">
                 <Label htmlFor="time">Time</Label>
-                <Select
-                  value={formData.time}
-                  onValueChange={(value) => setFormData(prev => ({ ...prev, time: value }))}
-                >
-                  <SelectTrigger id="time">
-                    <SelectValue placeholder="Select time" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="08:00">8:00 AM</SelectItem>
-                    <SelectItem value="08:30">8:30 AM</SelectItem>
-                    <SelectItem value="09:00">9:00 AM</SelectItem>
-                    <SelectItem value="09:30">9:30 AM</SelectItem>
-                    <SelectItem value="10:00">10:00 AM</SelectItem>
-                    <SelectItem value="10:30">10:30 AM</SelectItem>
-                    <SelectItem value="11:00">11:00 AM</SelectItem>
-                    <SelectItem value="14:00">2:00 PM</SelectItem>
-                    <SelectItem value="14:30">2:30 PM</SelectItem>
-                    <SelectItem value="15:00">3:00 PM</SelectItem>
-                    <SelectItem value="15:30">3:30 PM</SelectItem>
-                    <SelectItem value="16:00">4:00 PM</SelectItem>
-                    <SelectItem value="16:30">4:30 PM</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Input
+                  id="time"
+                  type="time"
+                  value={formData.time || ''}
+                  onChange={(e) => setFormData(prev => ({ ...prev, time: e.target.value }))}
+                  required
+                />
               </div>
             </div>
           </div>
@@ -411,9 +373,7 @@ export function CreateAppointmentModal({
                     <SelectValue placeholder="Select duration" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="15">15 mins</SelectItem>
                     <SelectItem value="30">30 mins</SelectItem>
-                    <SelectItem value="45">45 mins</SelectItem>
                     <SelectItem value="60">1 hour</SelectItem>
                     <SelectItem value="90">1.5 hours</SelectItem>
                     <SelectItem value="120">2 hours</SelectItem>

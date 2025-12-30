@@ -139,9 +139,7 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
                   <SelectValue placeholder="Duration" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="15">15 mins</SelectItem>
                   <SelectItem value="30">30 mins</SelectItem>
-                  <SelectItem value="45">45 mins</SelectItem>
                   <SelectItem value="60">1 hour</SelectItem>
                   <SelectItem value="90">1.5 hours</SelectItem>
                   <SelectItem value="120">2 hours</SelectItem>
