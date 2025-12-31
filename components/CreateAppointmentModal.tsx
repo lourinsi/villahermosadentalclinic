@@ -9,6 +9,9 @@ import { Calendar, Clock, User, Stethoscope } from "lucide-react";
 import { useAppointmentModal } from "./AdminLayout";
 import { toast } from "sonner";
 import { useDoctors } from "../hooks/useDoctors";
+import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
+import { APPOINTMENT_TYPES } from "../lib/appointment-types";
+import { formatDateToYYYYMMDD } from "../lib/utils";
 
 interface CreateAppointmentModalProps {
   open: boolean;
@@ -23,7 +26,9 @@ interface AppointmentFormData {
   date: string;
   time: string;
   duration: number;
-  type: string;
+  type: number;
+  customType?: string;
+  price?: number;
   doctor: string;
   notes: string;
   status: string;
@@ -42,7 +47,9 @@ export function CreateAppointmentModal({
     date: "",
     time: "",
     duration: 30,
-    type: "",
+    type: -1,
+    customType: "",
+    price: 0,
     doctor: "",
     notes: "",
     status: "scheduled"
@@ -51,6 +58,7 @@ export function CreateAppointmentModal({
   const [showNewPatient, setShowNewPatient] = useState(false);
   const [patients, setPatients] = useState<Array<{ id: string; name: string }>>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [showCustomTypeInput, setShowCustomTypeInput] = useState(false);
 
   const { refreshTrigger } = useAppointmentModal();
   const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors();
@@ -82,13 +90,15 @@ export function CreateAppointmentModal({
         dateStr = `${year}-${month}-${day}`;
       }
 
-      const newFormData = {
+      const newFormData: AppointmentFormData = {
         patientName: "",
         patientId: "",
         date: dateStr,
         time: selectedTime || "",
         duration: 30,
-        type: "",
+        type: -1,
+        customType: "",
+        price: 0,
         doctor: "",
         notes: "",
         status: "scheduled"
@@ -102,6 +112,7 @@ export function CreateAppointmentModal({
       
       setFormData(newFormData);
       setShowNewPatient(false);
+      setShowCustomTypeInput(false);
       reloadDoctors();
     }
   }, [open, selectedDate, selectedTime, reloadDoctors]);
@@ -109,8 +120,13 @@ export function CreateAppointmentModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!formData.patientName || !formData.date || !formData.time || !formData.type || !formData.doctor) {
-      toast.error("Please fill in all required fields");
+    if (!formData.patientName || !formData.date || !formData.time || formData.type < 0 || !formData.doctor || formData.price === undefined || formData.price < 0) {
+      toast.error("Please fill in all required fields and ensure price is valid.");
+      return;
+    }
+    
+    if (formData.type === APPOINTMENT_TYPES.length - 1 && !formData.customType) {
+      toast.error("Please specify the appointment type for 'Other'.");
       return;
     }
 
@@ -127,6 +143,9 @@ export function CreateAppointmentModal({
 
     setIsLoading(true);
 
+    let patientId = formData.patientId;
+    let patientName = formData.patientName;
+
     if (showNewPatient && formData.patientName) {
       try {
         const names = formData.patientName.trim().split(" ");
@@ -139,42 +158,20 @@ export function CreateAppointmentModal({
           body: JSON.stringify({ firstName, lastName, email: "", phone: "" })
         });
         
-        if (!res.ok) {
-          toast.error("Failed to create patient");
-          setIsLoading(false);
-          return;
-        }
-        
         const json = await res.json();
         
-        if (json?.success && json.data) {
-          const newId = String(json.data.id);
-          const fullName = `${firstName} ${lastName}`.trim();
-          
-          setPatients(prev => [{ id: newId, name: fullName }, ...prev]);
-          
-          await addAppointment({
-            patientName: fullName,
-            patientId: newId,
-            date: formData.date,
-            time: formData.time,
-            duration: formData.duration,
-            type: formData.type,
-            doctor: formData.doctor,
-            notes: formData.notes,
-            status: formData.status as "scheduled" | "confirmed" | "pending" | "tentative" | "completed" | "cancelled"
-          });
-          
-          toast.success("Patient and appointment created!");
-          refreshPatients();
-          refreshAppointments();
-          onOpenChange(false);
-          return;
-        } else {
-          toast.error("Failed to create patient");
+        if (!res.ok || !json?.success || !json.data) {
+          toast.error(json?.message || "Failed to create patient");
           setIsLoading(false);
           return;
         }
+        
+        patientId = String(json.data.id);
+        patientName = `${firstName} ${lastName}`.trim();
+        setPatients(prev => [{ id: patientId, name: patientName }, ...prev]);
+        toast.info("New patient created successfully!");
+        refreshPatients();
+
       } catch (err) {
         console.error("Error creating patient:", err);
         toast.error("Could not create patient");
@@ -185,19 +182,20 @@ export function CreateAppointmentModal({
 
     try {
       await addAppointment({
-        patientName: formData.patientName,
-        patientId: formData.patientId || formData.patientName,
+        patientName: patientName,
+        patientId: patientId || patientName, // Fallback for safety
         date: formData.date,
         time: formData.time,
         duration: formData.duration,
         type: formData.type,
+        customType: formData.customType,
+        price: formData.price,
         doctor: formData.doctor,
         notes: formData.notes,
         status: formData.status as "scheduled" | "confirmed" | "pending" | "tentative" | "completed" | "cancelled"
       });
 
       toast.success("Appointment created successfully!");
-      refreshPatients();
       refreshAppointments();
       onOpenChange(false);
     } catch (error) {
@@ -313,20 +311,34 @@ export function CreateAppointmentModal({
                   id="date"
                   type="date"
                   value={formData.date}
-                  min={new Date().toISOString().split('T')[0]}
+                  min={formatDateToYYYYMMDD(new Date())}
                   onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
                   required
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="time">Time</Label>
-                <Input
-                  id="time"
-                  type="time"
-                  value={formData.time || ''}
-                  onChange={(e) => setFormData(prev => ({ ...prev, time: e.target.value }))}
+                <Select
+                  value={formData.time ? TIME_SLOTS.indexOf(formData.time).toString() : "-1"}
+                  onValueChange={(value) => {
+                    const index = parseInt(value);
+                    if (index >= 0) {
+                      setFormData(prev => ({ ...prev, time: TIME_SLOTS[index] }));
+                    }
+                  }}
                   required
-                />
+                >
+                  <SelectTrigger id="time">
+                    <SelectValue placeholder="Select time" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TIME_SLOTS.map((slot, index) => (
+                      <SelectItem key={slot} value={index.toString()}>
+                        {formatTimeTo12h(slot)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </div>
@@ -339,28 +351,51 @@ export function CreateAppointmentModal({
             </h3>
             
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
+              <div className="space-y-2 col-span-2">
                 <Label htmlFor="type">Appointment Type</Label>
                 <Select
-                  value={formData.type}
-                  onValueChange={(value) => setFormData(prev => ({ ...prev, type: value }))}
+                  value={formData.type.toString()}
+                  onValueChange={(value) => {
+                    const typeIndex = parseInt(value);
+                    setFormData(prev => ({ ...prev, type: typeIndex, customType: "" }));
+                    setShowCustomTypeInput(typeIndex === APPOINTMENT_TYPES.length - 1);
+                  }}
                 >
                   <SelectTrigger id="type">
                     <SelectValue placeholder="Select type" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="cleaning">Routine Cleaning</SelectItem>
-                    <SelectItem value="checkup">Checkup</SelectItem>
-                    <SelectItem value="filling">Filling</SelectItem>
-                    <SelectItem value="crown">Crown</SelectItem>
-                    <SelectItem value="root-canal">Root Canal</SelectItem>
-                    <SelectItem value="extraction">Extraction</SelectItem>
-                    <SelectItem value="consultation">Consultation</SelectItem>
-                    <SelectItem value="emergency">Emergency</SelectItem>
-                    <SelectItem value="whitening">Teeth Whitening</SelectItem>
-                    <SelectItem value="implant">Implant</SelectItem>
+                    {APPOINTMENT_TYPES.map((type, index) => (
+                      <SelectItem key={index} value={index.toString()}>{type}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
+              </div>
+
+              {showCustomTypeInput && (
+                <div className="space-y-2 col-span-2">
+                  <Label htmlFor="customType">Please Specify</Label>
+                  <Input
+                      id="customType"
+                      placeholder="e.g., 'Denture Fitting', 'Braces Adjustment'"
+                      value={formData.customType}
+                      onChange={(e) => setFormData(prev => ({...prev, customType: e.target.value}))}
+                      required
+                  />
+                </div>
+              )}
+            
+              <div className="space-y-2">
+                <Label htmlFor="price">Price ($)</Label>
+                <Input
+                  id="price"
+                  type="number"
+                  value={formData.price !== undefined ? formData.price : ""}
+                  onChange={(e) => setFormData(prev => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
+                  min="0"
+                  step="0.01"
+                  required
+                />
               </div>
 
               <div className="space-y-2">
@@ -452,7 +487,7 @@ export function CreateAppointmentModal({
             <Button 
               variant="brand" 
               type="submit"
-              disabled={!formData.patientName || !formData.date || !formData.time || !formData.type || !formData.doctor || isLoading}
+              disabled={!formData.patientName || !formData.date || !formData.time || formData.type < 0 || !formData.doctor || isLoading}
             >
               {isLoading ? "Creating..." : "Create Appointment"}
             </Button>
@@ -460,5 +495,4 @@ export function CreateAppointmentModal({
         </form>
       </DialogContent>
     </Dialog>
-  );
-}
+  );}

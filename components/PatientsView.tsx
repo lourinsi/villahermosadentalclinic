@@ -25,6 +25,9 @@ import {
 } from "lucide-react";
 import { EditAppointmentModal } from "./EditAppointmentModal";
 import { Appointment } from "../hooks/useAppointments";
+import { DentalChart } from "./DentalChart";
+import { getAppointmentTypeName } from "../lib/appointment-types";
+import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
 
 const mockPatients = [
   {
@@ -108,6 +111,7 @@ interface Patient {
   emergencyContact?: string;
   emergencyPhone?: string;
   notes?: string;
+  dentalCharts?: { date: string; data: string }[];
 }
 
 export function PatientsView() {
@@ -124,6 +128,7 @@ export function PatientsView() {
   const [isPatientDeleteDialogOpen, setIsPatientDeleteDialogOpen] = useState(false);
   const [patientToDelete, setPatientToDelete] = useState<Patient | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isPatientDetailsModified, setIsPatientDetailsModified] = useState(false);
   const itemsPerPage = 10;
   const { openScheduleModal, openAddPatientModal, refreshPatients, refreshTrigger, appointments } = useAppointmentModal();
   
@@ -142,7 +147,7 @@ export function PatientsView() {
         const data = result.data || [];
         const meta = result.meta || { total: 0, page, limit: itemsPerPage, totalPages: 1 };
 
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayStr = formatDateToYYYYMMDD(new Date());
 
         const transformedPatients = data.map((patient: any) => {
           const patientAppointments = appointments.filter(
@@ -158,7 +163,7 @@ export function PatientsView() {
 
           const completedAppointments = patientAppointments
             .filter((apt: any) => apt.status === "completed")
-            .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+            .sort((a: any, b: any) => parseBackendDateToLocal(b.date).getTime() - parseBackendDateToLocal(a.date).getTime());
 
           const nextApt = upcomingAppointments.length > 0 ? upcomingAppointments[0].date : null;
           const lastVisitFromApt = completedAppointments.length > 0 ? completedAppointments[0].date : null;
@@ -167,7 +172,7 @@ export function PatientsView() {
           // Automatic Inactive Status: more than a year since last visit
           let status = patient.status || "active";
           if (effectiveLastVisit) {
-            const lastVisitDate = new Date(effectiveLastVisit);
+            const lastVisitDate = parseBackendDateToLocal(effectiveLastVisit);
             const oneYearAgo = new Date();
             oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
             if (lastVisitDate < oneYearAgo) {
@@ -337,7 +342,6 @@ export function PatientsView() {
                   <TableRow>
                     <TableHead>Patient</TableHead>
                     <TableHead>Contact</TableHead>
-                    <TableHead>Last Visit</TableHead>
                   <TableHead>Next Appointment</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Balance</TableHead>
@@ -350,7 +354,7 @@ export function PatientsView() {
                     <TableCell>
                       <div>
                         <div className="font-medium">{patient.name}</div>
-                        <div className="text-sm text-muted-foreground">DOB: {patient.dateOfBirth}</div>
+                        <div className="text-sm text-muted-foreground">Last Visit: {patient.lastVisit || "N/A"}</div>
                       </div>
                     </TableCell>
                     <TableCell>
@@ -365,7 +369,6 @@ export function PatientsView() {
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell>{patient.lastVisit}</TableCell>
                     <TableCell>
                       {patient.nextAppointment ? (
                         <div className="flex items-center space-x-1">
@@ -389,13 +392,16 @@ export function PatientsView() {
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => setSelectedPatient(patient)}
+                              onClick={() => {
+                                setSelectedPatient(patient);
+                                setIsPatientDetailsModified(false);
+                              }}
                             >
                               <Eye className="h-3 w-3 mr-1" />
                               View
                             </Button>
                           </DialogTrigger>
-                            <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+                            <DialogContent className="max-w-6xl w-[90vw] max-h-[90vh] overflow-y-auto">
                               <DialogHeader>
                                 <DialogTitle>Patient Details - {patient.name}</DialogTitle>
                               </DialogHeader>
@@ -410,6 +416,8 @@ export function PatientsView() {
                                   setPatientToDelete(p);
                                   setIsPatientDeleteDialogOpen(true);
                                 }}
+                                isModified={isPatientDetailsModified}
+                                setIsModified={setIsPatientDetailsModified}
                               />
                             </DialogContent>
                           </Dialog>
@@ -497,12 +505,16 @@ function PatientDetails({
   patient, 
   onClose, 
   onEditAppointment,
-  onDeletePatient
+  onDeletePatient,
+  isModified,
+  setIsModified
 }: { 
   patient: Patient; 
   onClose: () => void;
   onEditAppointment: (apt: Appointment) => void;
   onDeletePatient: (p: Patient) => void;
+  isModified: boolean;
+  setIsModified: (isModified: boolean) => void;
 }) {
   const [formData, setFormData] = useState({
     firstName: patient.firstName || patient.name?.split(' ')[0] || '',
@@ -523,14 +535,29 @@ function PatientDetails({
     zipCode: patient.zipCode || '',
     emergencyContact: patient.emergencyContact || '',
     emergencyPhone: patient.emergencyPhone || '',
-    notes: patient.notes || ''
+    notes: patient.notes || '',
+    dentalCharts: patient.dentalCharts || []
   });
 
   const [isSaving, setIsSaving] = useState(false);
-  const [isModified, setIsModified] = useState(false);
   const [patientAppointments, setPatientAppointments] = useState<any[]>([]);
   const { refreshPatients, appointments } = useAppointmentModal();
 
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isModified) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isModified]);
+  
   useEffect(() => {
     // If patient has an id, fetch the full record from the server so we show all fields (not just the transformed list values)
     const loadFullPatient = async () => {
@@ -554,7 +581,8 @@ function PatientDetails({
           zipCode: patient.zipCode || '',
           emergencyContact: patient.emergencyContact || '',
           emergencyPhone: patient.emergencyPhone || '',
-          notes: patient.notes || ''
+          notes: patient.notes || '',
+          dentalCharts: patient.dentalCharts || []
         });
         return;
       }
@@ -583,7 +611,8 @@ function PatientDetails({
             zipCode: p.zipCode || '',
             emergencyContact: p.emergencyContact || '',
             emergencyPhone: p.emergencyPhone || '',
-            notes: p.notes || ''
+            notes: p.notes || '',
+            dentalCharts: p.dentalCharts || []
           });
         }
       } catch (err) {
@@ -599,7 +628,7 @@ function PatientDetails({
       apt.patientId === patient.id ||
       apt.patientName === `${patient.firstName} ${patient.lastName}` ||
       apt.patientName === patient.name
-    ).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    ).sort((a, b) => parseBackendDateToLocal(b.date).getTime() - parseBackendDateToLocal(a.date).getTime());
 
     setPatientAppointments(filtered);
   }, [appointments, patient]);
@@ -652,8 +681,8 @@ function PatientDetails({
       </div>
 
       <Tabs defaultValue="info" className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
-<TabsTrigger
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger
             value="info"
             className="data-[state=active]:bg-violet-500 data-[state=active]:text-white hover:bg-violet-100"
           >
@@ -664,6 +693,12 @@ function PatientDetails({
             className="data-[state=active]:bg-violet-500 data-[state=active]:text-white hover:bg-violet-100"
           >
             Dental Records
+          </TabsTrigger>
+          <TabsTrigger
+            value="chart"
+            className="data-[state=active]:bg-violet-500 data-[state=active]:text-white hover:bg-violet-100"
+          >
+            Dental Chart
           </TabsTrigger>
           <TabsTrigger
             value="history"
@@ -788,6 +823,16 @@ function PatientDetails({
           </Card>
         </TabsContent>
 
+        <TabsContent value="chart" className="space-y-4">
+          <DentalChart 
+            records={formData.dentalCharts} 
+            onSaveRecords={(updatedRecords) => {
+              setFormData(prev => ({ ...prev, dentalCharts: updatedRecords }));
+              setIsModified(true);
+            }}
+          />
+        </TabsContent>
+
         <TabsContent value="history" className="space-y-4">
           <Card>
             <CardHeader>
@@ -803,7 +848,8 @@ function PatientDetails({
                       <div className="flex items-center space-x-4">
                         <div className="text-sm">
                           <div className="font-medium">{appointment.date} at {appointment.time}</div>
-                          <div className="text-muted-foreground">{appointment.type}</div>
+                          <div className="text-muted-foreground">{getAppointmentTypeName(appointment.type, appointment.customType)}</div>
+                          {appointment.price != null && <div className="text-muted-foreground">${appointment.price.toFixed(2)}</div>}
                         </div>
                         <div className="text-sm">
                           <div className="font-medium">{appointment.doctor}</div>

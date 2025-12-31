@@ -6,7 +6,9 @@ export interface Appointment {
   patientId: string;
   date: string;
   time: string;
-  type: string;
+  type: number;
+  customType?: string;
+  price?: number;
   doctor: string;
   duration?: number;
   notes: string;

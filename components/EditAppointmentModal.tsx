@@ -5,11 +5,12 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { Clock, User, Stethoscope } from "lucide-react";
 import { useAppointmentModal } from "./AdminLayout";
 import { toast } from "sonner";
 import { Appointment } from "../hooks/useAppointments";
 import { useDoctors } from "../hooks/useDoctors";
+import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
+import { APPOINTMENT_TYPES } from "../lib/appointment-types";
 
 interface EditAppointmentModalProps {
   open: boolean;
@@ -18,15 +19,21 @@ interface EditAppointmentModalProps {
 }
 
 export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAppointmentModalProps) {
-  const { updateAppointment, deleteAppointment } = useAppointmentModal();
+  const { updateAppointment, deleteAppointment, refreshAppointments } = useAppointmentModal();
   const [form, setForm] = useState<Partial<Appointment>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [showCustomTypeInput, setShowCustomTypeInput] = useState(false);
   const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors();
 
   useEffect(() => {
     if (appointment) {
       setForm({ ...appointment });
+      if (appointment.type === APPOINTMENT_TYPES.length - 1) {
+        setShowCustomTypeInput(true);
+      } else {
+        setShowCustomTypeInput(false);
+      }
     }
   }, [appointment]);
 
@@ -39,16 +46,27 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
   if (!appointment) return null;
 
   const handleSave = async () => {
-    if (!form.patientName || !form.date || !form.time || !form.type || !form.doctor || !appointment.id) {
-      toast.error("Please fill required fields");
+    if (form.type == null || form.type < 0) {
+      toast.error("Please select an appointment type.");
+      return;
+    }
+    
+    if (form.type === APPOINTMENT_TYPES.length - 1 && !form.customType) {
+      toast.error("Please specify the appointment type for 'Other'.");
+      return;
+    }
+
+    if (!form.patientName || !form.date || !form.time || !form.doctor || !appointment.id || form.price === undefined || form.price < 0) {
+      toast.error("Please fill all required fields and ensure price is valid.");
       return;
     }
 
     setIsLoading(true);
     try {
       console.log("=== UPDATING APPOINTMENT ===", appointment.id);
-      updateAppointment(appointment.id, form as Partial<Appointment>);
+      await updateAppointment(appointment.id, form as Partial<Appointment>);
       toast.success("Appointment updated");
+      refreshAppointments();
       onOpenChange(false);
     } catch (err) {
       console.error("Error updating appointment:", err);
@@ -67,8 +85,9 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
     setIsLoading(true);
     try {
       console.log("=== DELETING APPOINTMENT ===", appointment.id);
-      deleteAppointment(appointment.id);
+      await deleteAppointment(appointment.id);
       toast.success("Appointment deleted");
+      refreshAppointments();
       setIsDeleteDialogOpen(false);
       onOpenChange(false);
     } catch (err) {
@@ -103,31 +122,76 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
               <Input type="date" value={form.date || ''} onChange={(e) => setForm(prev => ({ ...prev, date: e.target.value }))} />
             </div>
             <div className="space-y-2">
-              <Label>Time</Label>
-              <Input value={form.time || ''} onChange={(e) => setForm(prev => ({ ...prev, time: e.target.value }))} />
+              <Label htmlFor="time">Time</Label>
+              <Select 
+                value={form.time ? TIME_SLOTS.indexOf(form.time).toString() : "-1"} 
+                onValueChange={(v) => {
+                  const index = parseInt(v);
+                  if (index >= 0) {
+                    setForm(prev => ({ ...prev, time: TIME_SLOTS[index] }));
+                  }
+                }}
+              >
+                <SelectTrigger id="time">
+                  <SelectValue placeholder="Select time" />
+                </SelectTrigger>
+                <SelectContent>
+                  {TIME_SLOTS.map((slot, index) => (
+                    <SelectItem key={slot} value={index.toString()}>
+                      {formatTimeTo12h(slot)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
+            <div className="space-y-2 col-span-2">
               <Label>Type</Label>
-              <Select value={String(form.type || '')} onValueChange={(v) => setForm(prev => ({ ...prev, type: v }))}>
+              <Select 
+                value={form.type != null ? form.type.toString() : "-1"} 
+                onValueChange={(v) => {
+                  const typeIndex = parseInt(v);
+                  setForm(prev => ({ ...prev, type: typeIndex, customType: "" }));
+                  setShowCustomTypeInput(typeIndex === APPOINTMENT_TYPES.length - 1);
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Type" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="cleaning">Routine Cleaning</SelectItem>
-                  <SelectItem value="checkup">Checkup</SelectItem>
-                  <SelectItem value="filling">Filling</SelectItem>
-                  <SelectItem value="crown">Crown</SelectItem>
-                  <SelectItem value="root-canal">Root Canal</SelectItem>
-                  <SelectItem value="extraction">Extraction</SelectItem>
-                  <SelectItem value="consultation">Consultation</SelectItem>
-                  <SelectItem value="emergency">Emergency</SelectItem>
-                  <SelectItem value="whitening">Teeth Whitening</SelectItem>
-                  <SelectItem value="implant">Implant</SelectItem>
+                  {APPOINTMENT_TYPES.map((type, index) => (
+                    <SelectItem key={index} value={index.toString()}>{type}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            {showCustomTypeInput && (
+              <div className="space-y-2 col-span-2">
+                <Label htmlFor="customType">Please Specify</Label>
+                <Input
+                    id="customType"
+                    placeholder="e.g., 'Denture Fitting', 'Braces Adjustment'"
+                    value={form.customType || ""}
+                    onChange={(e) => setForm(prev => ({...prev, customType: e.target.value}))}
+                    required
+                />
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="price">Price ($)</Label>
+              <Input
+                id="price"
+                type="number"
+                value={form.price !== undefined ? form.price : ""}
+                onChange={(e) => setForm(prev => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
+                min="0"
+                step="0.01"
+                required
+              />
             </div>
             <div className="space-y-2">
               <Label>Duration (minutes)</Label>

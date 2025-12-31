@@ -8,6 +8,8 @@ import { useAppointmentModal } from "./AdminLayout";
 import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from "recharts";
 import { Badge } from "./ui/badge";
 import { Appointment } from "../hooks/useAppointments";
+import { getAppointmentTypeName, APPOINTMENT_TYPES } from "../lib/appointment-types";
+import { parseBackendDateToLocal } from "../lib/utils";
 
 const statsData = [
   {
@@ -97,7 +99,7 @@ export function Dashboard() {
 
     if (viewMode === "day") {
       const dayStr = today.toISOString().split("T")[0];
-      return appointments.filter(apt => apt.date === dayStr);
+      return appointments.filter(apt => parseBackendDateToLocal(apt.date).toISOString().split("T")[0] === dayStr);
     } else if (viewMode === "week") {
       const weekStart = new Date(today);
       weekStart.setDate(today.getDate() - today.getDay());
@@ -108,7 +110,7 @@ export function Dashboard() {
       weekEnd.setHours(23, 59, 59, 999);
 
       return appointments.filter(apt => {
-        const aptDate = new Date(apt.date);
+        const aptDate = parseBackendDateToLocal(apt.date);
         return aptDate >= weekStart && aptDate <= weekEnd;
       });
     } else {
@@ -120,7 +122,7 @@ export function Dashboard() {
       monthEnd.setHours(23, 59, 59, 999);
 
       return appointments.filter(apt => {
-        const aptDate = new Date(apt.date);
+        const aptDate = parseBackendDateToLocal(apt.date);
         return aptDate >= monthStart && aptDate <= monthEnd;
       });
     }
@@ -173,9 +175,8 @@ export function Dashboard() {
     }
   };
 
-  // compute appointment types distribution
   const appointmentTypeCounts = appointments.reduce<Record<string, number>>((acc, apt) => {
-    const key = apt.type || "Other";
+    const key = getAppointmentTypeName(apt.type, apt.customType);
     acc[key] = (acc[key] || 0) + 1;
     return acc;
   }, {});
@@ -323,14 +324,14 @@ export function Dashboard() {
                         <div>{appointment.time}</div>
                         {viewMode !== "day" && (
                           <div className="text-xs text-gray-500 mt-1">
-                            {new Date(appointment.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                            {parseBackendDateToLocal(appointment.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                           </div>
                         )}
                       </div>
                       <div>
                         <div className="text-sm font-medium">{appointment.patientName}</div>
                         <div className="text-xs text-muted-foreground flex items-center space-x-2">
-                          <span>{appointment.type} • {appointment.doctor}</span>
+                          <span>{getAppointmentTypeName(appointment.type, appointment.customType)} • {appointment.doctor} {appointment.price != null && `• $${appointment.price.toFixed(2)}`}</span>
                           <Badge variant={appointment.status === "pending" ? "outline" : appointment.status === "confirmed" ? "secondary" : "default"}>
                             {appointment.status}
                           </Badge>

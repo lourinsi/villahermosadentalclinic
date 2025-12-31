@@ -24,25 +24,24 @@ import { Appointment, AppointmentFilters } from "../hooks/useAppointments";
 import { Badge } from "./ui/badge";
 import { EditAppointmentModal } from "./EditAppointmentModal";
 import { useDoctors } from "../hooks/useDoctors";
+import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "./ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { Calendar } from "./ui/calendar";
 import { Label } from "./ui/label";
+import { APPOINTMENT_TYPES, getAppointmentTypeName } from "../lib/appointment-types";
+import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
 
 type ViewMode = "month" | "week" | "day" | "custom";
 
 const appointmentColors: Record<string, { bg: string; text: string; border: string }> = {
-  "Cleaning": { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" },
+  "Routine Cleaning": { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" },
   "Checkup": { bg: "bg-green-50", text: "text-green-700", border: "border-green-200" },
   "Filling": { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200" },
   "Root Canal": { bg: "bg-purple-50", text: "text-purple-700", border: "border-purple-200" },
   "Extraction": { bg: "bg-red-50", text: "text-red-700", border: "border-red-200" },
   "Whitening": { bg: "bg-indigo-50", text: "text-indigo-700", border: "border-indigo-200" },
-  "Crown": { bg: "bg-orange-50", text: "text-orange-700", border: "border-orange-200" },
-  "Consultation": { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200" },
-  "Emergency": { bg: "bg-rose-50", text: "text-rose-700", border: "border-rose-200" },
-  "Implant": { bg: "bg-cyan-50", text: "text-cyan-700", border: "border-cyan-200" },
-  "Routine Cleaning": { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" },
+  "Other": { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200" },
 };
 
 export function CalendarView() {
@@ -117,8 +116,8 @@ export function CalendarView() {
       const monthEnd = new Date(end.getFullYear(), end.getMonth() + 1, 0);
       monthEnd.setHours(23, 59, 59, 999);
       
-      const fetchStartStr = monthStart.toISOString().split('T')[0];
-      const fetchEndStr = monthEnd.toISOString().split('T')[0];
+      const fetchStartStr = formatDateToYYYYMMDD(monthStart);
+      const fetchEndStr = formatDateToYYYYMMDD(monthEnd);
       
       const isNewMonthRange = fetchStartStr !== fetchedRange.start || fetchEndStr !== fetchedRange.end;
       
@@ -146,24 +145,9 @@ export function CalendarView() {
     }
   }, [refreshTrigger, viewMode, selectedDate, searchTerm, dateRange]);
 
-  const generateTimeSlots = () => {
-    const slots = [];
-    for (let hour = 8; hour < 18; hour++) {
-      slots.push(`${hour.toString().padStart(2, '0')}:00`);
-      slots.push(`${hour.toString().padStart(2, '0')}:30`);
-    }
-    return slots;
-  };
+  const timeSlots = TIME_SLOTS;
 
-  const timeSlots = generateTimeSlots();
-
-  const formatTime = (time: string) => {
-    const [hours, minutes] = time.split(':');
-    const hour = parseInt(hours);
-    const period = hour >= 12 ? 'PM' : 'AM';
-    const displayHour = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
-    return `${displayHour}:${minutes} ${period}`;
-  };
+  const formatTime = formatTimeTo12h;
 
   const formatDateLabel = (date: Date) => {
     if (viewMode === "day") {
@@ -233,13 +217,14 @@ export function CalendarView() {
   };
 
   const getAppointmentsForDate = (date: Date) => {
-    const dateStr = date.toISOString().split('T')[0];
+    const dateStr = formatDateToYYYYMMDD(date);
     return appointments.filter(apt => {
       const matchesDate = apt.date === dateStr;
       const matchesDoctor = selectedDoctor === "all" || apt.doctor === selectedDoctor;
+      const typeName = getAppointmentTypeName(apt.type, apt.customType);
       const matchesSearch = searchTerm === "" || 
         apt.patientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        apt.type.toLowerCase().includes(searchTerm.toLowerCase());
+        typeName.toLowerCase().includes(searchTerm.toLowerCase());
       return matchesDate && matchesDoctor && matchesSearch;
     });
   };
@@ -250,7 +235,7 @@ export function CalendarView() {
   };
 
   const getColorForType = (type: string) => {
-    return appointmentColors[type] || appointmentColors["Checkup"];
+    return appointmentColors[type] || appointmentColors["Other"];
   };
 
   const calculateAppointmentStyle = (duration: number = 60) => {
@@ -294,7 +279,8 @@ export function CalendarView() {
                   <>
                     <div className="flex flex-wrap gap-2">
                       {appointmentsForSlot.map((appointment) => {
-                        const colors = getColorForType(appointment.type);
+                        const typeName = getAppointmentTypeName(appointment.type, appointment.customType);
+                        const colors = getColorForType(typeName);
                         return (
                           <div 
                             key={appointment.id}
@@ -306,7 +292,7 @@ export function CalendarView() {
                               <div className="flex-1">
                                 <div className="font-semibold text-sm mb-1">{appointment.patientName}</div>
                                 <div className="text-xs opacity-90">
-                                  {appointment.type} • {appointment.duration || 30}min
+                                  {typeName} • {appointment.duration || 30}min {appointment.price != null && ` • $${appointment.price.toFixed(2)}`}
                                 </div>
                                 <div className="text-xs opacity-80 mt-1">
                                   {appointment.doctor}
@@ -406,7 +392,8 @@ export function CalendarView() {
                     >
                       <div className="space-y-1 h-full">
                         {appointmentsForSlot.map(appointment => {
-                          const colors = getColorForType(appointment.type);
+                          const typeName = getAppointmentTypeName(appointment.type, appointment.customType);
+                          const colors = getColorForType(typeName);
                           return (
                             <div 
                               key={appointment.id}
@@ -418,7 +405,7 @@ export function CalendarView() {
                               }}
                             >
                               <div className="font-bold truncate">{appointment.patientName}</div>
-                              <div className="opacity-90 truncate text-[10px]">{appointment.type}</div>
+                              <div className="opacity-90 truncate text-[10px]">{typeName}{appointment.price != null && ` • $${appointment.price.toFixed(2)}`}</div>
                             </div>
                           )
                         })}
@@ -492,14 +479,18 @@ export function CalendarView() {
                 )}
               </div>
               <div className="space-y-1">
-                {dayAppointments.slice(0, 3).map((apt) => (
-                  <div 
-                    key={apt.id} 
-                    className={`text-[10px] p-1 rounded truncate border-l-2 ${getColorForType(apt.type).bg} ${getColorForType(apt.type).text} ${getColorForType(apt.type).border}`}
-                  >
-                    {apt.time} {apt.patientName}
-                  </div>
-                ))}
+                {dayAppointments.slice(0, 3).map((apt) => {
+                  const typeName = getAppointmentTypeName(apt.type, apt.customType);
+                  const colors = getColorForType(typeName);
+                  return (
+                    <div 
+                      key={apt.id} 
+                      className={`text-[10px] p-1 rounded truncate border-l-2 ${colors.bg} ${colors.text} ${colors.border}`}
+                    >
+                      {apt.time} {apt.patientName} {apt.price != null && ` ($${apt.price.toFixed(2)})`}
+                    </div>
+                  )
+                })}
                 {dayAppointments.length > 3 && (
                   <div className="text-[10px] text-muted-foreground pl-1 font-medium">
                     + {dayAppointments.length - 3} more
@@ -517,7 +508,7 @@ export function CalendarView() {
     // Filter by doctor if one is selected
     const filtered = appointments
       .filter(a => selectedDoctor === 'all' || a.doctor === selectedDoctor)
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      .sort((a, b) => parseBackendDateToLocal(a.date).getTime() - parseBackendDateToLocal(b.date).getTime());
     
     return (
       <div className="space-y-4 p-4">
@@ -529,19 +520,20 @@ export function CalendarView() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filtered.map(apt => {
-              const colors = getColorForType(apt.type);
+              const typeName = getAppointmentTypeName(apt.type, apt.customType);
+              const colors = getColorForType(typeName);
               return (
                 <Card key={apt.id} className="overflow-hidden hover:shadow-md transition-shadow cursor-pointer" onClick={() => { setEditingAppointment(apt); setEditOpen(true); }}>
                   <div className={`h-1 ${colors.bg.replace('bg-', 'bg-').split(' ')[0]}`} />
                   <CardContent className="p-4">
                     <div className="flex justify-between items-start mb-2">
                       <div className="font-bold text-lg">{apt.patientName}</div>
-                      <Badge className={`${colors.bg} ${colors.text} border-none`}>{apt.type}</Badge>
+                      <Badge className={`${colors.bg} ${colors.text} border-none`}>{typeName}</Badge>
                     </div>
                     <div className="space-y-2 text-sm text-muted-foreground">
                       <div className="flex items-center gap-2">
                         <CalendarIcon className="h-4 w-4" />
-                        <span>{new Date(apt.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} at {apt.time}</span>
+                        <span>{parseBackendDateToLocal(apt.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} at {apt.time}</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <Clock className="h-4 w-4" />
@@ -551,6 +543,12 @@ export function CalendarView() {
                         <UsersIcon className="h-4 w-4" />
                         <span>{apt.doctor}</span>
                       </div>
+                      {apt.price != null && (
+                        <div className="flex items-center gap-2">
+                          <DollarSign className="h-4 w-4" />
+                          <span>${apt.price.toFixed(2)}</span>
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>

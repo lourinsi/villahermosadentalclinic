@@ -34,7 +34,8 @@ export function AddPatientModal({
     emergencyPhone: "",
     medicalHistory: "",
     allergies: "",
-    notes: ""
+    notes: "",
+    dentalCharts: []
   });
   
   const [isLoading, setIsLoading] = useState(false);
@@ -84,7 +85,8 @@ export function AddPatientModal({
           emergencyPhone: "",
           medicalHistory: "",
           allergies: "",
-          notes: ""
+          notes: "",
+          dentalCharts: []
         });
       } else {
         toast.error(result.message || "Failed to add patient");

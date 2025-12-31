@@ -8,6 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { useAppointmentModal } from "./AdminLayout";
 import { toast } from "sonner";
 import { useDoctors } from "../hooks/useDoctors";
+import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
+import { formatDateToYYYYMMDD } from "../lib/utils";
 
 interface ScheduleAppointmentModalProps {
   open: boolean;
@@ -216,27 +218,31 @@ export function ScheduleAppointmentModal({
                   
                   setFormData(prev => ({ ...prev, date: e.target.value }));
                 }}
-                min={new Date().toISOString().split('T')[0]}
+                min={formatDateToYYYYMMDD(new Date())}
                 required
               />
               {dateError && <p className="text-red-500 text-sm">{dateError}</p>}
             </div>
             <div className="space-y-2">
-              <Label>Time</Label>
+              <Label htmlFor="time">Time</Label>
               <Select
-                value={formData.time}
-                onValueChange={(value) => setFormData(prev => ({ ...prev, time: value }))}
+                value={TIME_SLOTS.indexOf(formData.time).toString()}
+                onValueChange={(value) => {
+                  const index = parseInt(value);
+                  if (index >= 0) {
+                    setFormData(prev => ({ ...prev, time: TIME_SLOTS[index] }));
+                  }
+                }}
               >
-                <SelectTrigger>
+                <SelectTrigger id="time">
                   <SelectValue placeholder="Select time" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="09:00">9:00 AM</SelectItem>
-                  <SelectItem value="10:00">10:00 AM</SelectItem>
-                  <SelectItem value="11:00">11:00 AM</SelectItem>
-                  <SelectItem value="14:00">2:00 PM</SelectItem>
-                  <SelectItem value="15:00">3:00 PM</SelectItem>
-                  <SelectItem value="16:00">4:00 PM</SelectItem>
+                  {TIME_SLOTS.map((slot, index) => (
+                    <SelectItem key={slot} value={index.toString()}>
+                      {formatTimeTo12h(slot)}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
