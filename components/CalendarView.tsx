@@ -17,6 +17,7 @@ import {
   Trash2, 
   Clock,
   X,
+  DollarSign,
   Users as UsersIcon
 } from "lucide-react";
 import { useAppointmentModal } from "./AdminLayout";
