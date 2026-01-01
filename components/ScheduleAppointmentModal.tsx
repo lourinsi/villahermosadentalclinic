@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { useDoctors } from "../hooks/useDoctors";
 import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
 import { formatDateToYYYYMMDD } from "../lib/utils";
+import { APPOINTMENT_TYPES } from "../lib/appointment-types";
 
 interface ScheduleAppointmentModalProps {
   open: boolean;
@@ -46,7 +47,8 @@ export function ScheduleAppointmentModal({
       setFormData(prev => ({
         ...prev,
         patientName: patientName || prev.patientName,
-        patientId: String(patientId || "")
+        patientId: String(patientId || ""),
+        type: "" // Reset type when patient changes
       }));
     }
   }, [patientName, patientId, open]);

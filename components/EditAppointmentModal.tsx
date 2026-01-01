@@ -10,7 +10,14 @@ import { toast } from "sonner";
 import { Appointment } from "../hooks/useAppointments";
 import { useDoctors } from "../hooks/useDoctors";
 import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
-import { APPOINTMENT_TYPES } from "../lib/appointment-types";
+import { APPOINTMENT_TYPES, getAppointmentTypeName } from "../lib/appointment-types";
+
+interface PatientOption {
+  id: string;
+  name: string;
+  email?: string;
+  phone?: string;
+}
 
 interface EditAppointmentModalProps {
   open: boolean;
@@ -26,24 +33,61 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
   const [showCustomTypeInput, setShowCustomTypeInput] = useState(false);
   const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors();
 
+  const [allPatients, setAllPatients] = useState<PatientOption[]>([]);
+  const [selectedPatientOption, setSelectedPatientOption] = useState<string>(""); // Stores patient ID or "new-patient"
+  const [isCreatingNewPatient, setIsCreatingNewPatient] = useState(false);
+  const [newPatientFormData, setNewPatientFormData] = useState({
+    firstName: "",
+    lastName: "",
+    email: "",
+    phone: "",
+  });
+
+  useEffect(() => {
+    const fetchPatients = async () => {
+      try {
+        const res = await fetch("http://localhost:3001/api/patients");
+        const json = await res.json();
+        if (json?.success && Array.isArray(json.data)) {
+          setAllPatients(json.data.map((p: any) => ({ id: String(p.id), name: `${p.firstName} ${p.lastName}`, email: p.email, phone: p.phone })));
+        }
+      } catch (err) {
+        console.error("Failed to load patients:", err);
+      }
+    };
+
+    if (open) { // Fetch patients only when modal is open
+      fetchPatients();
+      reloadDoctors(); // Reload doctors as well
+    }
+  }, [open, reloadDoctors]);
+
   useEffect(() => {
     if (appointment) {
       setForm({ ...appointment });
+      // Set initial selected patient option
+      if (appointment.patientId) {
+        setSelectedPatientOption(appointment.patientId);
+        setIsCreatingNewPatient(false);
+      } else {
+        setSelectedPatientOption(""); // No patient selected
+      }
+
       if (appointment.type === APPOINTMENT_TYPES.length - 1) {
         setShowCustomTypeInput(true);
       } else {
         setShowCustomTypeInput(false);
       }
+    } else {
+      // Reset form and state when no appointment is provided (e.g., modal is closed)
+      setForm({});
+      setSelectedPatientOption("");
+      setIsCreatingNewPatient(false);
+      setNewPatientFormData({ firstName: "", lastName: "", email: "", phone: "" });
     }
-  }, [appointment]);
+  }, [appointment, open]); // Added 'open' to dependency array to reset state on close
 
-  useEffect(() => {
-    if (open) {
-      reloadDoctors();
-    }
-  }, [open, reloadDoctors]);
 
-  if (!appointment) return null;
 
   const handleSave = async () => {
     if (form.type == null || form.type < 0) {
@@ -56,7 +100,59 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
       return;
     }
 
-    if (!form.patientName || !form.date || !form.time || !form.doctor || !appointment.id || form.price === undefined || form.price < 0) {
+    // Patient validation and creation logic
+    let finalPatientId = form.patientId;
+    let finalPatientName = form.patientName;
+
+    if (isCreatingNewPatient) {
+      if (!newPatientFormData.firstName || !newPatientFormData.lastName || !newPatientFormData.email || !newPatientFormData.phone) {
+        toast.error("Please fill all required fields for the new patient.");
+        return;
+      }
+      setIsLoading(true);
+      try {
+        const newPatient = {
+          firstName: newPatientFormData.firstName,
+          lastName: newPatientFormData.lastName,
+          email: newPatientFormData.email,
+          phone: newPatientFormData.phone,
+          // Add other required fields for patient creation, even if empty
+          dateOfBirth: "", address: "", city: "", zipCode: "", insurance: "",
+          emergencyContact: "", emergencyPhone: "", medicalHistory: "", allergies: "", notes: "",
+          dentalCharts: [],
+          createdAt: new Date().toISOString()
+        };
+        const response = await fetch("http://localhost:3001/api/patients", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(newPatient),
+        });
+        const result = await response.json();
+        if (result.success && result.data) {
+          finalPatientId = result.data.id;
+          finalPatientName = `${result.data.firstName} ${result.data.lastName}`;
+          toast.success("New patient created successfully!");
+          refreshAppointments(); // Refresh to ensure patient list is up to date
+        } else {
+          toast.error(result.message || "Failed to create new patient.");
+          return;
+        }
+      } catch (error) {
+        console.error("Error creating new patient:", error);
+        toast.error("Error creating new patient.");
+        return;
+      } finally {
+        setIsLoading(false);
+      }
+    } else {
+      // If not creating new patient, ensure a patient is selected
+      if (!finalPatientId || !finalPatientName) {
+        toast.error("Please select a patient or create a new one.");
+        return;
+      }
+    }
+
+    if (!form.date || !form.time || !form.doctor || !appointment.id || form.price === undefined || form.price < 0) {
       toast.error("Please fill all required fields and ensure price is valid.");
       return;
     }
@@ -64,7 +160,12 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
     setIsLoading(true);
     try {
       console.log("=== UPDATING APPOINTMENT ===", appointment.id);
-      await updateAppointment(appointment.id, form as Partial<Appointment>);
+      const updatedForm = {
+        ...form,
+        patientId: finalPatientId,
+        patientName: finalPatientName,
+      };
+      await updateAppointment(appointment.id, updatedForm as Partial<Appointment>);
       toast.success("Appointment updated");
       refreshAppointments();
       onOpenChange(false);
@@ -109,12 +210,80 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
         <div className="space-y-4">
           <div className="space-y-2">
             <Label>Patient</Label>
-            <Input 
-              value={form.patientName || ''} 
-              readOnly 
-              className="bg-muted"
-            />
+            <Select
+              value={selectedPatientOption}
+              onValueChange={(value) => {
+                setSelectedPatientOption(value);
+                if (value === "new-patient") {
+                  setIsCreatingNewPatient(true);
+                  // Clear existing patient details from form
+                  setForm(prev => ({ ...prev, patientId: undefined, patientName: undefined }));
+                } else {
+                  setIsCreatingNewPatient(false);
+                  const selected = allPatients.find(p => p.id === value);
+                  if (selected) {
+                    setForm(prev => ({ ...prev, patientId: selected.id, patientName: selected.name }));
+                  }
+                }
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select patient or create new" />
+              </SelectTrigger>
+              <SelectContent>
+                {allPatients.length > 0 && (
+                  <SelectItem disabled>Select an existing patient</SelectItem>
+                )}
+                {allPatients.map(p => (
+                  <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                ))}
+                <SelectItem value="new-patient" className="font-semibold text-blue-600">
+                  + Create New Patient
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </div>
+
+          {isCreatingNewPatient && (
+            <>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>First Name</Label>
+                  <Input
+                    value={newPatientFormData.firstName}
+                    onChange={(e) => setNewPatientFormData(prev => ({ ...prev, firstName: e.target.value }))}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Last Name</Label>
+                  <Input
+                    value={newPatientFormData.lastName}
+                    onChange={(e) => setNewPatientFormData(prev => ({ ...prev, lastName: e.target.value }))}
+                    required
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Email</Label>
+                <Input
+                  type="email"
+                  value={newPatientFormData.email}
+                  onChange={(e) => setNewPatientFormData(prev => ({ ...prev, email: e.target.value }))}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Phone</Label>
+                <Input
+                  type="tel"
+                  value={newPatientFormData.phone}
+                  onChange={(e) => setNewPatientFormData(prev => ({ ...prev, phone: e.target.value }))}
+                  required
+                />
+              </div>
+            </>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">

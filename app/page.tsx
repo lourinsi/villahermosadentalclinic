@@ -8,6 +8,7 @@ import { FinanceView } from "../components/FinanceView";
 import { CalendarView } from "../components/CalendarView";
 import { SettingsView } from "../components/SettingsView";
 import { StaffView } from "../components/Staff";
+import { AllAppointmentsView } from "../components/AllAppointmentsView";
 
 export default function Home() {
   const [currentView, setCurrentView] = useState("dashboard");
@@ -26,6 +27,8 @@ export default function Home() {
         return <StaffView />
       case "settings":
         return <SettingsView />;
+      case "all-appointments":
+        return <AllAppointmentsView />;
       default:
         return <Dashboard />;
     }

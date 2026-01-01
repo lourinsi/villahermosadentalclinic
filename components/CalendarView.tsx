@@ -32,8 +32,9 @@ import { Calendar } from "./ui/calendar";
 import { Label } from "./ui/label";
 import { APPOINTMENT_TYPES, getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
+import { AllAppointmentsView } from "./AllAppointmentsView";
 
-type ViewMode = "month" | "week" | "day" | "custom";
+type ViewMode = "month" | "week" | "day" | "custom" | "all";
 
 const appointmentColors: Record<string, { bg: string; text: string; border: string }> = {
   "Routine Cleaning": { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" },
@@ -111,18 +112,25 @@ export function CalendarView() {
   useEffect(() => {
     const { start, end } = getViewRange(selectedDate);
     
-    // For normal navigation (no search), we fetch by month
+    // For normal navigation (no search), we fetch by month or custom range
     if (searchTerm === "") {
-      const monthStart = new Date(start.getFullYear(), start.getMonth(), 1);
-      const monthEnd = new Date(end.getFullYear(), end.getMonth() + 1, 0);
-      monthEnd.setHours(23, 59, 59, 999);
+      let fetchStartStr: string;
+      let fetchEndStr: string;
+
+      if (viewMode === 'custom' && dateRange?.from && dateRange?.to) {
+        fetchStartStr = formatDateToYYYYMMDD(dateRange.from);
+        fetchEndStr = formatDateToYYYYMMDD(dateRange.to);
+      } else {
+        const monthStart = new Date(start.getFullYear(), start.getMonth(), 1);
+        const monthEnd = new Date(end.getFullYear(), end.getMonth() + 1, 0);
+        monthEnd.setHours(23, 59, 59, 999);
+        fetchStartStr = formatDateToYYYYMMDD(monthStart);
+        fetchEndStr = formatDateToYYYYMMDD(monthEnd);
+      }
       
-      const fetchStartStr = formatDateToYYYYMMDD(monthStart);
-      const fetchEndStr = formatDateToYYYYMMDD(monthEnd);
+      const isNewRange = fetchStartStr !== fetchedRange.start || fetchEndStr !== fetchedRange.end;
       
-      const isNewMonthRange = fetchStartStr !== fetchedRange.start || fetchEndStr !== fetchedRange.end;
-      
-      if (isNewMonthRange || refreshTrigger > 0) {
+      if (isNewRange || refreshTrigger > 0) {
         setIsLoadingView(true);
         refreshAppointments({
           startDate: fetchStartStr,
@@ -194,7 +202,6 @@ export function CalendarView() {
       newTo.setDate(newTo.getDate() + shift);
       
       setDateRange({ from: newFrom, to: newTo });
-      setSelectedDate(newFrom); // Keep selectedDate in sync with the start of the range
       return;
     }
     setSelectedDate(newDate);
@@ -607,6 +614,12 @@ export function CalendarView() {
                 </Button>
               </div>
               
+              {/* <Button variant="outline" className="h-10 font-semibold shadow-sm px-4" onClick={goToToday}>
+                Today
+              </Button> */}
+              {/* <Button variant="outline" className="h-10 font-semibold shadow-sm px-4" onClick={goToToday}>
+                Today
+              </Button> */}
               <Popover open={showDatePicker} onOpenChange={setShowDatePicker}>
                 <PopoverTrigger asChild>
                   <Button variant="outline" className="h-10 gap-2 font-semibold shadow-sm px-4">
@@ -619,7 +632,7 @@ export function CalendarView() {
                     <div className="space-y-2">
                       <Label className="text-xs font-bold uppercase tracking-wider text-gray-400">View Mode</Label>
                       <div className="grid grid-cols-2 gap-2">
-                        {(["day", "week", "month", "custom"] as const).map((mode) => (
+                        {(["week", "month", "custom", "all"] as const).map((mode) => (
                           <Button
                             key={mode}
                             variant={viewMode === mode ? "brand" : "outline"}
@@ -650,7 +663,13 @@ export function CalendarView() {
                           selected={dateRange}
                           onSelect={(range: DateRange | undefined) => {
                             setSearchTerm("");
-                            setDateRange(range);
+                            // If a full range was already selected, and user clicks a single new date,
+                            // treat it as starting a brand new range.
+                            if (dateRange?.from && dateRange?.to && range?.from && !range.to) {
+                                setDateRange({ from: range.from, to: undefined });
+                            } else {
+                                setDateRange(range);
+                            }
                           }}
                           numberOfMonths={2}
                           className="rounded-md border shadow-sm"
@@ -681,7 +700,7 @@ export function CalendarView() {
                             if (date) {
                               setSearchTerm("");
                               setSelectedDate(date);
-                              setViewMode("day");
+                              setViewMode("month");
                               setShowDatePicker(false);
                             }
                           }}
@@ -733,7 +752,7 @@ export function CalendarView() {
               
               <Badge variant="secondary" className="bg-violet-50 text-violet-700 border-violet-100 h-10 px-4 rounded-lg font-semibold flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-violet-600 animate-pulse" />
-                {searchTerm !== "" ? "Search Results" : (viewMode === "day" ? "Day View" : viewMode === "week" ? "Week View" : viewMode === "month" ? "Month View" : "Custom Range")}
+                {searchTerm !== "" ? "Search Results" : (viewMode === "day" ? "Day View" : viewMode === "week" ? "Week View" : viewMode === "month" ? "Month View" : viewMode === "custom" ? "Custom Range" : "All Appointments")}
               </Badge>
             </div>
           </div>
@@ -775,6 +794,11 @@ export function CalendarView() {
                     {viewMode === "week" && renderWeekView()}
                     {viewMode === "month" && renderMonthView()}
                     {viewMode === "custom" && renderCustomView()}
+                    {viewMode === "all" && (
+                      <div className="p-4">
+                        <AllAppointmentsView />
+                      </div>
+                    )}
                   </>
                 )}
               </>

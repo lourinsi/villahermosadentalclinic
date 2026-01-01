@@ -65,6 +65,7 @@ const menuItems = [
   { id: "staff", label: "Staff", icon: Briefcase },
   { id: "finance", label: "Finance", icon: DollarSign },
   { id: "settings", label: "Settings", icon: Settings },
+  { id: "all-appointments", label: "All Appointments", icon: Calendar },
 ];
 
 function SidebarContentWrapper({ currentView, onViewChange }: { currentView: string; onViewChange: (view: string) => void }) {
