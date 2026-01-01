@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -42,22 +42,26 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
     email: "",
     phone: "",
   });
+  const [isLoadingPatients, setIsLoadingPatients] = useState(false);
+
+  const fetchPatients = useCallback(async () => {
+    setIsLoadingPatients(true);
+    try {
+      const res = await fetch("http://localhost:3001/api/patients");
+      const json = await res.json();
+      if (json?.success && Array.isArray(json.data)) {
+        setAllPatients(json.data.map((p: any) => ({ id: String(p.id), name: `${p.firstName} ${p.lastName}`, email: p.email, phone: p.phone })));
+      }
+    } catch (err) {
+      console.error("Failed to load patients:", err);
+      toast.error("Failed to load patients.");
+    } finally {
+      setIsLoadingPatients(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const fetchPatients = async () => {
-      try {
-        const res = await fetch("http://localhost:3001/api/patients");
-        const json = await res.json();
-        if (json?.success && Array.isArray(json.data)) {
-          setAllPatients(json.data.map((p: any) => ({ id: String(p.id), name: `${p.firstName} ${p.lastName}`, email: p.email, phone: p.phone })));
-        }
-      } catch (err) {
-        console.error("Failed to load patients:", err);
-      }
-    };
-
     if (open) { // Fetch patients only when modal is open
-      fetchPatients();
       reloadDoctors(); // Reload doctors as well
     }
   }, [open, reloadDoctors]);
@@ -66,7 +70,8 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
     if (appointment) {
       setForm({ ...appointment });
       // Set initial selected patient option
-      if (appointment.patientId) {
+      if (appointment.patientId && appointment.patientName) {
+        setAllPatients([{ id: appointment.patientId, name: appointment.patientName, email: appointment.email, phone: appointment.phone }]);
         setSelectedPatientOption(appointment.patientId);
         setIsCreatingNewPatient(false);
       } else {
@@ -84,6 +89,7 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
       setSelectedPatientOption("");
       setIsCreatingNewPatient(false);
       setNewPatientFormData({ firstName: "", lastName: "", email: "", phone: "" });
+      setShowCustomTypeInput(false); // Also reset this when no appointment
     }
   }, [appointment, open]); // Added 'open' to dependency array to reset state on close
 
@@ -152,20 +158,20 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
       }
     }
 
-    if (!form.date || !form.time || !form.doctor || !appointment.id || form.price === undefined || form.price < 0) {
+    if (!form.date || !form.time || !form.doctor || !appointment?.id || form.price === undefined || form.price < 0) {
       toast.error("Please fill all required fields and ensure price is valid.");
       return;
     }
 
     setIsLoading(true);
     try {
-      console.log("=== UPDATING APPOINTMENT ===", appointment.id);
+      console.log("=== UPDATING APPOINTMENT ===", appointment?.id);
       const updatedForm = {
         ...form,
         patientId: finalPatientId,
         patientName: finalPatientName,
       };
-      await updateAppointment(appointment.id, updatedForm as Partial<Appointment>);
+      await updateAppointment(appointment?.id, updatedForm as Partial<Appointment>);
       toast.success("Appointment updated");
       refreshAppointments();
       onOpenChange(false);
@@ -182,7 +188,7 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
   };
 
   const confirmDelete = async () => {
-    if (!appointment.id) return;
+    if (!appointment?.id) return;
     setIsLoading(true);
     try {
       console.log("=== DELETING APPOINTMENT ===", appointment.id);
@@ -226,17 +232,28 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
                   }
                 }
               }}
+              onOpenChange={(open) => {
+                if (open) {
+                  fetchPatients();
+                }
+              }}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Select patient or create new" />
               </SelectTrigger>
               <SelectContent>
-                {allPatients.length > 0 && (
-                  <SelectItem disabled>Select an existing patient</SelectItem>
+                {isLoadingPatients && (
+                  <div className="p-2 text-center text-sm text-gray-500">Loading patients...</div>
+                )}
+                {allPatients.length > 0 && !isLoadingPatients && (
+                  <SelectItem disabled value="disabled-patient-header">Select an existing patient</SelectItem>
                 )}
                 {allPatients.map(p => (
                   <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
                 ))}
+                {!isLoadingPatients && allPatients.length === 0 && (
+                  <div className="p-2 text-center text-sm text-gray-500">No patients found.</div>
+                )}
                 <SelectItem value="new-patient" className="font-semibold text-blue-600">
                   + Create New Patient
                 </SelectItem>

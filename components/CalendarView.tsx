@@ -246,6 +246,82 @@ export function CalendarView() {
     return appointmentColors[type] || appointmentColors["Other"];
   };
 
+  // NOTE: Convert time string to minutes since midnight for easier comparison
+  const timeToMinutes = (time: string): number => {
+    const [hours, minutes] = time.split(':').map(Number);
+    return hours * 60 + minutes;
+  };
+
+  // NOTE: Check if two appointments overlap
+  const appointmentsOverlap = (apt1: Appointment, apt2: Appointment): boolean => {
+    const start1 = timeToMinutes(apt1.time);
+    const end1 = start1 + (apt1.duration || 30);
+    const start2 = timeToMinutes(apt2.time);
+    const end2 = start2 + (apt2.duration || 30);
+    
+    return start1 < end2 && start2 < end1;
+  };
+
+  // NOTE: Organize appointments into columns to handle overlaps
+  const organizeAppointmentsIntoColumns = (appointments: Appointment[]) => {
+    if (appointments.length === 0) return { columns: [], appointmentColumns: new Map<string, number>(), maxOverlappingAt: new Map<string, number>() };
+    
+    // Sort appointments by start time, then by duration (longer first)
+    const sorted = [...appointments].sort((a, b) => {
+      const timeCompare = timeToMinutes(a.time) - timeToMinutes(b.time);
+      if (timeCompare !== 0) return timeCompare;
+      return (b.duration || 30) - (a.duration || 30);
+    });
+
+    const columns: Appointment[][] = [];
+    const appointmentColumns = new Map<string, number>(); // appointmentId -> columnIndex
+    
+    sorted.forEach(apt => {
+      let columnIndex = 0;
+      while (columnIndex < columns.length) {
+        const hasOverlap = columns[columnIndex].some(existingApt => 
+          appointmentsOverlap(apt, existingApt)
+        );
+        if (!hasOverlap) break;
+        columnIndex++;
+      }
+      
+      if (columnIndex === columns.length) {
+        columns.push([]);
+      }
+      
+      columns[columnIndex].push(apt);
+      appointmentColumns.set(apt.id, columnIndex);
+    });
+
+    const maxOverlappingAt = new Map<string, number>();
+    
+    // Group appointments into clusters of overlapping ones
+    const clusters: Appointment[][] = [];
+    sorted.forEach(apt => {
+      let addedToCluster = false;
+      for (const cluster of clusters) {
+        if (cluster.some(c => appointmentsOverlap(apt, c))) {
+          cluster.push(apt);
+          addedToCluster = true;
+          break;
+        }
+      }
+      if (!addedToCluster) {
+        clusters.push([apt]);
+      }
+    });
+
+    clusters.forEach(cluster => {
+      const maxCol = Math.max(...cluster.map(a => appointmentColumns.get(a.id) ?? 0)) + 1;
+      cluster.forEach(a => {
+        maxOverlappingAt.set(a.id, maxCol);
+      });
+    });
+
+    return { columns, appointmentColumns, maxOverlappingAt };
+  };
+
   const calculateAppointmentStyle = (duration: number = 60) => {
     const slotHeight = 80; // pixels per 30-minute slot
     const slotsOccupied = duration / 30;
@@ -255,102 +331,142 @@ export function CalendarView() {
   };
 
   const renderDayView = () => {
-    const renderedSlots = new Set<string>();
+    const dayAppointments = getAppointmentsForDate(selectedDate);
+    const { appointmentColumns, maxOverlappingAt } = organizeAppointmentsIntoColumns(dayAppointments);
+
+    // Calculate occupied time segments for the entire day (minute by minute)
+    // This will help determine if a 30-minute slot is covered by any appointment duration.
+    const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
+
+    dayAppointments.forEach(apt => {
+      const startTimeMinutes = timeToMinutes(apt.time);
+      const duration = apt.duration || 30; // Default to 30 mins
+      const endTimeMinutes = startTimeMinutes + duration;
+
+      for (let m = startTimeMinutes; m < endTimeMinutes; m++) {
+        if (m >= 0 && m < isMinuteOccupied.length) {
+          isMinuteOccupied[m] = true;
+        }
+      }
+    });
+
+    // Function to check if a 30-minute timeSlot is covered by an appointment
+    const isSlotCovered = (timeSlot: string): boolean => {
+      const slotStartMinutes = timeToMinutes(timeSlot);
+      // Check if any minute within this 30-minute slot is occupied
+      for (let m = slotStartMinutes; m < slotStartMinutes + 30; m++) {
+        if (isMinuteOccupied[m]) {
+          return true;
+        }
+      }
+      return false;
+    };
 
     return (
-      <div className="space-y-0">
+      <div className="space-y-0 relative">
         {timeSlots.map((timeSlot) => {
-          if (renderedSlots.has(timeSlot)) {
-            return null;
-          }
+          const appointmentsStartingAtSlot = dayAppointments.filter(apt => apt.time === timeSlot);
+          const currentSlotIsCovered = isSlotCovered(timeSlot); // Check if the 30-min slot is covered
 
-          const appointmentsForSlot = getAppointmentsAtTime(timeSlot, selectedDate);
-          
-          if (appointmentsForSlot.length > 0) {
-            const maxDuration = Math.max(...appointmentsForSlot.map(a => a.duration || 30));
-            const slotsOccupied = Math.ceil(maxDuration / 30);
-            for (let i = 0; i < slotsOccupied; i++) {
-              const slotIndex = timeSlots.indexOf(timeSlot) + i;
-              if (slotIndex < timeSlots.length) {
-                renderedSlots.add(timeSlots[slotIndex]);
-              }
-            }
-          }
-          
           return (
-            <div key={timeSlot} className="flex items-start min-h-[60px] border-b border-gray-100">
-              <div className="w-28 pl-4 pt-2 text-sm text-muted-foreground font-medium">
+            <div key={timeSlot} className="flex items-start min-h-[80px] border-b border-gray-100 relative group">
+              {/* Plus button area - Conditional rendering based on whether appointments exist or cover the slot */}
+              {currentSlotIsCovered ? ( // If any part of the slot is covered
+                /* Position for occupied slots: under the time label, restricted width */
+                <div
+                  className="absolute top-8 left-4 w-20 h-10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-30 hover:bg-violet-50/50 rounded-xl border-2 border-dashed border-transparent hover:border-violet-200/50 group/plus"
+                  onClick={() => openCreateModal(selectedDate, timeSlot)} // Clicking still creates at this slot
+                >
+                  <Plus className="h-5 w-5 text-violet-300 transition-colors group-hover/plus:text-violet-600" />
+                </div>
+              ) : (
+                /* Wide position for empty slots: centered in the main area */
+                <div
+                  className="absolute inset-y-2 left-32 right-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-10 hover:bg-violet-50/50 rounded-xl border-2 border-dashed border-transparent hover:border-violet-200/50 group/plus"
+                  onClick={() => openCreateModal(selectedDate, timeSlot)}
+                >
+                  <Plus className="h-6 w-6 text-violet-300 transition-colors group-hover/plus:text-violet-600" />
+                </div>
+              )}
+
+              {/* Time Label */}
+              <div className="w-28 pl-4 pt-2 text-sm text-muted-foreground font-medium sticky left-0 bg-white z-10 pointer-events-none">
                 {formatTime(timeSlot)}
               </div>
-              <div className="flex-1 ml-6 py-1 pr-4">
-                {appointmentsForSlot.length > 0 ? (
-                  <>
-                    <div className="flex flex-wrap gap-2">
-                      {appointmentsForSlot.map((appointment) => {
-                        const typeName = getAppointmentTypeName(appointment.type, appointment.customType);
-                        const colors = getColorForType(typeName);
-                        return (
-                          <div 
-                            key={appointment.id}
-                            className={`${colors?.bg} ${colors?.text} ${colors?.border} border-l-4 rounded-lg p-4 shadow-sm hover:shadow-md transition-all cursor-pointer flex-1 min-w-[200px]`}
-                            style={calculateAppointmentStyle(appointment.duration)}
-                            onClick={() => { setEditingAppointment(appointment); setEditOpen(true); }}
-                          >
-                            <div className="flex items-start justify-between h-full">
-                              <div className="flex-1">
-                                <div className="font-semibold text-sm mb-1">{appointment.patientName}</div>
-                                <div className="text-xs opacity-90">
-                                  {typeName} • {appointment.duration || 30}min {appointment.price != null && ` • $${appointment.price.toFixed(2)}`}
-                                </div>
-                                <div className="text-xs opacity-80 mt-1">
-                                  {appointment.doctor}
-                                </div>
-                              </div>
-                              <div className="flex space-x-1">
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm" 
-                                  className="h-6 w-6 p-0 hover:bg-white/20"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setEditingAppointment(appointment);
-                                    setEditOpen(true);
-                                  }}
-                                >
-                                  <Edit className="h-3 w-3" />
-                                </Button>
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm" 
-                                  className="h-6 w-6 p-0 hover:bg-white/20"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setAppointmentToDelete(appointment.id);
-                                    setIsDeleteDialogOpen(true);
-                                  }}
-                                >
-                                  <Trash2 className="h-3 w-3" />
-                                </Button>
-                              </div>
-                            </div>
+              
+              <div className="flex-1 relative min-h-[80px]">
+                {/* Appointments starting at this slot */}
+                {appointmentsStartingAtSlot.map((appointment) => {
+                  const columnIndex = appointmentColumns.get(appointment.id) ?? 0;
+                  const totalColumns = maxOverlappingAt.get(appointment.id) ?? 1;
+                  const typeName = getAppointmentTypeName(appointment.type, appointment.customType);
+                  const colors = getColorForType(typeName);
+                  
+                  const width = `${100 / totalColumns}%`;
+                  const left = `${(columnIndex * 100) / totalColumns}%`;
+                  
+                  return (
+                    <div 
+                      key={appointment.id}
+                      className={`absolute top-0 ${colors?.bg} ${colors?.text} ${colors?.border} border-l-4 rounded-lg p-3 shadow-sm hover:shadow-md transition-all cursor-pointer z-20 overflow-hidden`}
+                      style={{
+                        ...calculateAppointmentStyle(appointment.duration),
+                        width: `calc(${width} - 4px)`,
+                        left: `calc(${left} + 2px)`,
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingAppointment(appointment);
+                        setEditOpen(true);
+                      }}
+                    >
+                      <div className="flex flex-col h-full">
+                        <div className="flex items-start justify-between">
+                          <div className="font-semibold text-sm truncate pr-2">
+                            {appointment.patientName}
                           </div>
-                        );
-                      })}
+                          <div className="flex flex-shrink-0 space-x-1">
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              className="h-6 w-6 p-0 hover:bg-black/5"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingAppointment(appointment);
+                                setEditOpen(true);
+                              }}
+                            >
+                              <Edit className="h-3 w-3" />
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              className="h-6 w-6 p-0 hover:bg-black/5"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setAppointmentToDelete(appointment.id);
+                                setIsDeleteDialogOpen(true);
+                              }}
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="text-xs opacity-90 truncate">
+                          {typeName} • {appointment.duration || 30}min
+                        </div>
+                        <div className="text-xs opacity-80 mt-1 truncate">
+                          {appointment.doctor}
+                        </div>
+                        {appointment.price != null && (
+                          <div className="text-xs font-medium mt-auto pt-1">
+                            ${appointment.price.toFixed(2)}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex justify-center py-1">
-                        <Button variant="ghost" size="icon" className="h-7 w-7 rounded-full" onClick={() => openCreateModal(selectedDate, timeSlot)}>
-                            <Plus className="h-4 w-4" />
-                        </Button>
-                    </div>
-                  </>
-                ) : (
-                  <div 
-                    className="h-[56px] flex items-center justify-center text-muted-foreground text-sm hover:bg-gray-50 rounded transition-colors cursor-pointer"
-                    onClick={() => openCreateModal(selectedDate, timeSlot)}
-                  >
-                    <Plus className="h-4 w-4" />
-                  </div>
-                )}
+                  );
+                })}
               </div>
             </div>
           );

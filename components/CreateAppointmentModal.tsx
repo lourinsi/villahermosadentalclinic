@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -58,27 +58,32 @@ export function CreateAppointmentModal({
   const [showNewPatient, setShowNewPatient] = useState(false);
   const [patients, setPatients] = useState<Array<{ id: string; name: string }>>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingPatients, setIsLoadingPatients] = useState(false);
   const [showCustomTypeInput, setShowCustomTypeInput] = useState(false);
 
   const { refreshTrigger } = useAppointmentModal();
   const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors();
 
-  useEffect(() => {
-    const fetchPatients = async () => {
-      try {
-        const res = await fetch("http://localhost:3001/api/patients");
-        const json = await res.json();
-        if (json?.success && Array.isArray(json.data)) {
-          const list = json.data.map((p: any) => ({ id: String(p.id), name: `${p.firstName} ${p.lastName}` }));
-          setPatients(list);
-        }
-      } catch (err) {
-        console.error("Failed to load patients:", err);
+  const fetchPatients = useCallback(async () => {
+    setIsLoadingPatients(true);
+    try {
+      const res = await fetch("http://localhost:3001/api/patients");
+      const json = await res.json();
+      if (json?.success && Array.isArray(json.data)) {
+        const list = json.data.map((p: any) => ({ id: String(p.id), name: `${p.firstName} ${p.lastName}` }));
+        setPatients(list);
       }
-    };
+    } catch (err) {
+      console.error("Failed to load patients:", err);
+      toast.error("Failed to load patients.");
+    } finally {
+      setIsLoadingPatients(false);
+    }
+  }, []);
 
+  useEffect(() => {
     fetchPatients();
-  }, [refreshTrigger]);
+  }, [refreshTrigger, fetchPatients]);
 
   useEffect(() => {
     if (open) {
@@ -244,17 +249,24 @@ export function CreateAppointmentModal({
                 <Select
                   value={formData.patientId || ""}
                   onValueChange={handlePatientSelect}
+                  onOpenChange={(open) => {
+                    if (open) {
+                      fetchPatients();
+                    }
+                  }}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select patient or create new" />
                   </SelectTrigger>
                   <SelectContent>
-                    {patients.length > 0 ? (
-                      patients.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                      ))
-                    ) : (
-                      <div className="p-2 text-sm text-gray-500">No patients found</div>
+                    {isLoadingPatients && (
+                      <div className="p-2 text-center text-sm text-gray-500">Loading patients...</div>
+                    )}
+                    {patients.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                    ))}
+                    {!isLoadingPatients && patients.length === 0 && (
+                      <div className="p-2 text-center text-sm text-gray-500">No patients found.</div>
                     )}
                     <SelectItem value="new">+ Create New Patient</SelectItem>
                   </SelectContent>
