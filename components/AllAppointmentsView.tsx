@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
-import { Appointment, useAppointments } from "../hooks/useAppointments";
-import { APPOINTMENT_TYPES, getAppointmentTypeName } from "../lib/appointment-types";
+import { Appointment } from "../hooks/useAppointments";
+import { getAppointmentTypeName } from "../lib/appointment-types";
 import {
   Table,
   TableBody,
@@ -11,38 +11,22 @@ import {
 } from "./ui/table";
 import { Button } from "./ui/button";
 import { ArrowUp, ArrowDown } from "lucide-react";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select"; // Import Select components
 
 type SortKey = "date" | "patientName" | "doctor" | "status";
 
-const ALL_APPOINTMENT_STATUSES = ["scheduled", "confirmed", "pending", "tentative", "completed", "cancelled"];
+interface AllAppointmentsViewProps {
+  appointments: Appointment[];
+  isLoading: boolean;
+}
 
-export const AllAppointmentsView: React.FC = () => {
-  const { appointments, isLoading } = useAppointments();
+export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({ appointments, isLoading }) => {
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [sortKey, setSortKey] = useState<SortKey>("date");
-  const [filterType, setFilterType] = useState<string>("all"); // New state for type filter
-  const [filterStatus, setFilterStatus] = useState<string>("all"); // New state for status filter
 
   const sortedAppointments = useMemo(() => {
     if (!appointments) return [];
 
-    let filtered = [...appointments];
-
-    // Apply type filter
-    if (filterType !== "all") {
-      filtered = filtered.filter(apt => {
-        const typeName = getAppointmentTypeName(apt.type, apt.customType);
-        return typeName === filterType;
-      });
-    }
-
-    // Apply status filter
-    if (filterStatus !== "all") {
-      filtered = filtered.filter(apt => apt.status === filterStatus);
-    }
-
-    return filtered.sort((a, b) => {
+    return [...appointments].sort((a, b) => {
       let compareA: string | number;
       let compareB: string | number;
 
@@ -76,7 +60,7 @@ export const AllAppointmentsView: React.FC = () => {
       }
       return 0;
     });
-  }, [appointments, sortOrder, sortKey, filterType, filterStatus]);
+  }, [appointments, sortOrder, sortKey]);
 
   const toggleSortOrder = (key: SortKey) => {
     if (sortKey === key) {
@@ -100,36 +84,6 @@ export const AllAppointmentsView: React.FC = () => {
 
   return (
     <>
-      <h1 className="text-3xl font-bold mb-6">All Appointments</h1>
-
-      <div className="flex space-x-4 mb-4">
-        <Select value={filterType} onValueChange={setFilterType}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="Filter by Type" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Types</SelectItem>
-            {APPOINTMENT_TYPES.map((type) => (
-              <SelectItem key={type} value={type}>{type}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select value={filterStatus} onValueChange={setFilterStatus}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="Filter by Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            {ALL_APPOINTMENT_STATUSES.map((status) => (
-              <SelectItem key={status} value={status}>
-                {status.charAt(0).toUpperCase() + status.slice(1)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
       <div className="rounded-md border">
         <Table>
           <TableHeader>
@@ -161,7 +115,7 @@ export const AllAppointmentsView: React.FC = () => {
             {sortedAppointments.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={5} className="h-24 text-center">
-                  No appointments found.
+                  No appointments found for the selected filters.
                 </TableCell>
               </TableRow>
             ) : (

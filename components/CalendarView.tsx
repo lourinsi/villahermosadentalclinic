@@ -18,7 +18,8 @@ import {
   Clock,
   X,
   DollarSign,
-  Users as UsersIcon
+  Users as UsersIcon,
+  ListFilter
 } from "lucide-react";
 import { useAppointmentModal } from "./AdminLayout";
 import { Appointment, AppointmentFilters } from "../hooks/useAppointments";
@@ -46,11 +47,16 @@ const appointmentColors: Record<string, { bg: string; text: string; border: stri
   "Other": { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200" },
 };
 
+const APPOINTMENT_STATUSES = ["all", "scheduled", "confirmed", "pending", "tentative", "completed", "cancelled"];
+
+
 export function CalendarView() {
   const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedDoctor, setSelectedDoctor] = useState("all");
+  const [selectedType, setSelectedType] = useState("all");
+  const [selectedStatus, setSelectedStatus] = useState("all");
   const [isLoadingView, setIsLoadingView] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
@@ -112,47 +118,42 @@ export function CalendarView() {
   useEffect(() => {
     const { start, end } = getViewRange(selectedDate);
     
-    // For normal navigation (no search), we fetch by month or custom range
-    if (searchTerm === "") {
+    let filters: AppointmentFilters = {};
+
+    if (searchTerm) {
+      filters.search = searchTerm;
+    } else {
       let fetchStartStr: string;
       let fetchEndStr: string;
 
       if (viewMode === 'custom' && dateRange?.from && dateRange?.to) {
         fetchStartStr = formatDateToYYYYMMDD(dateRange.from);
         fetchEndStr = formatDateToYYYYMMDD(dateRange.to);
-      } else {
+      } else if (viewMode !== 'all') { // For day, week, month, use a monthly range
         const monthStart = new Date(start.getFullYear(), start.getMonth(), 1);
         const monthEnd = new Date(end.getFullYear(), end.getMonth() + 1, 0);
         monthEnd.setHours(23, 59, 59, 999);
         fetchStartStr = formatDateToYYYYMMDD(monthStart);
         fetchEndStr = formatDateToYYYYMMDD(monthEnd);
+      } else { // 'all' view has no date constraints unless custom range is set
+        fetchStartStr = "";
+        fetchEndStr = "";
       }
-      
-      const isNewRange = fetchStartStr !== fetchedRange.start || fetchEndStr !== fetchedRange.end;
-      
-      if (isNewRange || refreshTrigger > 0) {
-        setIsLoadingView(true);
-        refreshAppointments({
-          startDate: fetchStartStr,
-          endDate: fetchEndStr,
-          search: ""
-        });
-        setFetchedRange({ start: fetchStartStr, end: fetchEndStr });
-        const timer = setTimeout(() => setIsLoadingView(false), 500);
-        return () => clearTimeout(timer);
-      }
-    } else {
-      // Global Search: Ignore date filters
-      setIsLoadingView(true);
-      refreshAppointments({
-        search: searchTerm
-      });
-      // Clear fetched range so we re-fetch when coming back from search
-      setFetchedRange({ start: "", end: "" });
-      const timer = setTimeout(() => setIsLoadingView(false), 500);
-      return () => clearTimeout(timer);
+      filters.startDate = fetchStartStr;
+      filters.endDate = fetchEndStr;
     }
-  }, [refreshTrigger, viewMode, selectedDate, searchTerm, dateRange]);
+
+    // Always apply other filters
+    filters.doctor = selectedDoctor;
+    filters.type = selectedType;
+    filters.status = selectedStatus;
+
+    setIsLoadingView(true);
+    refreshAppointments(filters);
+    const timer = setTimeout(() => setIsLoadingView(false), 500);
+    return () => clearTimeout(timer);
+    
+  }, [refreshTrigger, viewMode, selectedDate, searchTerm, dateRange, selectedDoctor, selectedType, selectedStatus]);
 
   const timeSlots = TIME_SLOTS;
 
@@ -226,15 +227,8 @@ export function CalendarView() {
 
   const getAppointmentsForDate = (date: Date) => {
     const dateStr = formatDateToYYYYMMDD(date);
-    return appointments.filter(apt => {
-      const matchesDate = apt.date === dateStr;
-      const matchesDoctor = selectedDoctor === "all" || apt.doctor === selectedDoctor;
-      const typeName = getAppointmentTypeName(apt.type, apt.customType);
-      const matchesSearch = searchTerm === "" || 
-        apt.patientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        typeName.toLowerCase().includes(searchTerm.toLowerCase());
-      return matchesDate && matchesDoctor && matchesSearch;
-    });
+    // Filtering is now done by the backend, we just need to filter by date for the calendar views
+    return appointments.filter(apt => apt.date === dateStr);
   };
 
   const getAppointmentsAtTime = (time: string, date: Date) => {
@@ -629,21 +623,19 @@ export function CalendarView() {
   };
 
   const renderCustomView = () => {
-    // Filter by doctor if one is selected
-    const filtered = appointments
-      .filter(a => selectedDoctor === 'all' || a.doctor === selectedDoctor)
-      .sort((a, b) => parseBackendDateToLocal(a.date).getTime() - parseBackendDateToLocal(b.date).getTime());
+    // Client-side filtering is removed, appointments are pre-filtered
+    const sortedAppointments = [...appointments].sort((a, b) => parseBackendDateToLocal(a.date).getTime() - parseBackendDateToLocal(b.date).getTime());
     
     return (
       <div className="space-y-4 p-4">
-        {filtered.length === 0 ? (
+        {sortedAppointments.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground bg-gray-50 rounded-lg border-2 border-dashed">
             <CalendarIcon className="h-12 w-12 mx-auto mb-4 opacity-20" />
-            <p>No appointments found in this range.</p>
+            <p>No appointments found for the selected filters.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered.map(apt => {
+            {sortedAppointments.map(apt => {
               const typeName = getAppointmentTypeName(apt.type, apt.customType);
               const colors = getColorForType(typeName);
               return (
@@ -664,7 +656,7 @@ export function CalendarView() {
                         <span>{apt.duration || 60} minutes</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <UsersIcon className="h-4 w-4" />
+                        <Users className="h-4 w-4" />
                         <span>{apt.doctor}</span>
                       </div>
                       {apt.price != null && (
@@ -850,10 +842,7 @@ export function CalendarView() {
             <div className="flex items-center space-x-3">
               <div className="flex items-center gap-2">
                 <Users className="h-4 w-4 text-gray-400" />
-                <Select value={selectedDoctor} onValueChange={(val) => {
-                  setSearchTerm("");
-                  setSelectedDoctor(val);
-                }}>
+                <Select value={selectedDoctor} onValueChange={setSelectedDoctor}>
                   <SelectTrigger className="w-[180px] h-10 shadow-sm">
                     <SelectValue placeholder={isLoadingDoctors ? "Loading..." : "Filter by doctor"} />
                   </SelectTrigger>
@@ -861,6 +850,33 @@ export function CalendarView() {
                     <SelectItem value="all">All Doctors</SelectItem>
                     {doctors.map((doctor) => (
                       <SelectItem key={doctor.id} value={doctor.name}>{doctor.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2">
+                <ListFilter className="h-4 w-4 text-gray-400" />
+                <Select value={selectedType} onValueChange={setSelectedType}>
+                  <SelectTrigger className="w-[180px] h-10 shadow-sm">
+                    <SelectValue placeholder="Filter by type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Types</SelectItem>
+                    {APPOINTMENT_TYPES.map((type, index) => (
+                      <SelectItem key={index} value={String(index)}>{type}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2">
+                <ListFilter className="h-4 w-4 text-gray-400" />
+                <Select value={selectedStatus} onValueChange={setSelectedStatus}>
+                  <SelectTrigger className="w-[180px] h-10 shadow-sm">
+                    <SelectValue placeholder="Filter by status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {APPOINTMENT_STATUSES.map((status) => (
+                      <SelectItem key={status} value={status} className="capitalize">{status === 'all' ? 'All Statuses' : status}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -912,7 +928,7 @@ export function CalendarView() {
                     {viewMode === "custom" && renderCustomView()}
                     {viewMode === "all" && (
                       <div className="p-4">
-                        <AllAppointmentsView />
+                        <AllAppointmentsView appointments={appointments} isLoading={isLoadingView} />
                       </div>
                     )}
                   </>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -34,6 +34,17 @@ interface AppointmentFormData {
   status: string;
 }
 
+interface ApiPatient {
+  id: string;
+  firstName: string;
+  lastName: string;
+}
+
+interface PatientSelectItem {
+  id: string;
+  name: string;
+}
+
 export function CreateAppointmentModal({ 
   open, 
   onOpenChange,
@@ -56,22 +67,49 @@ export function CreateAppointmentModal({
   });
 
   const [showNewPatient, setShowNewPatient] = useState(false);
-  const [patients, setPatients] = useState<Array<{ id: string; name: string }>>([]);
+  const [patients, setPatients] = useState<PatientSelectItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingPatients, setIsLoadingPatients] = useState(false);
   const [showCustomTypeInput, setShowCustomTypeInput] = useState(false);
 
-  const { refreshTrigger } = useAppointmentModal();
+  // New state for pagination
+  const [patientPage, setPatientPage] = useState(1);
+  const [hasMorePatients, setHasMorePatients] = useState(true);
+
   const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors();
 
-  const fetchPatients = useCallback(async () => {
+  const fetchPatients = useCallback(async (page: number) => {
     setIsLoadingPatients(true);
     try {
-      const res = await fetch("http://localhost:3001/api/patients");
+      const res = await fetch(`http://localhost:3001/api/patients?page=${page}&limit=20`);
       const json = await res.json();
       if (json?.success && Array.isArray(json.data)) {
-        const list = json.data.map((p: any) => ({ id: String(p.id), name: `${p.firstName} ${p.lastName}` }));
-        setPatients(list);
+        const list: PatientSelectItem[] = json.data.map((p: ApiPatient) => ({ id: String(p.id), name: `${p.firstName} ${p.lastName}` }));
+        
+        setPatients(prev => {
+          const newList = page === 1 ? list : [...prev, ...list];
+          // Ensure selected patient is always in the list
+          if (formData.patientId) {
+            const isSelectedPatientInList = newList.some(p => p.id === formData.patientId);
+            if (!isSelectedPatientInList) {
+              const selectedPatient = prev.find(p => p.id === formData.patientId);
+              if (selectedPatient) {
+                // Prepend selected patient to the new list
+                return [selectedPatient, ...list];
+              }
+            }
+          }
+          // Remove duplicates
+          return newList.filter((patient: PatientSelectItem, index: number, self: PatientSelectItem[]) => 
+            index === self.findIndex((p: PatientSelectItem) => p.id === patient.id)
+          );
+        });
+        
+        if (json.meta) {
+          setHasMorePatients(json.meta.page < json.meta.totalPages);
+        } else {
+          setHasMorePatients(false);
+        }
       }
     } catch (err) {
       console.error("Failed to load patients:", err);
@@ -79,11 +117,7 @@ export function CreateAppointmentModal({
     } finally {
       setIsLoadingPatients(false);
     }
-  }, []);
-
-  useEffect(() => {
-    fetchPatients();
-  }, [refreshTrigger, fetchPatients]);
+  }, [formData.patientId]);
 
   useEffect(() => {
     if (open) {
@@ -121,6 +155,26 @@ export function CreateAppointmentModal({
       reloadDoctors();
     }
   }, [open, selectedDate, selectedTime, reloadDoctors]);
+
+  // Infinite scroll observer
+  const observer = useRef<IntersectionObserver | null>(null);
+  const lastPatientElementRef = useCallback((node: HTMLDivElement) => {
+    if (isLoadingPatients) return;
+    if (observer.current) observer.current.disconnect();
+    observer.current = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && hasMorePatients) {
+        setPatientPage(prevPage => prevPage + 1);
+      }
+    });
+    if (node) observer.current.observe(node);
+  }, [isLoadingPatients, hasMorePatients]);
+
+  useEffect(() => {
+    if (patientPage > 1) {
+      fetchPatients(patientPage);
+    }
+  }, [patientPage, fetchPatients]);
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -225,6 +279,17 @@ export function CreateAppointmentModal({
     }
   };
 
+  const sortedPatients = useMemo(() => {
+    const selectedPatientId = formData.patientId;
+    if (!selectedPatientId) return patients;
+
+    const selectedPatient = patients.find(p => p.id === selectedPatientId);
+    if (!selectedPatient) return patients;
+
+    const filteredPatients = patients.filter(p => p.id !== selectedPatientId);
+    return [selectedPatient, ...filteredPatients];
+  }, [patients, formData.patientId]);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
@@ -251,7 +316,8 @@ export function CreateAppointmentModal({
                   onValueChange={handlePatientSelect}
                   onOpenChange={(open) => {
                     if (open) {
-                      fetchPatients();
+                      setPatientPage(1);
+                      fetchPatients(1);
                     }
                   }}
                 >
@@ -259,16 +325,19 @@ export function CreateAppointmentModal({
                     <SelectValue placeholder="Select patient or create new" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="new">+ Create New Patient</SelectItem>
+                    {sortedPatients.map((p, index) => {
+                      if (sortedPatients.length === index + 1) {
+                        return <div ref={lastPatientElementRef} key={p.id}><SelectItem value={p.id}>{p.name}</SelectItem></div>;
+                      }
+                      return <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>;
+                    })}
                     {isLoadingPatients && (
-                      <div className="p-2 text-center text-sm text-gray-500">Loading patients...</div>
+                      <div className="p-2 text-center text-sm text-gray-500">Loading more...</div>
                     )}
-                    {patients.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                    ))}
-                    {!isLoadingPatients && patients.length === 0 && (
+                    {!isLoadingPatients && sortedPatients.length === 0 && (
                       <div className="p-2 text-center text-sm text-gray-500">No patients found.</div>
                     )}
-                    <SelectItem value="new">+ Create New Patient</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

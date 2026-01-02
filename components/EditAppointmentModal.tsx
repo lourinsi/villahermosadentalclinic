@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -43,14 +43,30 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
     phone: "",
   });
   const [isLoadingPatients, setIsLoadingPatients] = useState(false);
+  
+  // New state for pagination
+  const [patientPage, setPatientPage] = useState(1);
+  const [hasMorePatients, setHasMorePatients] = useState(true);
 
-  const fetchPatients = useCallback(async () => {
+  const fetchPatients = useCallback(async (page: number) => {
     setIsLoadingPatients(true);
     try {
-      const res = await fetch("http://localhost:3001/api/patients");
+      const res = await fetch(`http://localhost:3001/api/patients?page=${page}&limit=20`);
       const json = await res.json();
       if (json?.success && Array.isArray(json.data)) {
-        setAllPatients(json.data.map((p: any) => ({ id: String(p.id), name: `${p.firstName} ${p.lastName}`, email: p.email, phone: p.phone })));
+        const list: PatientOption[] = json.data.map((p: any) => ({ id: String(p.id), name: `${p.firstName} ${p.lastName}`, email: p.email, phone: p.phone }));
+        
+        setAllPatients(prev => {
+          const existingIds = new Set(prev.map(p => p.id));
+          const newItems = list.filter(p => !existingIds.has(p.id));
+          return page === 1 ? list : [...prev, ...newItems];
+        });
+
+        if (json.meta) {
+          setHasMorePatients(json.meta.page < json.meta.totalPages);
+        } else {
+          setHasMorePatients(false);
+        }
       }
     } catch (err) {
       console.error("Failed to load patients:", err);
@@ -60,9 +76,29 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
     }
   }, []);
 
+  // Infinite scroll observer
+  const observer = useRef<IntersectionObserver | null>(null);
+  const lastPatientElementRef = useCallback((node: HTMLDivElement) => {
+    if (isLoadingPatients) return;
+    if (observer.current) observer.current.disconnect();
+    observer.current = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && hasMorePatients) {
+        setPatientPage(prevPage => prevPage + 1);
+      }
+    });
+    if (node) observer.current.observe(node);
+  }, [isLoadingPatients, hasMorePatients]);
+
   useEffect(() => {
-    if (open) { // Fetch patients only when modal is open
-      reloadDoctors(); // Reload doctors as well
+    if (patientPage > 1) {
+      fetchPatients(patientPage);
+    }
+  }, [patientPage, fetchPatients]);
+
+
+  useEffect(() => {
+    if (open) {
+      reloadDoctors();
     }
   }, [open, reloadDoctors]);
 
@@ -91,8 +127,22 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
       setNewPatientFormData({ firstName: "", lastName: "", email: "", phone: "" });
       setShowCustomTypeInput(false); // Also reset this when no appointment
     }
+    
+    // Reset pagination when appointment changes
+    setPatientPage(1);
+    setHasMorePatients(true);
+
   }, [appointment, open]); // Added 'open' to dependency array to reset state on close
 
+  const sortedPatients = useMemo(() => {
+    if (!selectedPatientOption) return allPatients;
+
+    const selectedPatient = allPatients.find(p => p.id === selectedPatientOption);
+    if (!selectedPatient) return allPatients;
+    
+    const filteredPatients = allPatients.filter(p => p.id !== selectedPatientOption);
+    return [selectedPatient, ...filteredPatients];
+  }, [allPatients, selectedPatientOption]);
 
 
   const handleSave = async () => {
@@ -234,7 +284,10 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
               }}
               onOpenChange={(open) => {
                 if (open) {
-                  fetchPatients();
+                  // Only fetch if the list is just the one pre-filled patient
+                  if (allPatients.length <= 1) {
+                    fetchPatients(1);
+                  }
                 }
               }}
             >
@@ -242,21 +295,21 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
                 <SelectValue placeholder="Select patient or create new" />
               </SelectTrigger>
               <SelectContent>
-                {isLoadingPatients && (
-                  <div className="p-2 text-center text-sm text-gray-500">Loading patients...</div>
-                )}
-                {allPatients.length > 0 && !isLoadingPatients && (
-                  <SelectItem disabled value="disabled-patient-header">Select an existing patient</SelectItem>
-                )}
-                {allPatients.map(p => (
-                  <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                ))}
-                {!isLoadingPatients && allPatients.length === 0 && (
-                  <div className="p-2 text-center text-sm text-gray-500">No patients found.</div>
-                )}
                 <SelectItem value="new-patient" className="font-semibold text-blue-600">
                   + Create New Patient
                 </SelectItem>
+                {sortedPatients.map((p, index) => {
+                  if (sortedPatients.length === index + 1) {
+                    return <div ref={lastPatientElementRef} key={p.id}><SelectItem value={p.id}>{p.name}</SelectItem></div>;
+                  }
+                  return <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>;
+                })}
+                {isLoadingPatients && (
+                  <div className="p-2 text-center text-sm text-gray-500">Loading more...</div>
+                )}
+                {!isLoadingPatients && sortedPatients.length === 0 && (
+                  <div className="p-2 text-center text-sm text-gray-500">No patients found.</div>
+                )}
               </SelectContent>
             </Select>
           </div>

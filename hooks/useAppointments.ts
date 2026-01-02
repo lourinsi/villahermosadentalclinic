@@ -22,6 +22,9 @@ export interface AppointmentFilters {
   startDate?: string;
   endDate?: string;
   search?: string;
+  doctor?: string;
+  type?: string;
+  status?: string;
 }
 
 export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFilters) => {
@@ -37,6 +40,9 @@ export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFi
         if (filters?.startDate) queryParams.append("startDate", filters.startDate);
         if (filters?.endDate) queryParams.append("endDate", filters.endDate);
         if (filters?.search) queryParams.append("search", filters.search);
+        if (filters?.doctor) queryParams.append("doctor", filters.doctor);
+        if (filters?.type) queryParams.append("type", filters.type);
+        if (filters?.status) queryParams.append("status", filters.status);
 
         const url = queryParams.toString() ? `${API_URL}?${queryParams.toString()}` : API_URL;
         const response = await fetch(url);
@@ -54,7 +60,7 @@ export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFi
     };
 
     loadAppointments();
-  }, [refreshTrigger, filters?.startDate, filters?.endDate, filters?.search]);
+  }, [refreshTrigger, filters?.startDate, filters?.endDate, filters?.search, filters?.doctor, filters?.type, filters?.status]);
 
   const addAppointment = async (appointment: Omit<Appointment, "id" | "createdAt">) => {
     try {
