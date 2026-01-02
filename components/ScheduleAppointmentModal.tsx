@@ -28,7 +28,9 @@ export function ScheduleAppointmentModal({
   const [formData, setFormData] = useState({
     date: "",
     time: "",
-    type: "",
+    duration: "30",
+    type: -1,
+    customType: "",
     doctor: "",
     notes: "",
     patientName: "",
@@ -48,7 +50,7 @@ export function ScheduleAppointmentModal({
         ...prev,
         patientName: patientName || prev.patientName,
         patientId: String(patientId || ""),
-        type: "" // Reset type when patient changes
+        type: -1 // Reset type when patient changes
       }));
     }
   }, [patientName, patientId, open]);
@@ -83,7 +85,7 @@ export function ScheduleAppointmentModal({
     console.log("PatientName prop:", patientName);
     console.log("PatientId prop:", patientId);
 
-    if (!formData.patientName || !formData.date || !formData.time || !formData.type || !formData.doctor) {
+    if (!formData.patientName || !formData.date || !formData.time || formData.type === -1 || !formData.doctor) {
       console.error("Validation failed - missing required fields:", {
         patientName: formData.patientName,
         date: formData.date,
@@ -125,7 +127,9 @@ export function ScheduleAppointmentModal({
         patientId: String(formData.patientId),
         date: formData.date,
         time: formData.time,
+        duration: parseInt(formData.duration),
         type: formData.type,
+        customType: formData.customType,
         doctor: formData.doctor,
         notes: formData.notes,
         status: "scheduled" as const
@@ -144,7 +148,8 @@ export function ScheduleAppointmentModal({
       setFormData({
         date: "",
         time: "",
-        type: "",
+        duration: "30",
+        type: -1,
         doctor: "",
         notes: "",
         patientName: patientName || "",
@@ -228,7 +233,7 @@ export function ScheduleAppointmentModal({
             <div className="space-y-2">
               <Label htmlFor="time">Time</Label>
               <Select
-                value={TIME_SLOTS.indexOf(formData.time).toString()}
+                value={formData.time ? TIME_SLOTS.indexOf(formData.time).toString() : ""}
                 onValueChange={(value) => {
                   const index = parseInt(value);
                   if (index >= 0) {
@@ -249,30 +254,55 @@ export function ScheduleAppointmentModal({
               </Select>
             </div>
           </div>
+
+          <div className="space-y-2">
+            <Label>Duration</Label>
+            <Select
+              value={formData.duration}
+              onValueChange={(value) => setFormData(prev => ({ ...prev, duration: value }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select duration" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="15">15 minutes</SelectItem>
+                <SelectItem value="30">30 minutes</SelectItem>
+                <SelectItem value="45">45 minutes</SelectItem>
+                <SelectItem value="60">1 hour</SelectItem>
+                <SelectItem value="90">1.5 hours</SelectItem>
+                <SelectItem value="120">2 hours</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           
           <div className="space-y-2">
             <Label>Appointment Type</Label>
             <Select
-              value={formData.type}
-              onValueChange={(value) => setFormData(prev => ({ ...prev, type: value }))}
+              value={formData.type === -1 ? "" : formData.type.toString()}
+              onValueChange={(value) => setFormData(prev => ({ ...prev, type: parseInt(value), customType: "" }))}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Select type" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="cleaning">Routine Cleaning</SelectItem>
-                <SelectItem value="checkup">Checkup</SelectItem>
-                <SelectItem value="filling">Filling</SelectItem>
-                <SelectItem value="crown">Crown</SelectItem>
-                <SelectItem value="root-canal">Root Canal</SelectItem>
-                <SelectItem value="extraction">Extraction</SelectItem>
-                <SelectItem value="consultation">Consultation</SelectItem>
-                <SelectItem value="emergency">Emergency</SelectItem>
-                <SelectItem value="whitening">Teeth Whitening</SelectItem>
-                <SelectItem value="implant">Implant</SelectItem>
+                {APPOINTMENT_TYPES.map((type, index) => (
+                  <SelectItem key={index} value={index.toString()}>{type}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
+
+          {formData.type === APPOINTMENT_TYPES.length - 1 && (
+            <div className="space-y-2">
+              <Label>Please Specify Type</Label>
+              <Input
+                placeholder="Enter custom appointment type"
+                value={formData.customType}
+                onChange={(e) => setFormData(prev => ({ ...prev, customType: e.target.value }))}
+                required
+              />
+            </div>
+          )}
           
           <div className="space-y-2">
             <Label>Doctor</Label>
