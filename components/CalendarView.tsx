@@ -471,6 +471,25 @@ export function CalendarView() {
 
   const renderWeekView = () => {
     const weekDays = getWeekDays(selectedDate);
+
+    // Pre-calculate layout for each day
+    const dayLayouts = weekDays.map(day => {
+      const dayAppointments = getAppointmentsForDate(day);
+      const layout = organizeAppointmentsIntoColumns(dayAppointments);
+      
+      // Calculate occupied minutes
+      const isMinuteOccupied = new Array(24 * 60).fill(false);
+      dayAppointments.forEach(apt => {
+        const startTimeMinutes = timeToMinutes(apt.time);
+        const duration = apt.duration || 30;
+        const endTimeMinutes = startTimeMinutes + duration;
+        for (let m = startTimeMinutes; m < endTimeMinutes; m++) {
+            if (m >= 0 && m < isMinuteOccupied.length) isMinuteOccupied[m] = true;
+        }
+      });
+
+      return { day, appointments: dayAppointments, layout, isMinuteOccupied };
+    });
     
     return (
       <div className="overflow-x-auto">
@@ -495,35 +514,77 @@ export function CalendarView() {
 
           <div className="relative">
             {timeSlots.map((timeSlot) => (
-              <div key={timeSlot} className="flex min-h-[60px] border-b border-gray-50">
-                <div className="w-20 flex-shrink-0 pt-2 pr-4 text-right text-xs font-medium text-muted-foreground">
+              <div key={timeSlot} className="flex min-h-[80px] border-b border-gray-50">
+                <div className="w-20 flex-shrink-0 pt-2 pr-4 text-right text-sm font-medium text-muted-foreground sticky left-0 bg-white z-10">
                   {formatTime(timeSlot)}
                 </div>
                 {weekDays.map((day, idx) => {
-                  const appointmentsForSlot = getAppointmentsAtTime(timeSlot, day);
+                  const { layout, isMinuteOccupied, appointments } = dayLayouts[idx];
+                  const appointmentsForSlot = appointments.filter(apt => apt.time === timeSlot);
+                  const { appointmentColumns, maxOverlappingAt } = layout;
+
+                  const slotStartMinutes = timeToMinutes(timeSlot);
+                  let currentSlotIsCovered = false;
+                  for (let m = slotStartMinutes; m < slotStartMinutes + 30; m++) {
+                      if (isMinuteOccupied[m]) {
+                          currentSlotIsCovered = true;
+                          break;
+                      }
+                  }
                   
                   return (
                     <div 
                       key={idx} 
-                      className="flex-1 border-l border-gray-100 p-1 hover:bg-gray-50/50 transition-colors cursor-pointer"
-                      onClick={() => openCreateModal(day, timeSlot)}
+                      className="flex-1 border-l border-gray-100 relative min-h-[80px] group"
                     >
-                      <div className="space-y-1 h-full">
+                        {/* Plus button */}
+                        {currentSlotIsCovered ? (
+                            <div
+                            className="absolute top-1 right-1 w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-30 hover:bg-violet-50/50 rounded border border-dashed border-transparent hover:border-violet-200/50"
+                            onClick={() => openCreateModal(day, timeSlot)}
+                            >
+                            <Plus className="h-3 w-3 text-violet-300" />
+                            </div>
+                        ) : (
+                            <div
+                            className="absolute inset-1 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-10 hover:bg-violet-50/50 rounded border border-dashed border-transparent hover:border-violet-200/50"
+                            onClick={() => openCreateModal(day, timeSlot)}
+                            >
+                            <Plus className="h-5 w-5 text-violet-300" />
+                            </div>
+                        )}
+
+                      <div className="relative w-full h-full">
                         {appointmentsForSlot.map(appointment => {
+                          const columnIndex = appointmentColumns.get(appointment.id) ?? 0;
+                          const totalColumns = maxOverlappingAt.get(appointment.id) ?? 1;
                           const typeName = getAppointmentTypeName(appointment.type, appointment.customType);
                           const colors = getColorForType(typeName);
+                          
+                          const width = `${100 / totalColumns}%`;
+                          const left = `${(columnIndex * 100) / totalColumns}%`;
+
                           return (
                             <div 
                               key={appointment.id}
-                              className={`${colors?.bg} ${colors?.text} ${colors?.border} border-l-2 rounded px-2 py-1 text-xs cursor-pointer hover:shadow-md transition-all`}
+                              className={`absolute top-0 ${colors?.bg} ${colors?.text} ${colors?.border} border-l-4 rounded-lg p-2 shadow-sm hover:shadow-md transition-all cursor-pointer z-20 overflow-hidden text-xs`}
+                              style={{
+                                ...calculateAppointmentStyle(appointment.duration),
+                                width: `calc(${width} - 4px)`,
+                                left: `calc(${left} + 2px)`,
+                              }}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setEditingAppointment(appointment);
                                 setEditOpen(true);
                               }}
                             >
-                              <div className="font-bold truncate">{appointment.patientName}</div>
-                              <div className="opacity-90 truncate text-[10px]">{typeName}{appointment.price != null && ` • $${appointment.price.toFixed(2)}`}</div>
+                              <div className="flex justify-between items-start">
+                                <div className="font-semibold truncate pr-1">{appointment.patientName}</div>
+                              </div>
+                              <div className="truncate opacity-90">{typeName}</div>
+                              <div className="truncate opacity-75 mt-0.5">{appointment.doctor}</div>
+                              {appointment.price != null && <div className="mt-1 font-medium">${appointment.price.toFixed(2)}</div>}
                             </div>
                           )
                         })}
