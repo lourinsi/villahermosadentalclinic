@@ -150,6 +150,7 @@ export function ScheduleAppointmentModal({
         time: "",
         duration: "30",
         type: -1,
+        customType: "",
         doctor: "",
         notes: "",
         patientName: patientName || "",

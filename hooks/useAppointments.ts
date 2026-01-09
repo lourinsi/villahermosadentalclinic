@@ -4,6 +4,8 @@ export interface Appointment {
   id: string;
   patientName: string;
   patientId: string;
+  email?: string;
+  phone?: string;
   date: string;
   time: string;
   type: number;

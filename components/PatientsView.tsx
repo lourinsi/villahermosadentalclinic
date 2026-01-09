@@ -883,4 +883,3 @@ function PatientDetails({
     </div>
   );
 }
-

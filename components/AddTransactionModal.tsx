@@ -50,7 +50,7 @@ export function AddTransactionModal({
         createdAt: new Date().toISOString()
       };
       console.log("Submitting transaction data:", transactionData);
-      const response = await fetch("http://localhost:3001/api/finance/transactions", {
+      const response = await fetch("http://localhost:3001/api/finance", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

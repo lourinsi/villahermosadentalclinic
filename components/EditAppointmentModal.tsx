@@ -187,8 +187,25 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
         if (result.success && result.data) {
           finalPatientId = result.data.id;
           finalPatientName = `${result.data.firstName} ${result.data.lastName}`;
+          const finalEmail = result.data.email;
+          const finalPhone = result.data.phone;
+          
           toast.success("New patient created successfully!");
           refreshAppointments(); // Refresh to ensure patient list is up to date
+
+          // Update updatedForm with new patient details
+          const updatedForm = {
+            ...form,
+            patientId: finalPatientId,
+            patientName: finalPatientName,
+            email: finalEmail,
+            phone: finalPhone,
+          };
+          await updateAppointment(appointment?.id!, updatedForm as Partial<Appointment>);
+          toast.success("Appointment updated");
+          refreshAppointments();
+          onOpenChange(false);
+          return;
         } else {
           toast.error(result.message || "Failed to create new patient.");
           return;
@@ -273,12 +290,12 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
                 if (value === "new-patient") {
                   setIsCreatingNewPatient(true);
                   // Clear existing patient details from form
-                  setForm(prev => ({ ...prev, patientId: undefined, patientName: undefined }));
+                  setForm(prev => ({ ...prev, patientId: undefined, patientName: undefined, email: undefined, phone: undefined }));
                 } else {
                   setIsCreatingNewPatient(false);
                   const selected = allPatients.find(p => p.id === value);
                   if (selected) {
-                    setForm(prev => ({ ...prev, patientId: selected.id, patientName: selected.name }));
+                    setForm(prev => ({ ...prev, patientId: selected.id, patientName: selected.name, email: selected.email, phone: selected.phone }));
                   }
                 }
               }}
