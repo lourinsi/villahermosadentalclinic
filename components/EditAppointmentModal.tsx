@@ -1,3 +1,5 @@
+"use client";
+
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Button } from "./ui/button";
@@ -5,7 +7,7 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { useAppointmentModal } from "./AdminLayout";
+import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { toast } from "sonner";
 import { Appointment } from "../hooks/useAppointments";
 import { useDoctors } from "../hooks/useDoctors";
@@ -19,14 +21,15 @@ interface PatientOption {
   phone?: string;
 }
 
-interface EditAppointmentModalProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  appointment?: Appointment | null;
-}
-
-export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAppointmentModalProps) {
-  const { updateAppointment, deleteAppointment, refreshAppointments } = useAppointmentModal();
+export function EditAppointmentModal() {
+  const { 
+    isEditModalOpen, 
+    closeEditModal, 
+    selectedAppointment: appointment, // Rename selectedAppointment to appointment for consistency
+    updateAppointment, 
+    deleteAppointment, 
+    refreshAppointments 
+  } = useAppointmentModal();
   const [form, setForm] = useState<Partial<Appointment>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -97,13 +100,13 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
 
 
   useEffect(() => {
-    if (open) {
+    if (isEditModalOpen) {
       reloadDoctors();
     }
-  }, [open, reloadDoctors]);
+  }, [isEditModalOpen, reloadDoctors]);
 
   useEffect(() => {
-    if (appointment) {
+    if (isEditModalOpen && appointment) {
       setForm({ ...appointment });
       // Set initial selected patient option
       if (appointment.patientId && appointment.patientName) {
@@ -132,7 +135,7 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
     setPatientPage(1);
     setHasMorePatients(true);
 
-  }, [appointment, open]); // Added 'open' to dependency array to reset state on close
+  }, [appointment, isEditModalOpen]);
 
   const sortedPatients = useMemo(() => {
     if (!selectedPatientOption) return allPatients;
@@ -204,7 +207,7 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
           await updateAppointment(appointment?.id!, updatedForm as Partial<Appointment>);
           toast.success("Appointment updated");
           refreshAppointments();
-          onOpenChange(false);
+          closeEditModal();
           return;
         } else {
           toast.error(result.message || "Failed to create new patient.");
@@ -241,7 +244,7 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
       await updateAppointment(appointment?.id, updatedForm as Partial<Appointment>);
       toast.success("Appointment updated");
       refreshAppointments();
-      onOpenChange(false);
+      closeEditModal();
     } catch (err) {
       console.error("Error updating appointment:", err);
       toast.error("Failed to update appointment");
@@ -263,7 +266,7 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
       toast.success("Appointment deleted");
       refreshAppointments();
       setIsDeleteDialogOpen(false);
-      onOpenChange(false);
+      closeEditModal();
     } catch (err) {
       console.error("Error deleting appointment:", err);
       toast.error("Failed to delete appointment");
@@ -274,7 +277,7 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
 
   return (
     <>
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={isEditModalOpen} onOpenChange={closeEditModal}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Edit Appointment</DialogTitle>
@@ -521,7 +524,7 @@ export function EditAppointmentModal({ open, onOpenChange, appointment }: EditAp
           </div>
 
           <div className="flex justify-end space-x-2">
-            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isLoading}>Cancel</Button>
+            <Button variant="outline" onClick={() => closeEditModal()} disabled={isLoading}>Cancel</Button>
             <Button variant="secondary" onClick={handleDelete} disabled={isLoading}>
               {isLoading ? "Deleting..." : "Delete"}
             </Button>

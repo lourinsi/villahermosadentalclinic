@@ -1,3 +1,5 @@
+"use client";
+
 import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
@@ -5,26 +7,29 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { useAppointmentModal } from "./AdminLayout";
+import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { toast } from "sonner";
 import { useDoctors } from "../hooks/useDoctors";
 import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
 import { formatDateToYYYYMMDD } from "../lib/utils";
 import { APPOINTMENT_TYPES } from "../lib/appointment-types";
 
-interface ScheduleAppointmentModalProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  patientName?: string;
-  patientId?: string | number;
-}
+export function ScheduleAppointmentModal() {
+  const {
+    isScheduleModalOpen,
+    closeScheduleModal,
+    newAppointmentPatientName,
+    newAppointmentPatientId,
+    addAppointment,
+    refreshAppointments,
+    refreshTrigger
+  } = useAppointmentModal();
 
-export function ScheduleAppointmentModal({ 
-  open, 
-  onOpenChange, 
-  patientName,
-  patientId 
-}: ScheduleAppointmentModalProps) {
+  const [patients, setPatients] = useState<Array<{ id: string; name: string }>>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [dateError, setDateError] = useState("");
+  const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors();
+
   const [formData, setFormData] = useState({
     date: "",
     time: "",
@@ -33,27 +38,21 @@ export function ScheduleAppointmentModal({
     customType: "",
     doctor: "",
     notes: "",
-    patientName: "",
-    patientId: ""
+    patientName: newAppointmentPatientName || "",
+    patientId: String(newAppointmentPatientId || "")
   });
-
-  const { addAppointment, refreshAppointments, refreshTrigger } = useAppointmentModal();
-  const [patients, setPatients] = useState<Array<{ id: string; name: string }>>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [dateError, setDateError] = useState("");
-  const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors();
 
   // Update formData when patientName or patientId props change
   useEffect(() => {
-    if (patientName || patientId) {
+    if (newAppointmentPatientName || newAppointmentPatientId) {
       setFormData(prev => ({
         ...prev,
-        patientName: patientName || prev.patientName,
-        patientId: String(patientId || ""),
+        patientName: newAppointmentPatientName || prev.patientName,
+        patientId: String(newAppointmentPatientId || ""),
         type: -1 // Reset type when patient changes
       }));
     }
-  }, [patientName, patientId, open]);
+  }, [newAppointmentPatientName, newAppointmentPatientId, isScheduleModalOpen]);
 
   useEffect(() => {
     const fetchPatients = async () => {
@@ -73,17 +72,17 @@ export function ScheduleAppointmentModal({
   }, [refreshTrigger]);
 
   useEffect(() => {
-    if (open) {
+    if (isScheduleModalOpen) {
       reloadDoctors();
     }
-  }, [open, reloadDoctors]);
+  }, [isScheduleModalOpen, reloadDoctors]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     console.log("=== SCHEDULE APPOINTMENT SUBMIT ===");
     console.log("Current formData:", formData);
-    console.log("PatientName prop:", patientName);
-    console.log("PatientId prop:", patientId);
+    console.log("PatientName prop:", newAppointmentPatientName);
+    console.log("PatientId prop:", newAppointmentPatientId);
 
     if (!formData.patientName || !formData.date || !formData.time || formData.type === -1 || !formData.doctor) {
       console.error("Validation failed - missing required fields:", {
@@ -144,7 +143,7 @@ export function ScheduleAppointmentModal({
       refreshAppointments();
       
       console.log("Closing modal and resetting form...");
-      onOpenChange(false);
+      closeScheduleModal();
       setFormData({
         date: "",
         time: "",
@@ -153,8 +152,8 @@ export function ScheduleAppointmentModal({
         customType: "",
         doctor: "",
         notes: "",
-        patientName: patientName || "",
-        patientId: String(patientId || "")
+        patientName: newAppointmentPatientName || "",
+        patientId: String(newAppointmentPatientId || "")
       });
     } catch (err) {
       console.error("Error scheduling appointment:", err);
@@ -169,17 +168,17 @@ export function ScheduleAppointmentModal({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={isScheduleModalOpen} onOpenChange={closeScheduleModal}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {patientName ? `Schedule Appointment - ${patientName}` : "Schedule New Appointment"}
+            {newAppointmentPatientName ? `Schedule Appointment - ${newAppointmentPatientName}` : "Schedule New Appointment"}
           </DialogTitle>
         </DialogHeader>
         
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Patient Selection (only show if no patient is pre-selected) */}
-          {!patientName && (
+          {!newAppointmentPatientName && (
             <div className="space-y-2">
               <Label>Patient</Label>
               <Select
@@ -341,7 +340,7 @@ export function ScheduleAppointmentModal({
           </div>
           
           <div className="flex justify-end space-x-2 pt-4">
-            <Button variant="cancel" type="button" onClick={() => onOpenChange(false)} disabled={isLoading}>
+            <Button variant="cancel" type="button" onClick={() => closeScheduleModal()} disabled={isLoading}>
               Cancel
             </Button>
             <Button variant="brand" type="submit" disabled={isLoading}>

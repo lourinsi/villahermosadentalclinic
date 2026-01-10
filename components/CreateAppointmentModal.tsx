@@ -1,3 +1,5 @@
+"use client";
+
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
@@ -6,19 +8,14 @@ import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Calendar, Clock, User, Stethoscope } from "lucide-react";
-import { useAppointmentModal } from "./AdminLayout";
+import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { toast } from "sonner";
 import { useDoctors } from "../hooks/useDoctors";
 import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
 import { APPOINTMENT_TYPES } from "../lib/appointment-types";
 import { formatDateToYYYYMMDD } from "../lib/utils";
 
-interface CreateAppointmentModalProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  selectedDate?: Date;
-  selectedTime?: string;
-}
+
 
 interface AppointmentFormData {
   patientName: string;
@@ -45,13 +42,16 @@ interface PatientSelectItem {
   name: string;
 }
 
-export function CreateAppointmentModal({ 
-  open, 
-  onOpenChange,
-  selectedDate,
-  selectedTime
-}: CreateAppointmentModalProps) {
-  const { addAppointment, refreshPatients, refreshAppointments } = useAppointmentModal();
+export function CreateAppointmentModal() {
+  const { 
+    isCreateModalOpen,
+    closeCreateModal,
+    newAppointmentDate,
+    newAppointmentTime,
+    addAppointment, 
+    refreshPatients, 
+    refreshAppointments 
+  } = useAppointmentModal();
   const [formData, setFormData] = useState<AppointmentFormData>({
     patientName: "",
     patientId: "",
@@ -120,12 +120,12 @@ export function CreateAppointmentModal({
   }, [formData.patientId]);
 
   useEffect(() => {
-    if (open) {
+    if (isCreateModalOpen) {
       let dateStr = "";
-      if (selectedDate) {
-        const year = selectedDate.getFullYear();
-        const month = (selectedDate.getMonth() + 1).toString().padStart(2, '0');
-        const day = selectedDate.getDate().toString().padStart(2, '0');
+      if (newAppointmentDate) {
+        const year = newAppointmentDate.getFullYear();
+        const month = (newAppointmentDate.getMonth() + 1).toString().padStart(2, '0');
+        const day = newAppointmentDate.getDate().toString().padStart(2, '0');
         dateStr = `${year}-${month}-${day}`;
       }
 
@@ -133,7 +133,7 @@ export function CreateAppointmentModal({
         patientName: "",
         patientId: "",
         date: dateStr,
-        time: selectedTime || "",
+        time: newAppointmentTime || "",
         duration: 30,
         type: -1,
         customType: "",
@@ -144,8 +144,8 @@ export function CreateAppointmentModal({
       };
 
       console.log("CreateAppointmentModal Details:", {
-        selectedDate: selectedDate,
-        selectedTime: selectedTime,
+        selectedDate: newAppointmentDate,
+        selectedTime: newAppointmentTime,
         formData: newFormData
       });
       
@@ -154,7 +154,7 @@ export function CreateAppointmentModal({
       setShowCustomTypeInput(false);
       reloadDoctors();
     }
-  }, [open, selectedDate, selectedTime, reloadDoctors]);
+  }, [isCreateModalOpen, newAppointmentDate, newAppointmentTime, reloadDoctors]);
 
   // Infinite scroll observer
   const observer = useRef<IntersectionObserver | null>(null);
@@ -256,7 +256,7 @@ export function CreateAppointmentModal({
 
       toast.success("Appointment created successfully!");
       refreshAppointments();
-      onOpenChange(false);
+      closeCreateModal();
     } catch (error) {
       console.error("Error creating appointment:", error);
       toast.error("Failed to create appointment");
@@ -291,7 +291,7 @@ export function CreateAppointmentModal({
   }, [patients, formData.patientId]);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={isCreateModalOpen} onOpenChange={closeCreateModal}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center space-x-2">
@@ -560,7 +560,7 @@ export function CreateAppointmentModal({
             <Button 
               variant="outline" 
               type="button" 
-              onClick={() => onOpenChange(false)}
+              onClick={() => closeCreateModal()}
               disabled={isLoading}
             >
               Cancel

@@ -1,17 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import { Dashboard } from "../components/Dashboard";
-import { AdminLayout } from "../components/AdminLayout";
-import { PatientsView } from "../components/PatientsView";
-import { FinanceView } from "../components/FinanceView";
-import { CalendarView } from "../components/CalendarView";
-import { SettingsView } from "../components/SettingsView";
-import { StaffView } from "../components/Staff";
-import { AllAppointmentsView } from "../components/AllAppointmentsView";
+import { Dashboard } from "@/components/Dashboard";
+import AdminLayout from "@/components/AdminLayout";
+import { PatientsView } from "@/components/PatientsView";
+import { FinanceView } from "@/components/FinanceView";
+import { CalendarView } from "@/components/CalendarView";
+import { SettingsView } from "@/components/SettingsView";
+import { StaffView } from "@/components/Staff";
+import { AllAppointmentsView } from "@/components/AllAppointmentsView";
+import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 
 export default function Home() {
   const [currentView, setCurrentView] = useState("dashboard");
+  const { appointments, isLoading } = useAppointmentModal();
 
   const renderContent = () => {
     switch (currentView) {
@@ -28,14 +30,14 @@ export default function Home() {
       case "settings":
         return <SettingsView />;
       case "all-appointments":
-        return <AllAppointmentsView />;
+        return <AllAppointmentsView appointments={appointments} isLoading={isLoading} />;
       default:
         return <Dashboard />;
     }
   };
 
   return (
-    <AdminLayout currentView={currentView} onViewChange={setCurrentView}>
+    <AdminLayout>
       {renderContent()}
     </AdminLayout>
   );

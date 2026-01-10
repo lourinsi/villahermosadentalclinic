@@ -1,5 +1,7 @@
 "use client";
 
+"use client";
+
 import { useState, useEffect, useMemo } from "react";
 import { DateRange } from "react-day-picker";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -21,7 +23,7 @@ import {
   Users as UsersIcon,
   ListFilter
 } from "lucide-react";
-import { useAppointmentModal } from "./AdminLayout";
+import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { Appointment, AppointmentFilters } from "../hooks/useAppointments";
 import { Badge } from "./ui/badge";
 import { EditAppointmentModal } from "./EditAppointmentModal";
@@ -67,11 +69,11 @@ export function CalendarView() {
     appointments, 
     deleteAppointment, 
     refreshAppointments, 
-    refreshTrigger 
+    refreshTrigger,
+    openEditModal
   } = useAppointmentModal();
   
-  const [editOpen, setEditOpen] = useState(false);
-  const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
+
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [appointmentToDelete, setAppointmentToDelete] = useState<string | null>(null);
   const { doctors, isLoadingDoctors } = useDoctors();
@@ -153,7 +155,7 @@ export function CalendarView() {
     const timer = setTimeout(() => setIsLoadingView(false), 500);
     return () => clearTimeout(timer);
     
-  }, [refreshTrigger, viewMode, selectedDate, searchTerm, dateRange, selectedDoctor, selectedType, selectedStatus]);
+  }, [viewMode, selectedDate, searchTerm, dateRange, selectedDoctor, selectedType, selectedStatus]);
 
   const timeSlots = TIME_SLOTS;
 
@@ -270,7 +272,7 @@ export function CalendarView() {
     const columns: Appointment[][] = [];
     const appointmentColumns = new Map<string, number>(); // appointmentId -> columnIndex
     
-    sorted.forEach(apt => {
+    sorted.forEach((apt: Appointment) => {
       let columnIndex = 0;
       while (columnIndex < columns.length) {
         const hasOverlap = columns[columnIndex].some(existingApt => 
@@ -292,7 +294,7 @@ export function CalendarView() {
     
     // Group appointments into clusters of overlapping ones
     const clusters: Appointment[][] = [];
-    sorted.forEach(apt => {
+    sorted.forEach((apt: Appointment) => {
       let addedToCluster = false;
       for (const cluster of clusters) {
         if (cluster.some(c => appointmentsOverlap(apt, c))) {
@@ -330,9 +332,8 @@ export function CalendarView() {
 
     // Calculate occupied time segments for the entire day (minute by minute)
     // This will help determine if a 30-minute slot is covered by any appointment duration.
-    const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
-
-    dayAppointments.forEach(apt => {
+const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
+    dayAppointments.forEach((apt: Appointment) => {
       const startTimeMinutes = timeToMinutes(apt.time);
       const duration = apt.duration || 30; // Default to 30 mins
       const endTimeMinutes = startTimeMinutes + duration;
@@ -359,7 +360,7 @@ export function CalendarView() {
     return (
       <div className="space-y-0 relative">
         {timeSlots.map((timeSlot) => {
-          const appointmentsStartingAtSlot = dayAppointments.filter(apt => apt.time === timeSlot);
+          const appointmentsStartingAtSlot = dayAppointments.filter((apt: Appointment) => apt.time === timeSlot);
           const currentSlotIsCovered = isSlotCovered(timeSlot); // Check if the 30-min slot is covered
 
           return (
@@ -390,7 +391,7 @@ export function CalendarView() {
               
               <div className="flex-1 relative min-h-[80px]">
                 {/* Appointments starting at this slot */}
-                {appointmentsStartingAtSlot.map((appointment) => {
+                {appointmentsStartingAtSlot.map((appointment: Appointment) => {
                   const columnIndex = appointmentColumns.get(appointment.id) ?? 0;
                   const totalColumns = maxOverlappingAt.get(appointment.id) ?? 1;
                   const typeName = getAppointmentTypeName(appointment.type, appointment.customType);
@@ -408,11 +409,10 @@ export function CalendarView() {
                         width: `calc(${width} - 4px)`,
                         left: `calc(${left} + 2px)`,
                       }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditingAppointment(appointment);
-                        setEditOpen(true);
-                      }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openEditModal(appointment);
+                          }}
                     >
                       <div className="flex flex-col h-full">
                         <div className="flex items-start justify-between">
@@ -426,8 +426,7 @@ export function CalendarView() {
                               className="h-6 w-6 p-0 hover:bg-black/5"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setEditingAppointment(appointment);
-                                setEditOpen(true);
+                                openEditModal(appointment);
                               }}
                             >
                               <Edit className="h-3 w-3" />
@@ -555,7 +554,7 @@ export function CalendarView() {
                         )}
 
                       <div className="relative w-full h-full">
-                        {appointmentsForSlot.map(appointment => {
+                        {appointmentsForSlot.map((appointment: Appointment) => {
                           const columnIndex = appointmentColumns.get(appointment.id) ?? 0;
                           const totalColumns = maxOverlappingAt.get(appointment.id) ?? 1;
                           const typeName = getAppointmentTypeName(appointment.type, appointment.customType);
@@ -575,8 +574,7 @@ export function CalendarView() {
                               }}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setEditingAppointment(appointment);
-                                setEditOpen(true);
+                                openEditModal(appointment);
                               }}
                             >
                               <div className="flex justify-between items-start">
@@ -658,7 +656,7 @@ export function CalendarView() {
                 )}
               </div>
               <div className="space-y-1">
-                {dayAppointments.slice(0, 3).map((apt) => {
+                {dayAppointments.slice(0, 3).map((apt: Appointment) => {
                   const typeName = getAppointmentTypeName(apt.type, apt.customType);
                   const colors = getColorForType(typeName);
                   return (
@@ -696,11 +694,11 @@ export function CalendarView() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {sortedAppointments.map(apt => {
+            {sortedAppointments.map((apt: Appointment) => {
               const typeName = getAppointmentTypeName(apt.type, apt.customType);
               const colors = getColorForType(typeName);
               return (
-                <Card key={apt.id} className="overflow-hidden hover:shadow-md transition-shadow cursor-pointer" onClick={() => { setEditingAppointment(apt); setEditOpen(true); }}>
+                <Card key={apt.id} className="overflow-hidden hover:shadow-md transition-shadow cursor-pointer" onClick={() => { openEditModal(apt); }}>
                   <div className={`h-1 ${colors.bg.replace('bg-', 'bg-').split(' ')[0]}`} />
                   <CardContent className="p-4">
                     <div className="flex justify-between items-start mb-2">
@@ -1000,11 +998,7 @@ export function CalendarView() {
         </CardContent>
       </Card>
 
-      <EditAppointmentModal
-        open={editOpen}
-        onOpenChange={setEditOpen}
-        appointment={editingAppointment}
-      />
+      <EditAppointmentModal />
 
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <DialogContent className="max-w-md">

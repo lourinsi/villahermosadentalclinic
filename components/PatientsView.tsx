@@ -1,7 +1,9 @@
+"use client";
+
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
-import { useAppointmentModal } from "./AdminLayout";
+import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
 import { toast } from "sonner";
@@ -123,14 +125,13 @@ export function PatientsView() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalFiltered, setTotalFiltered] = useState(0);
-  const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+
   const [isPatientDeleteDialogOpen, setIsPatientDeleteDialogOpen] = useState(false);
   const [patientToDelete, setPatientToDelete] = useState<Patient | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isPatientDetailsModified, setIsPatientDetailsModified] = useState(false);
   const itemsPerPage = 10;
-  const { openScheduleModal, openAddPatientModal, refreshPatients, refreshTrigger, appointments } = useAppointmentModal();
+  const { openScheduleModal, openAddPatientModal, refreshPatients, refreshTrigger, appointments, openEditModal } = useAppointmentModal();
   
   // Fetch patients from backend with pagination, search, and status filtering
   const fetchPatients = async (page = 1) => {
@@ -149,21 +150,21 @@ export function PatientsView() {
 
         const todayStr = formatDateToYYYYMMDD(new Date());
 
-        const transformedPatients = data.map((patient: any) => {
+        const transformedPatients = data.map((patient: Patient) => {
           const patientAppointments = appointments.filter(
-            (apt: any) => apt.patientId === patient.id || apt.patientName === `${patient.firstName} ${patient.lastName}`
+            (apt: Appointment) => apt.patientId === patient.id || apt.patientName === `${patient.firstName} ${patient.lastName}`
           );
 
           const upcomingAppointments = patientAppointments
-            .filter((apt: any) => apt.date >= todayStr && apt.status !== "completed" && apt.status !== "cancelled")
-            .sort((a: any, b: any) => {
+            .filter((apt: Appointment) => apt.date >= todayStr && apt.status !== "completed" && apt.status !== "cancelled")
+            .sort((a: Appointment, b: Appointment) => {
               if (a.date !== b.date) return a.date.localeCompare(b.date);
               return a.time.localeCompare(b.time);
             });
 
           const completedAppointments = patientAppointments
-            .filter((apt: any) => apt.status === "completed")
-            .sort((a: any, b: any) => parseBackendDateToLocal(b.date).getTime() - parseBackendDateToLocal(a.date).getTime());
+            .filter((apt: Appointment) => apt.status === "completed")
+            .sort((a: Appointment, b: Appointment) => parseBackendDateToLocal(b.date).getTime() - parseBackendDateToLocal(a.date).getTime());
 
           const nextApt = upcomingAppointments.length > 0 ? upcomingAppointments[0].date : null;
           const lastVisitFromApt = completedAppointments.length > 0 ? completedAppointments[0].date : null;
@@ -405,21 +406,16 @@ export function PatientsView() {
                               <DialogHeader>
                                 <DialogTitle>Patient Details - {patient.name}</DialogTitle>
                               </DialogHeader>
-                              <PatientDetails 
-                                patient={patient} 
-                                onClose={() => setSelectedPatient(null)} 
-                                onEditAppointment={(apt) => {
-                                  setEditingAppointment(apt);
-                                  setIsEditModalOpen(true);
-                                }}
-                                onDeletePatient={(p) => {
-                                  setPatientToDelete(p);
-                                  setIsPatientDeleteDialogOpen(true);
-                                }}
-                                isModified={isPatientDetailsModified}
-                                setIsModified={setIsPatientDetailsModified}
-                              />
-                            </DialogContent>
+                                                            <PatientDetails
+                                                              patient={patient}
+                                                              onClose={() => setSelectedPatient(null)}
+                                                              onDeletePatient={(p) => {
+                                                                setPatientToDelete(p);
+                                                                setIsPatientDeleteDialogOpen(true);
+                                                              }}
+                                                              isModified={isPatientDetailsModified}
+                                                              setIsModified={setIsPatientDetailsModified}
+                                                            />                            </DialogContent>
                           </Dialog>
                         
                         <Button 
@@ -471,11 +467,7 @@ export function PatientsView() {
         </CardContent>
       </Card>
 
-      <EditAppointmentModal 
-        open={isEditModalOpen} 
-        onOpenChange={setIsEditModalOpen} 
-        appointment={editingAppointment} 
-      />
+      <EditAppointmentModal />
 
       <Dialog open={isPatientDeleteDialogOpen} onOpenChange={setIsPatientDeleteDialogOpen}>
         <DialogContent className="max-w-md">
@@ -501,21 +493,20 @@ export function PatientsView() {
   );
 }
 
-function PatientDetails({ 
-  patient, 
-  onClose, 
-  onEditAppointment,
+function PatientDetails({
+  patient,
+  onClose,
   onDeletePatient,
   isModified,
   setIsModified
-}: { 
-  patient: Patient; 
+}: {
+  patient: Patient;
   onClose: () => void;
-  onEditAppointment: (apt: Appointment) => void;
   onDeletePatient: (p: Patient) => void;
   isModified: boolean;
   setIsModified: (isModified: boolean) => void;
 }) {
+  const { openEditModal, refreshPatients, appointments } = useAppointmentModal();
   const [formData, setFormData] = useState({
     firstName: patient.firstName || patient.name?.split(' ')[0] || '',
     lastName: patient.lastName || patient.name?.split(' ').slice(1).join(' ') || '',
@@ -540,8 +531,7 @@ function PatientDetails({
   });
 
   const [isSaving, setIsSaving] = useState(false);
-  const [patientAppointments, setPatientAppointments] = useState<any[]>([]);
-  const { refreshPatients, appointments } = useAppointmentModal();
+  const [patientAppointments, setPatientAppointments] = useState<Appointment[]>([]);
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -624,11 +614,11 @@ function PatientDetails({
   }, [patient]);
 
   useEffect(() => {
-    const filtered = appointments.filter(apt =>
+    const filtered = appointments.filter((apt: Appointment) =>
       apt.patientId === patient.id ||
       apt.patientName === `${patient.firstName} ${patient.lastName}` ||
       apt.patientName === patient.name
-    ).sort((a, b) => parseBackendDateToLocal(b.date).getTime() - parseBackendDateToLocal(a.date).getTime());
+    ).sort((a: Appointment, b: Appointment) => parseBackendDateToLocal(b.date).getTime() - parseBackendDateToLocal(a.date).getTime());
 
     setPatientAppointments(filtered);
   }, [appointments, patient]);
@@ -865,7 +855,7 @@ function PatientDetails({
                           size="sm" 
                           className="h-8 w-8 p-0"
                           onClick={() => {
-                            onEditAppointment(appointment);
+                            openEditModal(appointment);
                           }}
                         >
                           <Eye className="h-4 w-4" />

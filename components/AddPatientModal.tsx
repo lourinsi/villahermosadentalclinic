@@ -1,3 +1,5 @@
+"use client";
+
 import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
@@ -6,20 +8,14 @@ import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { toast } from "sonner";
-import { useAppointmentModal } from "./AdminLayout";
+import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 
-interface AddPatientModalProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onPatientAdded?: (patient: any) => void;
-}
-
-export function AddPatientModal({ 
-  open, 
-  onOpenChange,
-  onPatientAdded
-}: AddPatientModalProps) {
-  const { refreshPatients } = useAppointmentModal();
+export function AddPatientModal() {
+  const { 
+    isAddPatientModalOpen, 
+    closeAddPatientModal, 
+    refreshPatients 
+  } = useAppointmentModal();
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
@@ -65,11 +61,8 @@ export function AddPatientModal({
 
       if (result.success) {
         toast.success("Patient added successfully!");
-        if (onPatientAdded && result.data) {
-          onPatientAdded(result.data);
-        }
         refreshPatients(); // Refresh patient list to show new patient immediately
-        onOpenChange(false);
+        closeAddPatientModal();
         // Reset form
         setFormData({
           firstName: "",
@@ -100,7 +93,7 @@ export function AddPatientModal({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={isAddPatientModalOpen} onOpenChange={closeAddPatientModal}>
       <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Add New Patient</DialogTitle>
@@ -256,7 +249,7 @@ export function AddPatientModal({
           </div>
           
           <div className="flex justify-end space-x-2 pt-4 border-t">
-            <Button variant="cancel" type="button" onClick={() => onOpenChange(false)} disabled={isLoading}>
+            <Button variant="cancel" type="button" onClick={() => closeAddPatientModal()} disabled={isLoading}>
               Cancel
             </Button>
             <Button variant="brand" type="submit" disabled={isLoading}>
