@@ -130,6 +130,7 @@ export function PatientsView() {
   const [patientToDelete, setPatientToDelete] = useState<Patient | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isPatientDetailsModified, setIsPatientDetailsModified] = useState(false);
+  const [isPatientDetailsModalOpen, setIsPatientDetailsModalOpen] = useState(false); // New state
   const itemsPerPage = 10;
   const { openScheduleModal, openAddPatientModal, refreshPatients, refreshTrigger, appointments, openEditModal } = useAppointmentModal();
   
@@ -416,7 +417,7 @@ export function PatientsView() {
                                                               isModified={isPatientDetailsModified}
                                                               setIsModified={setIsPatientDetailsModified}
                                                             />                            </DialogContent>
-                          </Dialog>
+                        </Dialog>
                         
                         <Button 
                           variant="dark" 
@@ -531,6 +532,7 @@ function PatientDetails({
   });
 
   const [isSaving, setIsSaving] = useState(false);
+  const [isConfirmUnsavedChangesOpen, setIsConfirmUnsavedChangesOpen] = useState(false); // New state
   const [patientAppointments, setPatientAppointments] = useState<Appointment[]>([]);
 
   useEffect(() => {
@@ -642,12 +644,15 @@ function PatientDetails({
         toast.success("Patient updated successfully");
         refreshPatients();
         setIsModified(false);
+        return true; // Indicate success
       } else {
         toast.error(result.message || "Failed to update patient");
+        return false; // Indicate failure
       }
     } catch (err) {
       console.error("Error updating patient:", err);
       toast.error("Error connecting to server. Make sure the backend is running on port 3001.");
+      return false; // Indicate failure
     } finally {
       setIsSaving(false);
     }
@@ -655,6 +660,24 @@ function PatientDetails({
 
   const handleDeletePatient = () => {
     onDeletePatient(patient);
+  };
+
+  const handleSaveAndClose = async () => {
+    const success = await handleUpdatePatient();
+    if (success) {
+      onClose(); // Call parent's onClose only if save was successful
+    }
+    setIsConfirmUnsavedChangesOpen(false);
+  };
+
+  const handleDiscardAndClose = () => {
+    setIsModified(false); // Clear modified state
+    onClose(); // Call parent's onClose
+    setIsConfirmUnsavedChangesOpen(false);
+  };
+
+  const handleCancelClose = () => {
+    setIsConfirmUnsavedChangesOpen(false); // Close the prompt, stay in the modal
   };
 
   return (
@@ -870,6 +893,29 @@ function PatientDetails({
           </Card>
         </TabsContent>
       </Tabs>
+      <Dialog open={isConfirmUnsavedChangesOpen} onOpenChange={setIsConfirmUnsavedChangesOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Unsaved Changes</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground">
+              You have unsaved changes. Do you want to save them before closing?
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={handleDiscardAndClose}>
+              Discard & Close
+            </Button>
+            <Button variant="secondary" onClick={handleCancelClose}>
+              Cancel
+            </Button>
+            <Button variant="brand" onClick={handleSaveAndClose} disabled={isSaving}>
+              {isSaving ? "Saving..." : "Save & Close"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

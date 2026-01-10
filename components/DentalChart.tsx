@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
 import { Button } from "./ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { Eraser, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Plus, Undo2 } from "lucide-react";
+import { Eraser, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Plus, Undo2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
 
@@ -31,19 +32,19 @@ interface DentalChartProps {
 }
 
 export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
-  const defaultInitialRecord = useMemo(() => [{ date: formatDateToYYYYMMDD(new Date()), data: '{}' }], []);
-  // If no records, initialize with one empty record
-  const initialRecords = records.length > 0 ? records : defaultInitialRecord;
+
   
-  const [currentIndex, setCurrentIndex] = useState(initialRecords.length - 1);
+  const [currentIndex, setCurrentIndex] = useState(records.length > 0 ? records.length - 1 : 0);
   const [selectedColor, setSelectedColor] = useState<ToothColor>("blue");
   const [teethState, setTeethState] = useState<Record<number, ToothState>>({});
   const [originalTeethState, setOriginalTeethState] = useState<Record<number, ToothState>>({});
   const [currentDate, setCurrentDate] = useState("");
+  const [isConfirmDeleteChartOpen, setIsConfirmDeleteChartOpen] = useState(false);
+  const [isConfirmDeleteEmptyChartsOpen, setIsConfirmDeleteEmptyChartsOpen] = useState(false);
 
   // Load teeth state when index or records change
   useEffect(() => {
-    const currentRecord = initialRecords[currentIndex];
+    const currentRecord = records[currentIndex]; // Use records prop directly
     if (currentRecord) {
       try {
         const parsedData = JSON.parse(currentRecord.data || '{}');
@@ -53,8 +54,14 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
       } catch (e) {
         setTeethState({});
         setOriginalTeethState({});
-        setCurrentDate(formatDateToYYYYMMDD(new Date()));
+        setCurrentDate(formatDateToYYYYMMDD(new Date())); // Fallback if record data is bad
       }
+    } else {
+      // If currentRecord is undefined (e.g., records array is empty or index is out of bounds)
+      setTeethState({});
+      setOriginalTeethState({});
+      // If records are empty, set current date to current day, otherwise to the first record's date if available.
+      setCurrentDate(records.length > 0 ? records[0].date : formatDateToYYYYMMDD(new Date()));
     }
   }, [currentIndex, records]);
 
@@ -65,7 +72,7 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
       return;
     }
 
-    const updatedRecords = [...initialRecords];
+    const updatedRecords = [...records];
     const currentRecord = updatedRecords[currentIndex];
 
     // This should not happen if logic is correct, but as a safeguard.
@@ -124,26 +131,110 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
     }
   };
 
-  const handleUndo = () => {
-    setTeethState(originalTeethState);
-    toast.info("Changes reverted to the state when the chart was opened.");
-  };
+
 
   const handleCreateNew = () => {
-    const lastRecordDate = initialRecords.length > 0 ? parseBackendDateToLocal(initialRecords[initialRecords.length - 1].date) : new Date();
-    lastRecordDate.setDate(lastRecordDate.getDate() + 1);
-    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Normalize today to start of day
+
+    let newChartDate = new Date(today); // Start with today's date
+
+    const sortedRecords = [...records].sort((a, b) => {
+      const dateA = parseBackendDateToLocal(a.date).getTime();
+      const dateB = parseBackendDateToLocal(b.date).getTime();
+      return dateA - dateB;
+    });
+
+    // Find the latest record date that is today or in the future
+    const latestFutureRecordDate = sortedRecords.reduce((latestDate: Date | null, record) => {
+      const recordDate = parseBackendDateToLocal(record.date);
+      recordDate.setHours(0, 0, 0, 0); // Normalize record date
+
+      if (recordDate.getTime() >= today.getTime()) { // Check if record is today or in the future
+        if (!latestDate || recordDate.getTime() > latestDate.getTime()) {
+          return recordDate;
+        }
+      }
+      return latestDate;
+    }, null);
+
+    if (latestFutureRecordDate) {
+      // If there's a record today or in the future, increment from that date
+      newChartDate = new Date(latestFutureRecordDate);
+      newChartDate.setDate(newChartDate.getDate() + 1);
+    } 
+    // Else, newChartDate remains today (initialized above)
+
     const newRecord = {
-      date: lastRecordDate.toISOString().split('T')[0],
+      date: formatDateToYYYYMMDD(newChartDate), // Use local date components for string
       data: '{}'
     };
-    const updatedRecords = [...initialRecords, newRecord];
+    const updatedRecords = [...records, newRecord];
     onSaveRecords(updatedRecords);
     setCurrentIndex(updatedRecords.length - 1);
-    toast.info("New dental chart record created.");
+    toast.info("New dental chart record created for " + newChartDate.toLocaleDateString());
   };
+  const handleDeleteChart = () => {
+    if (records.length === 0) {
+      toast.info("No chart to delete.");
+      return;
+    }
+    setIsConfirmDeleteChartOpen(true); // Open the confirmation modal
+  };
+
+  const confirmDeleteChart = () => {
+    const updatedRecords = records.filter((_, index) => index !== currentIndex);
+    onSaveRecords(updatedRecords);
+
+    // After deleting, adjust currentIndex
+    if (updatedRecords.length === 0) {
+      setCurrentIndex(0); // If no records left, reset to 0
+      setCurrentDate(formatDateToYYYYMMDD(new Date())); // And show today's date
+    } else if (currentIndex >= updatedRecords.length) {
+      setCurrentIndex(updatedRecords.length - 1); // If deleted last, move to new last
+    } else {
+      setCurrentIndex(Math.max(0, currentIndex - 1)); // Move to previous chart for consistent view
+    }
+    setIsConfirmDeleteChartOpen(false); // Close the modal
+    toast.success("Dental chart record deleted."); // Keeping success toast
+  };
+
+  const handleDeleteEmptyCharts = () => {
+    if (records.length === 0) {
+      toast.info("No charts to clean up.");
+      return;
+    }
+    setIsConfirmDeleteEmptyChartsOpen(true); // Open the confirmation modal
+  };
+
+  const confirmDeleteEmptyCharts = () => {
+    const cleanedRecords = records.filter(record => {
+      // Assuming '{}' means empty data
+      return record.data !== '{}'; 
+    });
+
+    if (cleanedRecords.length === records.length) {
+      toast.info("No empty charts found to delete."); // Keeping this toast
+      setIsConfirmDeleteEmptyChartsOpen(false);
+      return;
+    }
+
+    onSaveRecords(cleanedRecords);
+    // After deletion, adjust currentIndex
+    if (cleanedRecords.length === 0) {
+      setCurrentIndex(0); // If no records left, reset to 0
+      setCurrentDate(formatDateToYYYYMMDD(new Date())); // And show today's date
+    } else if (currentIndex >= cleanedRecords.length) {
+      setCurrentIndex(cleanedRecords.length - 1); // If deleted records at the end, move to new last
+    } else {
+      // Current index might still be valid, no change needed
+    }
+    setIsConfirmDeleteEmptyChartsOpen(false); // Close the modal
+    toast.success(`${records.length - cleanedRecords.length} empty charts deleted.`); // Keeping success toast
+  };
+
   const canGoPrevious = currentIndex > 0;
-  const canGoNext = currentIndex < initialRecords.length - 1;
+  const canGoNext = currentIndex < records.length - 1;
 
   return (
     <div className="space-y-4">
@@ -194,10 +285,12 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
                 <RotateCcw className="h-4 w-4 mr-1" />
                 Clear
               </Button>
-              <Button variant="outline" size="sm" onClick={handleUndo}>
-                <Undo2 className="h-4 w-4 mr-1" />
-                Undo
+              <Button variant="destructive" size="sm" onClick={handleDeleteEmptyCharts} disabled={records.length === 0}>
+                <Trash2 className="h-4 w-4 mr-1" />
+                Delete Empty Charts
               </Button>
+
+
             </div>
           </div>
         </CardContent>
@@ -221,8 +314,19 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
 
       {/* Dental Chart Diagram */}
       <Card>
-        <CardHeader>
+        <CardHeader className="relative"> {/* Add relative for positioning */}
           <CardTitle>Dental Chart Diagram</CardTitle>
+          {records.length > 0 && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="absolute top-4 right-4 text-red-500 hover:text-red-700" // Position top-right
+              onClick={handleDeleteChart}
+              title="Delete current chart"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
         </CardHeader>
         <CardContent>
           <div className="space-y-8 pb-4">
@@ -313,6 +417,7 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
                     <ChevronLeft className="h-4 w-4" />
                   </Button>
                   
+
                   <div className="px-4 text-sm font-medium text-gray-600">
                     {parseBackendDateToLocal(currentDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </div>
@@ -330,7 +435,7 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8 text-gray-400"
-                    onClick={() => setCurrentIndex(initialRecords.length - 1)}
+                    onClick={() => setCurrentIndex(records.length - 1)} // Use records.length
                     disabled={!canGoNext}
                   >
                     <ChevronsRight className="h-4 w-4" />
@@ -341,6 +446,46 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
           </div>
         </CardContent>
       </Card>
+      <Dialog open={isConfirmDeleteChartOpen} onOpenChange={setIsConfirmDeleteChartOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Confirm Chart Deletion</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground">
+              Are you sure you want to delete this dental chart record? This action cannot be undone.
+            </p>
+          </div>
+          <DialogFooter className="sm:justify-center">
+            <Button variant="outline" onClick={() => setIsConfirmDeleteChartOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmDeleteChart}>
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={isConfirmDeleteEmptyChartsOpen} onOpenChange={setIsConfirmDeleteEmptyChartsOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Confirm Delete Empty Charts</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground">
+              Are you sure you want to delete all empty dental chart records? This action cannot be undone.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsConfirmDeleteEmptyChartsOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmDeleteEmptyCharts}>
+              Delete All Empty Charts
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -808,10 +808,12 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                             onClick={() => {
                               setSearchTerm("");
                               setViewMode(mode);
-                              if (mode === "week") {
-                                setSelectedDate(new Date());
-                              }
-                              if (mode !== "custom") setShowDatePicker(false);
+                              // Retain selectedDate for context in week view
+                              // if (mode === "week") {
+                              //   setSelectedDate(new Date()); 
+                              // }
+                              // Keep the date picker open after changing view mode
+                              // if (mode !== "custom") setShowDatePicker(false);
                             }}
                           >
                             {mode}
@@ -840,6 +842,9 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                           }}
                           numberOfMonths={2}
                           className="rounded-md border shadow-sm"
+                          classNames={{
+                            today: "bg-violet-600 text-white rounded-full",
+                          }}
                           components={{
                             MonthCaption: ({ calendarMonth, displayIndex, ...props }: any) => (
                               <div {...props}>
@@ -867,11 +872,14 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                             if (date) {
                               setSearchTerm("");
                               setSelectedDate(date);
-                              setViewMode("month");
-                              setShowDatePicker(false);
+                              setViewMode(viewMode); // Keep the current view mode
+                              // setShowDatePicker(false); // Keep the date picker open
                             }
                           }}
                           className="rounded-md border shadow-sm"
+                          classNames={{
+                            today: "bg-violet-600 text-white rounded-full",
+                          }}
                           components={{
                             MonthCaption: ({ calendarMonth, displayIndex, ...props }: any) => (
                               <div {...props}>
