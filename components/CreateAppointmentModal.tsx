@@ -350,39 +350,67 @@ export function CreateAppointmentModal() {
                   {open && (
                     <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-auto">
                       <div className="p-2">
-                        <div
-                          className="px-2 py-1 text-sm cursor-pointer hover:bg-gray-100 rounded"
-                          onClick={() => {
-                            setShowNewPatient(true);
-                            setFormData(prev => ({ ...prev, patientId: "", patientName: "" }));
-                            setPatientInputValue("");
-                            setOpen(false);
-                          }}
-                        >
-                          + Create New Patient
-                        </div>
-                        {sortedPatients
-                          .filter((p) =>
+                        {(() => {
+                          const filteredPatients = sortedPatients.filter((p) =>
                             p.name.toLowerCase().includes(patientSearch.toLowerCase())
-                          )
-                          .map((p, index) => (
-                            <div
-                              key={p.id}
-                              className="px-2 py-1 text-sm cursor-pointer hover:bg-gray-100 rounded"
-                              onClick={() => {
-                                setShowNewPatient(false);
-                                setFormData(prev => ({ ...prev, patientId: p.id, patientName: p.name }));
-                                setPatientInputValue(p.name);
-                                setOpen(false);
-                              }}
-                              ref={index === sortedPatients.length - 1 ? lastPatientElementRef : undefined}
-                            >
-                              {p.name}
-                            </div>
-                          ))}
-                        {isLoadingPatients && (
-                          <div className="px-2 py-1 text-sm text-gray-500">Loading more...</div>
-                        )}
+                          );
+                          const isSearching = patientSearch !== "";
+                          const hasNoResults = isSearching && filteredPatients.length === 0;
+
+                          return (
+                            <>
+                              {patientSearch === "" && (
+                                <div
+                                  className="px-2 py-1 text-sm cursor-pointer hover:bg-gray-100 rounded"
+                                  onClick={() => {
+                                    setShowNewPatient(true);
+                                    setFormData(prev => ({ ...prev, patientId: "", patientName: "" }));
+                                    setPatientInputValue("");
+                                    setOpen(false);
+                                  }}
+                                >
+                                  + Create New Patient
+                                </div>
+                              )}
+                              {hasNoResults && (
+                                <div className="px-2 py-1 text-sm text-gray-500">
+                                  No patients found
+                                </div>
+                              )}
+                              {hasNoResults && (
+                                <div
+                                  className="px-2 py-1 text-sm cursor-pointer hover:bg-gray-100 rounded"
+                                  onClick={() => {
+                                    setShowNewPatient(true);
+                                    setFormData(prev => ({ ...prev, patientId: "", patientName: "" }));
+                                    setPatientInputValue("");
+                                    setOpen(false);
+                                  }}
+                                >
+                                  + Create New Patient
+                                </div>
+                              )}
+                              {filteredPatients.map((p, index) => (
+                                <div
+                                  key={p.id}
+                                  className="px-2 py-1 text-sm cursor-pointer hover:bg-gray-100 rounded"
+                                  onClick={() => {
+                                    setShowNewPatient(false);
+                                    setFormData(prev => ({ ...prev, patientId: p.id, patientName: p.name }));
+                                    setPatientInputValue(p.name);
+                                    setOpen(false);
+                                  }}
+                                  ref={index === filteredPatients.length - 1 ? lastPatientElementRef : undefined}
+                                >
+                                  {p.name}
+                                </div>
+                              ))}
+                              {isLoadingPatients && (
+                                <div className="px-2 py-1 text-sm text-gray-500">Loading more...</div>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
                     </div>
                   )}
