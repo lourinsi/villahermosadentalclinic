@@ -7,7 +7,13 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { Calendar, Clock, User, Stethoscope } from "lucide-react";
+
+
+
+import { cn } from "../lib/utils";
+import { Calendar, Clock, User, Stethoscope, ChevronsUpDown } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { Command, CommandEmpty, CommandInput, CommandList, CommandItem } from "./ui/command";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { toast } from "sonner";
 import { useDoctors } from "../hooks/useDoctors";
@@ -71,10 +77,13 @@ export function CreateAppointmentModal() {
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingPatients, setIsLoadingPatients] = useState(false);
   const [showCustomTypeInput, setShowCustomTypeInput] = useState(false);
+  const [patientSearch, setPatientSearch] = useState("");
+  const [patientInputValue, setPatientInputValue] = useState("");
 
   // New state for pagination
   const [patientPage, setPatientPage] = useState(1);
   const [hasMorePatients, setHasMorePatients] = useState(true);
+  const [open, setOpen] = useState(false);
 
   const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors();
 
@@ -311,35 +320,73 @@ export function CreateAppointmentModal() {
             {!showNewPatient ? (
               <div className="space-y-2">
                 <Label>Select Patient</Label>
-                <Select
-                  value={formData.patientId || ""}
-                  onValueChange={handlePatientSelect}
-                  onOpenChange={(open) => {
-                    if (open) {
+                <div className="relative">
+                  <Input
+                    placeholder="Search patients..."
+                    value={patientInputValue}
+                    onChange={(e) => {
+                      setPatientInputValue(e.target.value);
+                      setPatientSearch(e.target.value);
+                      setOpen(true);
+                      if (!open) {
+                        setPatientPage(1);
+                        fetchPatients(1);
+                      }
+                    }}
+                    onFocus={() => {
+                      setOpen(true);
                       setPatientPage(1);
                       fetchPatients(1);
-                    }
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select patient or create new" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="new">+ Create New Patient</SelectItem>
-                    {sortedPatients.map((p, index) => {
-                      if (sortedPatients.length === index + 1) {
-                        return <div ref={lastPatientElementRef} key={p.id}><SelectItem value={p.id}>{p.name}</SelectItem></div>;
-                      }
-                      return <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>;
-                    })}
-                    {isLoadingPatients && (
-                      <div className="p-2 text-center text-sm text-gray-500">Loading more...</div>
-                    )}
-                    {!isLoadingPatients && sortedPatients.length === 0 && (
-                      <div className="p-2 text-center text-sm text-gray-500">No patients found.</div>
-                    )}
-                  </SelectContent>
-                </Select>
+                    }}
+                    onBlur={() => {
+                      // Delay closing to allow click on options
+                      setTimeout(() => setOpen(false), 200);
+                    }}
+                    className="w-full"
+                  />
+                  <div className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
+                    <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                  </div>
+                  {open && (
+                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-auto">
+                      <div className="p-2">
+                        <div
+                          className="px-2 py-1 text-sm cursor-pointer hover:bg-gray-100 rounded"
+                          onClick={() => {
+                            setShowNewPatient(true);
+                            setFormData(prev => ({ ...prev, patientId: "", patientName: "" }));
+                            setPatientInputValue("");
+                            setOpen(false);
+                          }}
+                        >
+                          + Create New Patient
+                        </div>
+                        {sortedPatients
+                          .filter((p) =>
+                            p.name.toLowerCase().includes(patientSearch.toLowerCase())
+                          )
+                          .map((p, index) => (
+                            <div
+                              key={p.id}
+                              className="px-2 py-1 text-sm cursor-pointer hover:bg-gray-100 rounded"
+                              onClick={() => {
+                                setShowNewPatient(false);
+                                setFormData(prev => ({ ...prev, patientId: p.id, patientName: p.name }));
+                                setPatientInputValue(p.name);
+                                setOpen(false);
+                              }}
+                              ref={index === sortedPatients.length - 1 ? lastPatientElementRef : undefined}
+                            >
+                              {p.name}
+                            </div>
+                          ))}
+                        {isLoadingPatients && (
+                          <div className="px-2 py-1 text-sm text-gray-500">Loading more...</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="space-y-3">

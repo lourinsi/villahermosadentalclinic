@@ -630,11 +630,12 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
         ))}
         {days.map((item, idx) => {
           const dayAppointments = getAppointmentsForDate(item.date);
+          const sortedDayAppointments = [...dayAppointments].sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
           const isToday = item.date.toDateString() === new Date().toDateString();
-          
+
           return (
-            <div 
-              key={idx} 
+            <div
+              key={idx}
               className={`min-h-[120px] p-2 border-r border-b border-gray-200 transition-colors cursor-pointer ${
                 item.currentMonth ? 'bg-white hover:bg-gray-50' : 'bg-gray-50/50 text-gray-400'
               }`}
@@ -656,12 +657,12 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                 )}
               </div>
               <div className="space-y-1">
-                {dayAppointments.slice(0, 3).map((apt: Appointment) => {
+                {sortedDayAppointments.slice(0, 3).map((apt: Appointment) => {
                   const typeName = getAppointmentTypeName(apt.type, apt.customType);
                   const colors = getColorForType(typeName);
                   return (
-                    <div 
-                      key={apt.id} 
+                    <div
+                      key={apt.id}
                       className={`text-[10px] p-1 rounded truncate border-l-2 ${colors.bg} ${colors.text} ${colors.border}`}
                     >
                       {apt.time} {apt.patientName} {apt.price != null && ` ($${apt.price.toFixed(2)})`}
