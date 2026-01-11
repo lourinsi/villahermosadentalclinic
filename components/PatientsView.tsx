@@ -113,7 +113,7 @@ interface Patient {
   emergencyContact?: string;
   emergencyPhone?: string;
   notes?: string;
-  dentalCharts?: { date: string; data: string }[];
+  dentalCharts?: { date: string; data: string; isEmpty: boolean }[];
 }
 
 export function PatientsView() {
@@ -403,7 +403,7 @@ export function PatientsView() {
                               View
                             </Button>
                           </DialogTrigger>
-                            <DialogContent className="max-w-6xl w-[90vw] max-h-[90vh] overflow-y-auto">
+                            <DialogContent className="sm:max-w-7xl w-[95vw] max-h-[90vh] overflow-y-auto">
                               <DialogHeader>
                                 <DialogTitle>Patient Details - {patient.name}</DialogTitle>
                               </DialogHeader>

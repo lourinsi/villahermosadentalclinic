@@ -14,6 +14,7 @@ type ToothState = Record<ToothSection, ToothColor>;
 interface ChartRecord {
   date: string;
   data: string; // JSON stringified Record<number, ToothState>
+  isEmpty: boolean;
 }
 
 const upperRightAdult = [18, 17, 16, 15, 14, 13, 12, 11];
@@ -32,9 +33,31 @@ interface DentalChartProps {
 }
 
 export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
+  const [localRecords, setLocalRecords] = useState<ChartRecord[]>([]);
 
+  useEffect(() => {
+    if (records.length === 0) {
+      const tempRecord = {
+        date: formatDateToYYYYMMDD(new Date()),
+        data: '{}',
+        isEmpty: true
+      };
+      setLocalRecords([tempRecord]);
+    } else {
+      setLocalRecords(records.map(record => ({
+        ...record,
+        isEmpty: record.isEmpty ?? isChartEmpty(JSON.parse(record.data || '{}'))
+      })));
+    }
+  }, [records]);
   
-  const [currentIndex, setCurrentIndex] = useState(records.length > 0 ? records.length - 1 : 0);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  
+  useEffect(() => {
+    if (localRecords.length > 0 && currentIndex >= localRecords.length) {
+      setCurrentIndex(localRecords.length - 1);
+    }
+  }, [localRecords.length, currentIndex]);
   const [selectedColor, setSelectedColor] = useState<ToothColor>("blue");
   const [teethState, setTeethState] = useState<Record<number, ToothState>>({});
   const [originalTeethState, setOriginalTeethState] = useState<Record<number, ToothState>>({});
@@ -44,7 +67,7 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
 
   // Load teeth state when index or records change
   useEffect(() => {
-    const currentRecord = records[currentIndex]; // Use records prop directly
+    const currentRecord = localRecords[currentIndex]; // Use localRecords
     if (currentRecord) {
       try {
         const parsedData = JSON.parse(currentRecord.data || '{}');
@@ -57,13 +80,12 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
         setCurrentDate(formatDateToYYYYMMDD(new Date())); // Fallback if record data is bad
       }
     } else {
-      // If currentRecord is undefined (e.g., records array is empty or index is out of bounds)
+      // If currentRecord is undefined
       setTeethState({});
       setOriginalTeethState({});
-      // If records are empty, set current date to current day, otherwise to the first record's date if available.
-      setCurrentDate(records.length > 0 ? records[0].date : formatDateToYYYYMMDD(new Date()));
+      setCurrentDate(formatDateToYYYYMMDD(new Date()));
     }
-  }, [currentIndex, records]);
+  }, [currentIndex, localRecords]);
 
   // This useEffect will now trigger on every change to teethState and call onSaveRecords
   useEffect(() => {
@@ -72,10 +94,9 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
       return;
     }
 
-    const updatedRecords = [...records];
+    const updatedRecords = [...localRecords];
     const currentRecord = updatedRecords[currentIndex];
 
-    // This should not happen if logic is correct, but as a safeguard.
     if (!currentRecord) {
         return; 
     }
@@ -84,6 +105,7 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
     const newRecord = {
       ...currentRecord,
       data: JSON.stringify(teethState),
+      isEmpty: isChartEmpty(teethState),
     };
 
     // Replace the old record with the new one
@@ -91,7 +113,6 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
 
     // Call the callback to update the parent's state
     onSaveRecords(updatedRecords);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teethState]);
 
   const getToothState = (toothNumber: number): ToothState => {
@@ -102,6 +123,18 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
       right: "none",
       center: "none"
     };
+  };
+
+  const isChartEmpty = (state: Record<number, ToothState>): boolean => {
+    for (const tooth in state) {
+      const toothState = state[tooth];
+      for (const section of Object.keys(toothState) as ToothSection[]) {
+        if (toothState[section] !== "none") {
+          return false;
+        }
+      }
+    }
+    return true;
   };
 
   const handleSectionClick = (toothNumber: number, section: ToothSection) => {
@@ -139,7 +172,7 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
 
     let newChartDate = new Date(today); // Start with today's date
 
-    const sortedRecords = [...records].sort((a, b) => {
+    const sortedRecords = [...localRecords].sort((a, b) => {
       const dateA = parseBackendDateToLocal(a.date).getTime();
       const dateB = parseBackendDateToLocal(b.date).getTime();
       return dateA - dateB;
@@ -167,40 +200,54 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
 
     const newRecord = {
       date: formatDateToYYYYMMDD(newChartDate), // Use local date components for string
-      data: '{}'
+      data: '{}',
+      isEmpty: true
     };
-    const updatedRecords = [...records, newRecord];
+    const updatedRecords = [...localRecords, newRecord];
     onSaveRecords(updatedRecords);
     setCurrentIndex(updatedRecords.length - 1);
     toast.info("New dental chart record created for " + newChartDate.toLocaleDateString());
   };
   const handleDeleteChart = () => {
-    if (records.length === 0) {
-      toast.info("No chart to delete.");
+    if (localRecords.length === 1 && records.length === 0) {
+      toast.info("This is a temporary chart and cannot be deleted yet.");
       return;
     }
+    
     setIsConfirmDeleteChartOpen(true); // Open the confirmation modal
   };
 
   const confirmDeleteChart = () => {
-    const updatedRecords = records.filter((_, index) => index !== currentIndex);
-    onSaveRecords(updatedRecords);
+    const updatedRecords = localRecords.filter((_, index) => index !== currentIndex);
 
-    // After deleting, adjust currentIndex
     if (updatedRecords.length === 0) {
-      setCurrentIndex(0); // If no records left, reset to 0
-      setCurrentDate(formatDateToYYYYMMDD(new Date())); // And show today's date
-    } else if (currentIndex >= updatedRecords.length) {
-      setCurrentIndex(updatedRecords.length - 1); // If deleted last, move to new last
+      // If we deleted the last chart, create a new temporary one
+      const tempRecord = {
+        date: formatDateToYYYYMMDD(new Date()),
+        data: '{}',
+        isEmpty: true
+      };
+      setLocalRecords([tempRecord]);
+      setCurrentIndex(0);
+      onSaveRecords([]); // Tell parent there are no charts
+      toast.info("Last chart deleted. A new temporary chart has been created.");
     } else {
-      setCurrentIndex(Math.max(0, currentIndex - 1)); // Move to previous chart for consistent view
+      onSaveRecords(updatedRecords);
+      // After deleting, adjust currentIndex
+      if (currentIndex >= updatedRecords.length) {
+        setCurrentIndex(updatedRecords.length - 1); // If deleted last, move to new last
+      } else {
+        // Stay at same index or adjust if needed
+        setCurrentIndex(Math.max(0, currentIndex));
+      }
+      toast.success("Dental chart record deleted.");
     }
+
     setIsConfirmDeleteChartOpen(false); // Close the modal
-    toast.success("Dental chart record deleted."); // Keeping success toast
   };
 
   const handleDeleteEmptyCharts = () => {
-    if (records.length === 0) {
+    if (localRecords.length === 0 || (localRecords.length === 1 && localRecords[0].data === '{}' && records.length === 0)) {
       toast.info("No charts to clean up.");
       return;
     }
@@ -208,33 +255,38 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
   };
 
   const confirmDeleteEmptyCharts = () => {
-    const cleanedRecords = records.filter(record => {
-      // Assuming '{}' means empty data
-      return record.data !== '{}'; 
+    const cleanedRecords = localRecords.filter(record => {
+      return !record.isEmpty;
     });
 
-    if (cleanedRecords.length === records.length) {
-      toast.info("No empty charts found to delete."); // Keeping this toast
+    if (cleanedRecords.length === 0) {
+      // If all charts were empty, keep one temporary chart
+      const tempRecord = {
+        date: formatDateToYYYYMMDD(new Date()),
+        data: '{}',
+        isEmpty: true
+      };
+      setLocalRecords([tempRecord]);
+      setCurrentIndex(0);
+      onSaveRecords([]);
+      toast.info("All charts were empty. A new temporary chart has been created.");
+    } else if (cleanedRecords.length === localRecords.length) {
+      toast.info("No empty charts found to delete.");
       setIsConfirmDeleteEmptyChartsOpen(false);
       return;
+    } else {
+      onSaveRecords(cleanedRecords);
+      if (currentIndex >= cleanedRecords.length) {
+        setCurrentIndex(cleanedRecords.length - 1);
+      }
+      toast.success(`${localRecords.length - cleanedRecords.length} empty charts deleted.`);
     }
 
-    onSaveRecords(cleanedRecords);
-    // After deletion, adjust currentIndex
-    if (cleanedRecords.length === 0) {
-      setCurrentIndex(0); // If no records left, reset to 0
-      setCurrentDate(formatDateToYYYYMMDD(new Date())); // And show today's date
-    } else if (currentIndex >= cleanedRecords.length) {
-      setCurrentIndex(cleanedRecords.length - 1); // If deleted records at the end, move to new last
-    } else {
-      // Current index might still be valid, no change needed
-    }
     setIsConfirmDeleteEmptyChartsOpen(false); // Close the modal
-    toast.success(`${records.length - cleanedRecords.length} empty charts deleted.`); // Keeping success toast
   };
 
   const canGoPrevious = currentIndex > 0;
-  const canGoNext = currentIndex < records.length - 1;
+  const canGoNext = currentIndex < localRecords.length - 1;
 
   return (
     <div className="space-y-4">
