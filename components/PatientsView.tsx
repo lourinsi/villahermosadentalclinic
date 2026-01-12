@@ -505,7 +505,7 @@ export function PatientsView() {
           }
         }}
       >
-        <DialogContent className="sm:max-w-7xl w-[95vw] max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-7xl w-[95vw] max-h-[90vh] overflow-y-auto data-[state=closed]:zoom-out-100 data-[state=open]:zoom-in-100">
           <DialogHeader>
             <DialogTitle>Patient Details - {selectedPatient?.name}</DialogTitle>
           </DialogHeader>
