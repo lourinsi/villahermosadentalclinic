@@ -35,6 +35,8 @@ interface AppointmentFormData {
   doctor: string;
   notes: string;
   status: string;
+  paymentStatus: "paid" | "unpaid" | "overdue" | "half-paid";
+  balance: number;
 }
 
 interface ApiPatient {
@@ -69,7 +71,9 @@ export function CreateAppointmentModal() {
     price: 0,
     doctor: "",
     notes: "",
-    status: "scheduled"
+    status: "scheduled",
+    paymentStatus: "unpaid",
+    balance: 0
   });
 
   const [showNewPatient, setShowNewPatient] = useState(false);
@@ -149,7 +153,9 @@ export function CreateAppointmentModal() {
         price: 0,
         doctor: "",
         notes: "",
-        status: "scheduled"
+        status: "scheduled",
+        paymentStatus: "unpaid",
+        balance: 0
       };
 
       console.log("CreateAppointmentModal Details:", {
@@ -260,7 +266,9 @@ export function CreateAppointmentModal() {
         price: formData.price,
         doctor: formData.doctor,
         notes: formData.notes,
-        status: formData.status as "scheduled" | "confirmed" | "pending" | "tentative" | "completed" | "cancelled"
+        status: formData.status as "scheduled" | "confirmed" | "pending" | "tentative" | "completed" | "cancelled",
+        paymentStatus: formData.paymentStatus,
+        balance: formData.balance
       });
 
       toast.success("Appointment created successfully!");
@@ -614,6 +622,36 @@ export function CreateAppointmentModal() {
                     <SelectItem value="tentative">Tentative</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="paymentStatus">Payment Status</Label>
+                <Select
+                  value={formData.paymentStatus}
+                  onValueChange={(value: any) => setFormData(prev => ({ ...prev, paymentStatus: value }))}
+                >
+                  <SelectTrigger id="paymentStatus">
+                    <SelectValue placeholder="Select payment status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="paid">Paid</SelectItem>
+                    <SelectItem value="unpaid">Unpaid</SelectItem>
+                    <SelectItem value="half-paid">Half Paid</SelectItem>
+                    <SelectItem value="overdue">Overdue</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="balance">Balance Left ($)</Label>
+                <Input
+                  id="balance"
+                  type="number"
+                  value={formData.balance}
+                  onChange={(e) => setFormData(prev => ({ ...prev, balance: parseFloat(e.target.value) || 0 }))}
+                  min="0"
+                  step="0.01"
+                />
               </div>
             </div>
           </div>

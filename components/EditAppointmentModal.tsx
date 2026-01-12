@@ -516,6 +516,36 @@ export function EditAppointmentModal() {
                 </SelectContent>
               </Select>
             </div>
+
+            <div className="space-y-2">
+              <Label>Payment Status</Label>
+              <Select 
+                value={form.paymentStatus || 'unpaid'} 
+                onValueChange={(v) => setForm(prev => ({ ...prev, paymentStatus: v as any }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Payment Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="paid">Paid</SelectItem>
+                  <SelectItem value="unpaid">Unpaid</SelectItem>
+                  <SelectItem value="half-paid">Half Paid</SelectItem>
+                  <SelectItem value="overdue">Overdue</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="balance">Balance Left ($)</Label>
+              <Input
+                id="balance"
+                type="number"
+                value={form.balance !== undefined ? form.balance : ""}
+                onChange={(e) => setForm(prev => ({ ...prev, balance: parseFloat(e.target.value) || 0 }))}
+                min="0"
+                step="0.01"
+              />
+            </div>
           </div>
 
           <div className="space-y-2">

@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogFooter } from "./ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Label } from "./ui/label";
+import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { 
   Search, 
@@ -24,7 +25,9 @@ import {
   Eye,
   Clock,
   CheckCircle,
-  AlertTriangle
+  AlertTriangle,
+  DollarSign,
+  CreditCard
 } from "lucide-react";
 import { EditAppointmentModal } from "./EditAppointmentModal";
 import { Appointment } from "../hooks/useAppointments";
@@ -32,63 +35,9 @@ import { DentalChart } from "./DentalChart";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
 
-const mockPatients = [
-  {
-    id: 1,
-    name: "John Smith",
-    email: "john.smith@email.com",
-    phone: "(555) 123-4567",
-    dateOfBirth: "1985-03-15",
-    lastVisit: "2024-01-15",
-    nextAppointment: "2024-02-20",
-    status: "active",
-    insurance: "Blue Cross",
-    balance: 0
-  },
-  {
-    id: 2,
-    name: "Sarah Davis",
-    email: "sarah.davis@email.com",
-    phone: "(555) 234-5678",
-    dateOfBirth: "1990-07-22",
-    lastVisit: "2024-01-18",
-    nextAppointment: null,
-    status: "active",
-    insurance: "Aetna",
-    balance: 250
-  },
-  {
-    id: 3,
-    name: "Mike Johnson",
-    email: "mike.johnson@email.com",
-    phone: "(555) 345-6789",
-    dateOfBirth: "1978-11-08",
-    lastVisit: "2023-12-10",
-    nextAppointment: "2024-02-25",
-    status: "overdue",
-    insurance: "Delta Dental",
-    balance: 450
-  },
-  {
-    id: 4,
-    name: "Emily Brown",
-    email: "emily.brown@email.com",
-    phone: "(555) 456-7890",
-    dateOfBirth: "1995-05-30",
-    lastVisit: "2024-01-20",
-    nextAppointment: "2024-02-15",
-    status: "active",
-    insurance: "Cigna",
-    balance: 0
-  }
-];
+// dummy data removed per request
 
-const mockAppointmentHistory = [
-  { date: "2024-01-15", type: "Cleaning", doctor: "Dr. Johnson", notes: "Routine cleaning completed", cost: 150 },
-  { date: "2023-10-20", type: "Checkup", doctor: "Dr. Chen", notes: "No issues found", cost: 75 },
-  { date: "2023-07-15", type: "Filling", doctor: "Dr. Johnson", notes: "Composite filling on tooth #14", cost: 280 },
-  { date: "2023-04-10", type: "Cleaning", doctor: "Dr. Rodriguez", notes: "Routine cleaning completed", cost: 150 }
-];
+// appointment history dummy data removed per request
 
 interface Patient {
   id?: string;
@@ -132,21 +81,31 @@ export function PatientsView() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isPatientDetailsModified, setIsPatientDetailsModified] = useState(false);
   const [isPatientDetailsModalOpen, setIsPatientDetailsModalOpen] = useState(false);
+  
   const [isConfirmUnsavedChangesOpen, setIsConfirmUnsavedChangesOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const patientDetailsRef = useRef<{ save: () => Promise<boolean> } | null>(null);
   const itemsPerPage = 10;
   const { openScheduleModal, openAddPatientModal, refreshPatients, refreshTrigger, appointments, openEditModal } = useAppointmentModal();
-  
-  // Fetch patients from backend with pagination, search, and status filtering
+  // Fetch patients when page, search, status filter, or refresh trigger changes
+  useEffect(() => {
+    fetchPatients(currentPage);
+  }, [currentPage, searchTerm, statusFilter, refreshTrigger, appointments]);
   const fetchPatients = async (page = 1) => {
+    // Add a timeout so the fetch can't hang indefinitely in the client
+    const controller = new AbortController();
+    const timeoutMs = 5000; // 5 seconds
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
     try {
       setIsLoading(true);
       const q = encodeURIComponent(searchTerm || "");
       const statusParam = statusFilter || "all";
       const res = await fetch(
-        `http://localhost:3001/api/patients?page=${page}&limit=${itemsPerPage}&search=${q}&status=${statusParam}`
+        `http://localhost:3001/api/patients?page=${page}&limit=${itemsPerPage}&search=${q}&status=${statusParam}`,
+        { signal: controller.signal }
       );
+
       const result = await res.json();
 
       if (result && result.success) {
@@ -210,29 +169,50 @@ export function PatientsView() {
         setTotalPages(1);
         setTotalFiltered(0);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error fetching patients:", err);
-      setPaginatedPatients([]);
-      setTotalPages(1);
-      setTotalFiltered(0);
+      // If the request was aborted due to timeout, fall back to local mock data so the UI remains usable
+      if (err && err.name === 'AbortError') {
+        console.warn(`Patient fetch aborted after ${timeoutMs}ms; returning empty list.`);
+        toast.error('Patient fetch timed out.');
+        setPaginatedPatients([]);
+        setTotalPages(1);
+        setTotalFiltered(0);
+      } else {
+        // Other network or parsing errors - return empty list so UI doesn't hang
+        console.warn('Failed to fetch patients; returning empty list.');
+        toast.error('Failed to fetch patients from backend.');
+        setPaginatedPatients([]);
+        setTotalPages(1);
+        setTotalFiltered(0);
+      }
     } finally {
+      clearTimeout(timeoutId);
       setIsLoading(false);
     }
   };
 
-  // Fetch patients when page, search, status filter, or refresh trigger changes
+    // Fetch patients when page, search, status filter, or refresh trigger changes
   useEffect(() => {
     fetchPatients(currentPage);
   }, [currentPage, searchTerm, statusFilter, refreshTrigger, appointments]);
 
+  const getStatusBadge = (status: string | undefined) => {
+    switch (status) {
+      case "active":
+        return <Badge className="bg-green-100 text-green-800">Active</Badge>;
+      case "overdue":
+        return <Badge className="bg-red-100 text-red-800">Overdue</Badge>;
+      case "inactive":
+        return <Badge className="bg-gray-100 text-gray-800">Inactive</Badge>;
+      default:
+        return <Badge>{status || "Unknown"}</Badge>;
+    }
+  };
+
   const handleAddPatient = () => {
     openAddPatientModal();
   };
-  
-  // Reset to page 1 when search or filter changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm, statusFilter]);
 
   const handleConfirmDeletePatient = async () => {
     if (!patientToDelete?.id) {
@@ -242,7 +222,6 @@ export function PatientsView() {
 
     setIsDeleting(true);
     try {
-      console.log("[DELETE PATIENT] Attempting to delete patient:", patientToDelete.id);
       const res = await fetch(`http://localhost:3001/api/patients/${patientToDelete.id}`, {
         method: "DELETE",
       });
@@ -261,16 +240,6 @@ export function PatientsView() {
       toast.error("Error deleting patient");
     } finally {
       setIsDeleting(false);
-    }
-  };
-
-  const handlePatientDetailsCloseAttempt = (open: boolean) => {
-    if (!open && isPatientDetailsModified) {
-      setIsConfirmUnsavedChangesOpen(true);
-    } else if (!open) {
-      setIsPatientDetailsModalOpen(false);
-      setSelectedPatient(null);
-      setIsPatientDetailsModified(false);
     }
   };
 
@@ -299,19 +268,6 @@ export function PatientsView() {
     setIsConfirmUnsavedChangesOpen(false);
   };
 
-  const getStatusBadge = (status: string | undefined) => {
-    switch (status) {
-      case "active":
-        return <Badge className="bg-green-100 text-green-800">Active</Badge>;
-      case "overdue":
-        return <Badge className="bg-red-100 text-red-800">Overdue</Badge>;
-      case "inactive":
-        return <Badge className="bg-gray-100 text-gray-800">Inactive</Badge>;
-      default:
-        return <Badge>{status || "Unknown"}</Badge>;
-    }
-  };
-
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -324,19 +280,14 @@ export function PatientsView() {
           Add New Patient
         </Button>
       </div>
-      
+
       {/* Search and Filters */}
       <Card>
         <CardContent className="p-4">
           <div className="flex items-center space-x-4">
             <div className="relative flex-1 max-w-md">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search patients..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9"
-              />
+              <Input placeholder="Search patients..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-9" />
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-[140px]">
@@ -352,8 +303,7 @@ export function PatientsView() {
           </div>
         </CardContent>
       </Card>
-      
-      {/* Patients Table */}
+
       <Card>
         <CardHeader>
           <CardTitle>Patient List ({totalFiltered})</CardTitle>
@@ -618,6 +568,263 @@ const PatientDetails = React.forwardRef<{
   const [isConfirmUnsavedChangesOpen, setIsConfirmUnsavedChangesOpen] = useState(false); // New state
   const [patientAppointments, setPatientAppointments] = useState<Appointment[]>([]);
 
+  // Payment state and helpers (local to PatientDetails)
+  const [showPaymentDialog, setShowPaymentDialog] = useState(false);
+  const [selectedAppointmentForPayment, setSelectedAppointmentForPayment] = useState<string | null>(null);
+  const [allTransactions, setAllTransactions] = useState<any[]>([]);
+  const [mockAppointmentHistoryLocal, setMockAppointmentHistoryLocal] = useState<any[]>([]);
+  const [expandedTransactions, setExpandedTransactions] = useState<Set<string>>(new Set());
+
+  const toggleExpandTransactions = (id: string) => {
+    setExpandedTransactions((prev) => {
+      const copy = new Set(prev);
+      if (copy.has(id)) copy.delete(id);
+      else copy.add(id);
+      return copy;
+    });
+  };
+
+  const getPaymentMethodIcon = (method: string) => {
+    switch ((method || '').toLowerCase()) {
+      case 'cash':
+        return <DollarSign className="h-4 w-4" />;
+      case 'card':
+      case 'credit':
+      case 'credit card':
+        return <CreditCard className="h-4 w-4" />;
+      default:
+        return <DollarSign className="h-4 w-4" />;
+    }
+  };
+
+  const getPaymentStatusBadge = (status: string) => {
+    switch (status) {
+      case 'paid':
+        return <Badge className="bg-green-100 text-green-800">Paid</Badge>;
+      case 'partial':
+        return <Badge className="bg-yellow-100 text-yellow-800">Partial</Badge>;
+      default:
+        return <Badge className="bg-gray-100 text-gray-800">Unpaid</Badge>;
+    }
+  };
+
+  const recordTransaction = (txn: any) => {
+    // dedupe transaction addition by id
+    setAllTransactions((prev: any[]) => {
+      if (!txn || !txn.id) return prev;
+      if (prev.find((p: any) => p.id === txn.id)) return prev;
+      return [txn, ...prev];
+    });
+
+    setMockAppointmentHistoryLocal((prev: any[]) => prev.map((a: any) => {
+      const isTarget = (a.id && a.id === txn.appointmentId) || (!a.id && (txn.appointmentId == null || txn.appointmentId === undefined));
+      if (isTarget) {
+        const existing = a.transactions || [];
+        const combined = [...existing, txn];
+        // dedupe by id
+        const deduped = Array.from(new Map(combined.map((t: any) => [t.id, t])).values());
+        const totalPaid = deduped.reduce((s: number, t: any) => s + (t.amount || 0), 0);
+        return { ...a, transactions: deduped, totalPaid };
+      }
+      return a;
+    }));
+  };
+
+  // RecordPaymentForm placed inside PatientDetails so it can access local mockAppointmentHistoryLocal
+  function RecordPaymentFormLocal({ appointmentId, onClose, onSave }: { appointmentId: string | null; onClose: () => void; onSave: (txn: any) => void; }) {
+    const [selectedAppointment, setSelectedAppointment] = useState<string | null>(appointmentId || null);
+    const [paymentMethod, setPaymentMethod] = useState<string | null>(null);
+    const [amount, setAmount] = useState<string>('');
+    const [paymentDate, setPaymentDate] = useState<string>(new Date().toISOString().split('T')[0]);
+    const [notes, setNotes] = useState<string>('');
+
+  // Use the entire appointment list for selection (user requested all appointments available)
+  const appointmentsForSelect = mockAppointmentHistoryLocal;
+  const selectedApt = appointmentsForSelect.find((a: any) => a.id === selectedAppointment) || (appointmentId ? appointmentsForSelect.find((a: any) => a.id === appointmentId) : undefined);
+  const outstandingBalance = selectedApt ? ((selectedApt.cost || 0) - (selectedApt.totalPaid || 0)) : 0;
+
+    const handleSubmit = async () => {
+      const amt = parseFloat(amount) || 0;
+      if (!selectedAppointment && !appointmentId) {
+        toast.error('Select an appointment');
+        return;
+      }
+      if (!paymentMethod) {
+        toast.error('Select payment method');
+        return;
+      }
+
+      const aptId = selectedAppointment || appointmentId!;
+
+      try {
+        const body = {
+          amount: amt,
+          method: paymentMethod,
+          date: paymentDate,
+          transactionId: `T-${Math.random().toString(36).slice(2,9).toUpperCase()}`,
+          notes,
+        };
+
+        const res = await fetch(`http://localhost:3001/api/appointments/${aptId}/pay`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+
+        const json = await res.json();
+        if (!res.ok) {
+          toast.error(json?.message || 'Failed to record payment');
+          return;
+        }
+
+        const returnedTxn = json.data?.transaction || {
+          id: `txn-${Date.now()}`,
+          amount: amt,
+          method: paymentMethod,
+          date: paymentDate,
+          transactionId: body.transactionId,
+          notes,
+          status: 'completed'
+        };
+
+        // If backend returned updated appointment, merge into local history
+        const updatedApt = json.data?.appointment;
+        if (updatedApt) {
+          setMockAppointmentHistoryLocal((prev: any[]) => prev.map((a: any) => {
+            if (a.id === updatedApt.id) {
+              return {
+                ...a,
+                cost: updatedApt.price ?? a.cost,
+                totalPaid: updatedApt.totalPaid ?? a.totalPaid ?? 0,
+                paymentStatus: updatedApt.paymentStatus ?? a.paymentStatus,
+                transactions: updatedApt.transactions ?? (a.transactions || []),
+              };
+            }
+            return a;
+          }));
+        }
+
+        // update local UI state (transactions list) from backend's appointment transactions when available
+        if (updatedApt && Array.isArray(updatedApt.transactions)) {
+          // dedupe by id
+          const uniqueTxns = Array.from(new Map(updatedApt.transactions.map((t: any) => [t.id, t])).values());
+          setAllTransactions(uniqueTxns.slice().reverse());
+        } else {
+          // fallback if backend did not return appointment: insert returnedTxn once
+          setAllTransactions((prev) => {
+            if (!returnedTxn || !returnedTxn.id) return prev;
+            if (prev.find((p: any) => p.id === returnedTxn.id)) return prev;
+            return [returnedTxn, ...prev];
+          });
+        }
+
+  // Refresh patients/appointments if available
+  try { refreshPatients(); } catch {}
+  onClose();
+  // call onSave only to surface UI notification; avoid mutation in onSave to prevent duplicates
+  try { onSave && onSave(returnedTxn); } catch {}
+  toast.success('Payment recorded');
+      } catch (err) {
+        console.error('Error recording payment', err);
+        toast.error('Error recording payment');
+      }
+    };
+
+    return (
+      <div className="space-y-4">
+        {!appointmentId && (
+          <div>
+            <Label>Select Appointment</Label>
+            <Select value={selectedAppointment || ''} onValueChange={(v) => setSelectedAppointment(v || null)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select appointment" />
+              </SelectTrigger>
+              <SelectContent>
+                {appointmentsForSelect.map((apt: any) => (
+                    <SelectItem key={apt.id} value={apt.id}>
+                      {apt.type} - {apt.date} (Balance: ${( (apt.cost || 0) - (apt.totalPaid || 0) ).toFixed(2)})
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+        {appointmentId && (
+          <div className="bg-gray-50 p-3 rounded-lg">
+            <div className="text-sm font-medium mb-1">Appointment Details</div>
+            <div className="text-sm text-muted-foreground">
+              {selectedApt?.type} - {selectedApt?.date}
+            </div>
+            <div className="text-sm font-medium text-red-600 mt-1">
+              Outstanding Balance: ${outstandingBalance}
+            </div>
+          </div>
+        )}
+        <div>
+          <Label>Payment Method</Label>
+          <Select value={paymentMethod || ''} onValueChange={(v) => setPaymentMethod(v || null)}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select payment method" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Credit Card">Credit Card</SelectItem>
+              <SelectItem value="Cash">Cash</SelectItem>
+              <SelectItem value="Debit Card">Debit Card</SelectItem>
+              <SelectItem value="Insurance">Insurance</SelectItem>
+              <SelectItem value="Check">Check</SelectItem>
+              <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label>Payment Amount</Label>
+          <div className="relative">
+            <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input 
+              type="number" 
+              step="0.01" 
+              min="0"
+              max={outstandingBalance || undefined}
+              placeholder="0.00" 
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          {outstandingBalance > 0 && parseFloat(amount) > outstandingBalance && (
+            <p className="text-xs text-red-600 mt-1">Amount exceeds outstanding balance</p>
+          )}
+          {outstandingBalance > 0 && (
+            <div className="flex items-center justify-between text-xs text-muted-foreground mt-1">
+              <span>Outstanding: ${outstandingBalance}</span>
+              <button type="button" onClick={() => setAmount(String(outstandingBalance))} className="text-primary font-semibold underline-offset-2 hover:underline">Pay in full</button>
+            </div>
+          )}
+        </div>
+        <div>
+          <Label>Payment Date</Label>
+          <Input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
+        </div>
+        <div>
+          <Label>Transaction Notes (Optional)</Label>
+          <Textarea placeholder="Additional payment details..." value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+        </div>
+        <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
+          <div className="flex items-start space-x-2">
+            <CheckCircle className="h-4 w-4 text-blue-600 mt-0.5" />
+            <div className="text-xs text-blue-900">Transaction ID will be auto-generated upon submission</div>
+          </div>
+        </div>
+        <div className="flex justify-end space-x-2 pt-2 border-t">
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={handleSubmit} className="bg-primary hover:bg-primary/90" disabled={!selectedAppointment && !appointmentId || !paymentMethod || !amount || parseFloat(amount) <= 0}>
+            <CheckCircle className="h-4 w-4 mr-2" />Record Payment
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   useImperativeHandle(ref, () => ({
     save: handleUpdatePatient,
   }));
@@ -712,6 +919,53 @@ const PatientDetails = React.forwardRef<{
     setPatientAppointments(filtered);
   }, [appointments, patient]);
 
+    // Map patientAppointments into local appointment history shape used for payments
+    useEffect(() => {
+      const mapped = patientAppointments.map((apt: Appointment, i: number) => {
+        const id = apt.id || `apt-${i}`;
+        const cost = (apt.price != null ? apt.price : 0);
+        const totalPaid = (apt as any).totalPaid != null ? (apt as any).totalPaid : 0;
+        const transactions = (apt as any).transactions ? (apt as any).transactions : [];
+        const paymentStatus = (apt as any).paymentStatus || (cost - totalPaid <= 0 ? 'paid' : (totalPaid === 0 ? 'unpaid' : 'half-paid'));
+
+        return {
+          id,
+          date: apt.date + (apt.time ? ` ${apt.time}` : ''),
+          type: getAppointmentTypeName(apt.type, (apt as any).customType) || apt.type || 'Appointment',
+          doctor: apt.doctor || '',
+          notes: apt.notes || '',
+          cost,
+          totalPaid,
+          paymentStatus,
+          transactions: transactions as any[],
+        };
+      });
+
+      setMockAppointmentHistoryLocal(mapped);
+    }, [patientAppointments]);
+
+    // Populate the allTransactions list from the appointment history so persisted
+    // transactions show immediately in the Payments tab without needing to add a new payment
+    useEffect(() => {
+      try {
+        const txns = (mockAppointmentHistoryLocal || []).flatMap((a: any) => (a.transactions || []).map((t: any) => ({
+          ...t,
+          appointmentId: a.id,
+          appointmentType: a.type,
+          appointmentDate: a.date,
+          doctor: a.doctor,
+        })));
+
+        // dedupe by id
+        const deduped = Array.from(new Map(txns.map((t: any) => [t.id, t])).values());
+        // sort by date desc (newest first)
+        deduped.sort((x: any, y: any) => new Date(y.date).getTime() - new Date(x.date).getTime());
+        setAllTransactions(deduped);
+      } catch (e) {
+        console.warn('[Payments] failed to populate transactions from history', e);
+      }
+    }, [mockAppointmentHistoryLocal]);
+
   const handleUpdatePatient = async () => {
     console.log("=== UPDATE PATIENT BUTTON CLICKED ===");
     console.log("Patient ID:", patient.id);
@@ -781,7 +1035,7 @@ const PatientDetails = React.forwardRef<{
       </div>
 
       <Tabs defaultValue="info" className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
+  <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger
             value="info"
             className="data-[state=active]:bg-violet-500 data-[state=active]:text-white hover:bg-violet-100"
@@ -805,6 +1059,12 @@ const PatientDetails = React.forwardRef<{
             className="data-[state=active]:bg-violet-500 data-[state=active]:text-white hover:bg-violet-100"
           >
             Appointment History
+          </TabsTrigger>
+          <TabsTrigger
+            value="payments"
+            className="data-[state=active]:bg-violet-500 data-[state=active]:text-white hover:bg-violet-100"
+          >
+            Payments
           </TabsTrigger>
         </TabsList>
 
@@ -939,47 +1199,246 @@ const PatientDetails = React.forwardRef<{
               <CardTitle>Appointment History</CardTitle>
             </CardHeader>
             <CardContent>
-              {patientAppointments.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">No appointments scheduled for this patient yet.</div>
-              ) : (
-                <div className="space-y-4">
-                  {patientAppointments.map((appointment, index) => (
-                    <div key={index} className="flex items-center justify-between p-4 border rounded-lg">
-                      <div className="flex items-center space-x-4">
-                        <div className="text-sm">
-                          <div className="font-medium">{appointment.date} at {appointment.time}</div>
-                          <div className="text-muted-foreground">{getAppointmentTypeName(appointment.type, appointment.customType)}</div>
-                          {appointment.price != null && <div className="text-muted-foreground">${appointment.price.toFixed(2)}</div>}
-                        </div>
-                        <div className="text-sm">
-                          <div className="font-medium">{appointment.doctor}</div>
-                          <div className="text-muted-foreground">{appointment.notes || 'No notes'}</div>
-                        </div>
-                      </div>
-                      <div className="text-sm flex items-center space-x-4">
-                        <span className={new Date(`${appointment.date}T${appointment.time}`) < new Date() ? 'text-gray-500' : 'text-blue-600'}>
-                          {new Date(`${appointment.date}T${appointment.time}`) < new Date() ? 'Completed' : 'Scheduled'}
-                        </span>
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          className="h-8 w-8 p-0"
-                          onClick={() => {
-                            openEditModal(appointment);
-                          }}
-                        >
+              <div className="space-y-4">
+                {/** Build a lightweight appointment history shape from patientAppointments **/}
+                {(mockAppointmentHistoryLocal.length === 0) ? (
+                  <div className="text-center py-8 text-muted-foreground">No appointments scheduled for this patient yet.</div>
+                ) : (
+                  <div className="space-y-4">
+                    {mockAppointmentHistoryLocal.map((appointment: any, index: number) => {
+
+                      return (
+                        <div key={appointment.id || `apt-${index}`} className="border rounded-lg p-4 space-y-3">
+                          <div className="flex items-start justify-between">
+                            <div className="space-y-2 flex-1">
+                              <div className="flex items-center space-x-3">
+                                <div className="text-sm">
+                                  <div className="font-medium text-base">{appointment.type}</div>
+                                  <div className="text-muted-foreground">{appointment.date}</div>
+                                </div>
+                                {getPaymentStatusBadge(appointment.paymentStatus)}
+                              </div>
+                              <div className="text-sm">
+                                <div className="font-medium">{appointment.doctor}</div>
+                                <div className="text-muted-foreground">{appointment.notes}</div>
+                              </div>
+                            </div>
+                            <div className="text-right space-y-2">
+                                                      <Button 
+                                                        variant="ghost" 
+                                                        size="sm" 
+                                                        className="h-8 w-8 p-0"
+                                                        onClick={() => {
+                                                          // find original appointment object by id
+                                                          const original = patientAppointments.find((x: Appointment) => x.id === appointment.id);
+                                                          if (original) openEditModal(original);
+                                                        }}
+                                                      >
                           <Eye className="h-4 w-4" />
                           <span className="sr-only">View Appointment</span>
                         </Button>
-                      </div>
-                    </div>
-                  ))}
+                              <div>
+                                <div className="text-sm font-medium">Total: ${appointment.cost}</div>
+                                <div className="text-sm text-muted-foreground">Paid: ${appointment.totalPaid}</div>
+                                {appointment.cost - appointment.totalPaid > 0 && (
+                                  <div className="text-sm font-medium text-red-600">
+                                    Balance: ${appointment.cost - appointment.totalPaid}
+                                  </div>
+                                )}
+                              </div>
+                              <Button 
+                                size="sm" 
+                                variant="outline"
+                                onClick={() => {
+                                  setSelectedAppointmentForPayment(appointment.id);
+                                  setShowPaymentDialog(true);
+                                }}
+                              >
+                                <DollarSign className="h-3 w-3 mr-1" />
+                                Record Payment
+                              </Button>
+                            </div>
+                          </div>
+                          {appointment.transactions.length > 0 && (
+                            <div className="border-t pt-3 mt-3">
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="text-sm font-medium">Payment Transactions</div>
+                                <button type="button" className="text-sm text-primary underline-offset-1 hover:underline" onClick={() => toggleExpandTransactions(appointment.id)}>
+                                  {expandedTransactions.has(appointment.id) ? 'Hide' : 'Show'}
+                                </button>
+                              </div>
+                              {expandedTransactions.has(appointment.id) && (
+                                <div className="space-y-2">
+                                  {Array.from(new Map((appointment.transactions || []).map((t: any) => [t.id, t])).values()).map((txn: any) => (
+                                    <div key={txn.id} className="flex items-center justify-between text-sm bg-gray-50 p-2 rounded">
+                                      <div className="flex items-center space-x-2">
+                                        {getPaymentMethodIcon(txn.method)}
+                                        <div>
+                                          <div className="font-medium">{txn.method} - ${txn.amount}</div>
+                                          <div className="text-xs text-muted-foreground">{txn.date} • {txn.transactionId}</div>
+                                        </div>
+                                      </div>
+                                      <Badge variant="outline" className="text-xs">
+                                        {txn.status}
+                                      </Badge>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="payments" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle>Payment History</CardTitle>
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <div className="text-sm text-muted-foreground">Total Transactions</div>
+                    <div className="text-2xl font-semibold">{allTransactions.length}</div>
+                  </div>
+                  <Button 
+                    size="sm"
+                    onClick={() => {
+                      setSelectedAppointmentForPayment(null);
+                      setShowPaymentDialog(true);
+                    }}
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Payment
+                  </Button>
                 </div>
-              )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {/* Summary Cards */}
+                <div className="grid grid-cols-3 gap-4 mb-6">
+                  <Card>
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-muted-foreground">Total Paid</p>
+                          <p className="text-2xl font-semibold text-green-600">
+                            ${mockAppointmentHistoryLocal.reduce((sum: number, apt: any) => sum + (apt.totalPaid || 0), 0)}
+                          </p>
+                        </div>
+                        <CheckCircle className="h-8 w-8 text-green-600" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-muted-foreground">Outstanding</p>
+                          <p className="text-2xl font-semibold text-red-600">
+                            ${mockAppointmentHistoryLocal.reduce((sum: number, apt: any) => sum + ((apt.cost || 0) - (apt.totalPaid || 0)), 0)}
+                          </p>
+                        </div>
+                        <AlertTriangle className="h-8 w-8 text-red-600" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-muted-foreground">Total Billed</p>
+                          <p className="text-2xl font-semibold">
+                            ${mockAppointmentHistoryLocal.reduce((sum: number, apt: any) => sum + (apt.cost || 0), 0)}
+                          </p>
+                        </div>
+                        <DollarSign className="h-8 w-8 text-gray-600" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Transaction List */}
+                <div className="space-y-3">
+                  <h3 className="font-medium">All Transactions</h3>
+                  {allTransactions.length > 0 ? (
+                    allTransactions.map((txn) => (
+                      <div key={txn.id} className="border rounded-lg p-4">
+                        <div className="flex items-start justify-between mb-2">
+                          <div className="flex items-center space-x-3">
+                            <div className="p-2 bg-gray-100 rounded">
+                              {getPaymentMethodIcon(txn.method)}
+                            </div>
+                            <div>
+                              <div className="font-medium">{txn.method}</div>
+                              <div className="text-sm text-muted-foreground">
+                                {txn.appointmentType} - {txn.appointmentDate}
+                              </div>
+                              <div className="text-xs text-muted-foreground mt-1">
+                                Dr: {txn.doctor}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-lg font-semibold text-green-600">${txn.amount}</div>
+                            <div className="text-xs text-muted-foreground">{txn.date}</div>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between text-sm pt-2 border-t">
+                          <div className="text-muted-foreground">
+                            ID: {txn.transactionId}
+                          </div>
+                          <Badge variant="outline" className={
+                            txn.status === "completed" ? "bg-green-50 text-green-700" : ""
+                          }>
+                            {txn.status}
+                          </Badge>
+                        </div>
+                        {txn.notes && (
+                          <div className="text-sm text-muted-foreground mt-2 italic">
+                            {txn.notes}
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      No payment transactions found
+                    </div>
+                  )}
+                </div>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
+      {/* Record Payment Dialog */}
+      <Dialog open={showPaymentDialog} onOpenChange={setShowPaymentDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Record Payment</DialogTitle>
+          </DialogHeader>
+          <div className="py-2">
+            <RecordPaymentFormLocal
+              appointmentId={selectedAppointmentForPayment}
+              onClose={() => setShowPaymentDialog(false)}
+              onSave={(txn) => {
+                recordTransaction(txn);
+                toast.success('Payment recorded');
+              }}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 });
+
+ 
