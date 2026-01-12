@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useImperativeHandle } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
@@ -9,6 +9,7 @@ import { Badge } from "./ui/badge";
 import { toast } from "sonner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "./ui/dialog";
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogFooter } from "./ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Label } from "./ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
@@ -130,7 +131,10 @@ export function PatientsView() {
   const [patientToDelete, setPatientToDelete] = useState<Patient | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isPatientDetailsModified, setIsPatientDetailsModified] = useState(false);
-  const [isPatientDetailsModalOpen, setIsPatientDetailsModalOpen] = useState(false); // New state
+  const [isPatientDetailsModalOpen, setIsPatientDetailsModalOpen] = useState(false);
+  const [isConfirmUnsavedChangesOpen, setIsConfirmUnsavedChangesOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const patientDetailsRef = useRef<{ save: () => Promise<boolean> } | null>(null);
   const itemsPerPage = 10;
   const { openScheduleModal, openAddPatientModal, refreshPatients, refreshTrigger, appointments, openEditModal } = useAppointmentModal();
   
@@ -258,6 +262,41 @@ export function PatientsView() {
     } finally {
       setIsDeleting(false);
     }
+  };
+
+  const handlePatientDetailsCloseAttempt = (open: boolean) => {
+    if (!open && isPatientDetailsModified) {
+      setIsConfirmUnsavedChangesOpen(true);
+    } else if (!open) {
+      setIsPatientDetailsModalOpen(false);
+      setSelectedPatient(null);
+      setIsPatientDetailsModified(false);
+    }
+  };
+
+  const handleSaveAndClose = async () => {
+    setIsSaving(true);
+    if (patientDetailsRef.current) {
+      const success = await patientDetailsRef.current.save();
+      if (success) {
+        setIsPatientDetailsModalOpen(false);
+        setSelectedPatient(null);
+        setIsPatientDetailsModified(false);
+      }
+    }
+    setIsSaving(false);
+    setIsConfirmUnsavedChangesOpen(false);
+  };
+
+  const handleDiscardAndClose = () => {
+    setIsPatientDetailsModified(false);
+    setIsPatientDetailsModalOpen(false);
+    setSelectedPatient(null);
+    setIsConfirmUnsavedChangesOpen(false);
+  };
+
+  const handleCancelClose = () => {
+    setIsConfirmUnsavedChangesOpen(false);
   };
 
   const getStatusBadge = (status: string | undefined) => {
@@ -389,35 +428,18 @@ export function PatientsView() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center space-x-2">
-                        <Dialog>
-                          <DialogTrigger asChild>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setSelectedPatient(patient);
-                                setIsPatientDetailsModified(false);
-                              }}
-                            >
-                              <Eye className="h-3 w-3 mr-1" />
-                              View
-                            </Button>
-                          </DialogTrigger>
-                            <DialogContent className="sm:max-w-7xl w-[95vw] max-h-[90vh] overflow-y-auto">
-                              <DialogHeader>
-                                <DialogTitle>Patient Details - {patient.name}</DialogTitle>
-                              </DialogHeader>
-                                                            <PatientDetails
-                                                              patient={patient}
-                                                              onClose={() => setSelectedPatient(null)}
-                                                              onDeletePatient={(p) => {
-                                                                setPatientToDelete(p);
-                                                                setIsPatientDeleteDialogOpen(true);
-                                                              }}
-                                                              isModified={isPatientDetailsModified}
-                                                              setIsModified={setIsPatientDetailsModified}
-                                                            />                            </DialogContent>
-                        </Dialog>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedPatient(patient);
+                            setIsPatientDetailsModified(false);
+                            setIsPatientDetailsModalOpen(true);
+                          }}
+                        >
+                          <Eye className="h-3 w-3 mr-1" />
+                          View
+                        </Button>
                         
                         <Button 
                           variant="dark" 
@@ -468,6 +490,41 @@ export function PatientsView() {
         </CardContent>
       </Card>
 
+      <Dialog
+        open={isPatientDetailsModalOpen}
+        onOpenChange={(open) => {
+          if (!open && isPatientDetailsModified) {
+            setIsConfirmUnsavedChangesOpen(true);
+            // Keep the dialog open when there are unsaved changes
+          } else {
+            setIsPatientDetailsModalOpen(open);
+            if (!open) {
+              setSelectedPatient(null);
+              setIsPatientDetailsModified(false);
+            }
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-7xl w-[95vw] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Patient Details - {selectedPatient?.name}</DialogTitle>
+          </DialogHeader>
+          {selectedPatient && (
+            <PatientDetails
+              ref={patientDetailsRef}
+              patient={selectedPatient}
+              onClose={() => setSelectedPatient(null)}
+              onDeletePatient={(p) => {
+                setPatientToDelete(p);
+                setIsPatientDeleteDialogOpen(true);
+              }}
+              isModified={isPatientDetailsModified}
+              setIsModified={setIsPatientDetailsModified}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
       <EditAppointmentModal />
 
       <Dialog open={isPatientDeleteDialogOpen} onOpenChange={setIsPatientDeleteDialogOpen}>
@@ -490,23 +547,49 @@ export function PatientsView() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={isConfirmUnsavedChangesOpen} onOpenChange={setIsConfirmUnsavedChangesOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Unsaved Changes</AlertDialogTitle>
+          </AlertDialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground">
+              You have unsaved changes. Do you want to save them before closing?
+            </p>
+          </div>
+          <AlertDialogFooter>
+            <Button variant="outline" onClick={handleDiscardAndClose}>
+              Discard & Close
+            </Button>
+            <Button variant="secondary" onClick={handleCancelClose}>
+              Cancel
+            </Button>
+            <Button variant="brand" onClick={handleSaveAndClose} disabled={isSaving}>
+              {isSaving ? "Saving..." : "Save & Close"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
 
-function PatientDetails({
-  patient,
-  onClose,
-  onDeletePatient,
-  isModified,
-  setIsModified
-}: {
+const PatientDetails = React.forwardRef<{
+  save: () => Promise<boolean>;
+}, {
   patient: Patient;
   onClose: () => void;
   onDeletePatient: (p: Patient) => void;
   isModified: boolean;
   setIsModified: (isModified: boolean) => void;
-}) {
+}>(({
+  patient,
+  onClose,
+  onDeletePatient,
+  isModified,
+  setIsModified
+}, ref) => {
   const { openEditModal, refreshPatients, appointments } = useAppointmentModal();
   const [formData, setFormData] = useState({
     firstName: patient.firstName || patient.name?.split(' ')[0] || '',
@@ -534,6 +617,10 @@ function PatientDetails({
   const [isSaving, setIsSaving] = useState(false);
   const [isConfirmUnsavedChangesOpen, setIsConfirmUnsavedChangesOpen] = useState(false); // New state
   const [patientAppointments, setPatientAppointments] = useState<Appointment[]>([]);
+
+  useImperativeHandle(ref, () => ({
+    save: handleUpdatePatient,
+  }));
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -893,29 +980,6 @@ function PatientDetails({
           </Card>
         </TabsContent>
       </Tabs>
-      <Dialog open={isConfirmUnsavedChangesOpen} onOpenChange={setIsConfirmUnsavedChangesOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Unsaved Changes</DialogTitle>
-          </DialogHeader>
-          <div className="py-4">
-            <p className="text-sm text-muted-foreground">
-              You have unsaved changes. Do you want to save them before closing?
-            </p>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={handleDiscardAndClose}>
-              Discard & Close
-            </Button>
-            <Button variant="secondary" onClick={handleCancelClose}>
-              Cancel
-            </Button>
-            <Button variant="brand" onClick={handleSaveAndClose} disabled={isSaving}>
-              {isSaving ? "Saving..." : "Save & Close"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
-}
+});
