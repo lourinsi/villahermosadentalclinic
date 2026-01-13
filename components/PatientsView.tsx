@@ -575,6 +575,59 @@ const PatientDetails = React.forwardRef<{
   const [mockAppointmentHistoryLocal, setMockAppointmentHistoryLocal] = useState<any[]>([]);
   const [expandedTransactions, setExpandedTransactions] = useState<Set<string>>(new Set());
 
+  // New state for filters
+  const [historyStatusFilter, setHistoryStatusFilter] = useState('all');
+  const [historyDoctorFilter, setHistoryDoctorFilter] = useState('all');
+  const [historyProcedureFilter, setHistoryProcedureFilter] = useState('all');
+
+  const uniqueDoctors = React.useMemo(() => {
+    const doctors = new Set(mockAppointmentHistoryLocal.map(apt => apt.doctor).filter(Boolean));
+    return ['all', ...Array.from(doctors)];
+  }, [mockAppointmentHistoryLocal]);
+
+  const uniqueProcedures = React.useMemo(() => {
+      const procedures = new Set(mockAppointmentHistoryLocal.map(apt => apt.type).filter(Boolean));
+      return ['all', ...Array.from(procedures)];
+  }, [mockAppointmentHistoryLocal]);
+
+  const filteredHistory = React.useMemo(() => {
+    return mockAppointmentHistoryLocal.filter(apt => {
+        if (historyStatusFilter !== 'all' && apt.paymentStatus !== historyStatusFilter) return false;
+        if (historyDoctorFilter !== 'all' && apt.doctor !== historyDoctorFilter) return false;
+        if (historyProcedureFilter !== 'all' && apt.type !== historyProcedureFilter) return false;
+        return true;
+    });
+  }, [mockAppointmentHistoryLocal, historyStatusFilter, historyDoctorFilter, historyProcedureFilter]);
+
+  // Filters for Payments tab
+  const [paymentDoctorFilter, setPaymentDoctorFilter] = useState('all');
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState('all');
+  const [paymentProcedureFilter, setPaymentProcedureFilter] = useState('all');
+
+  const uniquePaymentDoctors = React.useMemo(() => {
+    const doctors = new Set(allTransactions.map(t => t.doctor).filter(Boolean));
+    return ['all', ...Array.from(doctors)];
+  }, [allTransactions]);
+
+  const uniquePaymentMethods = React.useMemo(() => {
+    const methods = new Set(allTransactions.map(t => t.method).filter(Boolean));
+    return ['all', ...Array.from(methods)];
+  }, [allTransactions]);
+
+  const uniquePaymentProcedures = React.useMemo(() => {
+    const procedures = new Set(allTransactions.map(t => t.appointmentType).filter(Boolean));
+    return ['all', ...Array.from(procedures)];
+  }, [allTransactions]);
+
+  const filteredTransactions = React.useMemo(() => {
+    return allTransactions.filter(t => {
+      if (paymentDoctorFilter !== 'all' && t.doctor !== paymentDoctorFilter) return false;
+      if (paymentMethodFilter !== 'all' && t.method !== paymentMethodFilter) return false;
+      if (paymentProcedureFilter !== 'all' && t.appointmentType !== paymentProcedureFilter) return false;
+      return true;
+    });
+  }, [allTransactions, paymentDoctorFilter, paymentMethodFilter, paymentProcedureFilter]);
+
   const toggleExpandTransactions = (id: string) => {
     setExpandedTransactions((prev) => {
       const copy = new Set(prev);
@@ -601,9 +654,13 @@ const PatientDetails = React.forwardRef<{
     switch (status) {
       case 'paid':
         return <Badge className="bg-green-100 text-green-800">Paid</Badge>;
-      case 'partial':
-        return <Badge className="bg-yellow-100 text-yellow-800">Partial</Badge>;
-      default:
+      case 'over-paid':
+        return <Badge className="bg-blue-100 text-blue-800">Over-paid</Badge>;
+      case 'half-paid':
+        return <Badge className="bg-yellow-100 text-yellow-800">Partially Paid</Badge>;
+      case 'overdue':
+        return <Badge className="bg-red-100 text-red-800">Overdue</Badge>;
+      default: // unpaid
         return <Badge className="bg-gray-100 text-gray-800">Unpaid</Badge>;
     }
   };
@@ -928,7 +985,24 @@ const PatientDetails = React.forwardRef<{
         const cost = (apt.price != null ? apt.price : 0);
         const totalPaid = (apt as any).totalPaid != null ? (apt as any).totalPaid : 0;
         const transactions = (apt as any).transactions ? (apt as any).transactions : [];
-        const paymentStatus = (apt as any).paymentStatus || (cost - totalPaid <= 0 ? 'paid' : (totalPaid === 0 ? 'unpaid' : 'half-paid'));
+        
+        let paymentStatus;
+        const oneWeekAgo = new Date();
+        oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+        const aptDateStr = (apt.date || '').split(' ')[0];
+        const appointmentDate = parseBackendDateToLocal(aptDateStr);
+
+        if (totalPaid > cost && cost > 0) {
+          paymentStatus = 'over-paid';
+        } else if (totalPaid > 0 && totalPaid < cost) {
+          paymentStatus = 'half-paid';
+        } else if (totalPaid >= cost && cost > 0) {
+          paymentStatus = 'paid';
+        } else if (totalPaid === 0 && cost > 0 && appointmentDate < oneWeekAgo) {
+          paymentStatus = 'overdue';
+        } else {
+          paymentStatus = 'unpaid';
+        }
 
         return {
           id,
@@ -959,11 +1033,30 @@ const PatientDetails = React.forwardRef<{
                   if (aptPayments.length > 0) {
                     const totalPaid = aptPayments.reduce((s: number, p: any) => s + (p.amount || 0), 0);
                     const cost = apt.cost || 0;
+                    
+                    let paymentStatus;
+                    const oneWeekAgo = new Date();
+                    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+                    const aptDateStr = (apt.date || '').split(' ')[0];
+                    const appointmentDate = parseBackendDateToLocal(aptDateStr);
+
+                    if (totalPaid > cost && cost > 0) {
+                      paymentStatus = 'over-paid';
+                    } else if (totalPaid > 0 && totalPaid < cost) {
+                      paymentStatus = 'half-paid';
+                    } else if (totalPaid >= cost && cost > 0) {
+                      paymentStatus = 'paid';
+                    } else if (totalPaid === 0 && cost > 0 && appointmentDate < oneWeekAgo) {
+                      paymentStatus = 'overdue';
+                    } else {
+                      paymentStatus = 'unpaid';
+                    }
+
                     return {
                       ...apt,
                       totalPaid,
                       transactions: aptPayments,
-                      paymentStatus: totalPaid >= cost ? 'paid' : (totalPaid > 0 ? 'half-paid' : 'unpaid'),
+                      paymentStatus,
                     };
                   }
                   return apt;
@@ -1227,16 +1320,59 @@ const PatientDetails = React.forwardRef<{
         <TabsContent value="history" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>Appointment History</CardTitle>
+                <div className="flex justify-between items-center flex-wrap gap-2">
+                    <CardTitle>Appointment History</CardTitle>
+                    <div className="flex items-center space-x-2">
+                        <Select value={historyStatusFilter} onValueChange={setHistoryStatusFilter}>
+                            <SelectTrigger className="w-[140px]">
+                                <SelectValue placeholder="Filter by status" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All Statuses</SelectItem>
+                                <SelectItem value="paid">Paid</SelectItem>
+                                <SelectItem value="unpaid">Unpaid</SelectItem>
+                                <SelectItem value="half-paid">Partially Paid</SelectItem>
+                                <SelectItem value="over-paid">Over-paid</SelectItem>
+                                <SelectItem value="overdue">Overdue</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <Select value={historyDoctorFilter} onValueChange={setHistoryDoctorFilter}>
+                            <SelectTrigger className="w-[180px]">
+                                <SelectValue placeholder="Filter by doctor" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {uniqueDoctors.map(doctor => (
+                                    <SelectItem key={doctor} value={doctor}>{doctor === 'all' ? 'All Doctors' : doctor}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        <Select value={historyProcedureFilter} onValueChange={setHistoryProcedureFilter}>
+                            <SelectTrigger className="w-[180px]">
+                                <SelectValue placeholder="Filter by procedure" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {uniqueProcedures.map(proc => (
+                                    <SelectItem key={proc} value={proc}>{proc === 'all' ? 'All Procedures' : proc}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                </div>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {/** Build a lightweight appointment history shape from patientAppointments **/}
-                {(mockAppointmentHistoryLocal.length === 0) ? (
-                  <div className="text-center py-8 text-muted-foreground">No appointments scheduled for this patient yet.</div>
+                {(filteredHistory.length === 0) ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    {mockAppointmentHistoryLocal.length === 0 ? "No appointments scheduled for this patient yet." : "No appointments match the selected filters."}
+                    </div>
                 ) : (
                   <div className="space-y-4">
-                    {mockAppointmentHistoryLocal.map((appointment: any, index: number) => {
+                    {filteredHistory.map((appointment: any, index: number) => {
+                      const sortedTransactions = Array.from(new Map((appointment.transactions || []).map((t: any) => [t.id, t])).values())
+                        .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                      
+                      const isExpanded = expandedTransactions.has(appointment.id);
+                      const visibleTransactions = isExpanded ? sortedTransactions : sortedTransactions.slice(0, 1);
 
                       return (
                         <div key={appointment.id || `apt-${index}`} className="border rounded-lg p-4 space-y-3">
@@ -1291,32 +1427,32 @@ const PatientDetails = React.forwardRef<{
                                 Record Payment
                               </Button>
                             </div>
-                          {appointment.transactions.length > 0 && (
+                          {sortedTransactions.length > 0 && (
                             <div className="border-t pt-3 mt-3">
                               <div className="flex items-center justify-between mb-2">
                                 <div className="text-sm font-medium">Payment Transactions</div>
-                                <button type="button" className="text-sm text-primary underline-offset-1 hover:underline" onClick={() => toggleExpandTransactions(appointment.id)}>
-                                  {expandedTransactions.has(appointment.id) ? 'Hide' : 'Show'}
-                                </button>
+                                {sortedTransactions.length > 1 &&
+                                  <button type="button" className="text-sm text-primary underline-offset-1 hover:underline" onClick={() => toggleExpandTransactions(appointment.id)}>
+                                    {isExpanded ? 'Less' : 'More'}
+                                  </button>
+                                }
                               </div>
-                              {expandedTransactions.has(appointment.id) && (
-                                <div className="space-y-2">
-                                  {Array.from(new Map((appointment.transactions || []).map((t: any) => [t.id, t])).values()).map((txn: any) => (
-                                    <div key={txn.id} className="flex items-center justify-between text-sm bg-gray-50 p-2 rounded">
-                                      <div className="flex items-center space-x-2">
-                                        {getPaymentMethodIcon(txn.method)}
-                                        <div>
-                                          <div className="font-medium">{txn.method} - ${txn.amount}</div>
-                                          <div className="text-xs text-muted-foreground">{txn.date} • {txn.transactionId}</div>
-                                        </div>
+                              <div className="space-y-2">
+                                {visibleTransactions.map((txn: any) => (
+                                  <div key={txn.id} className="flex items-center justify-between text-sm bg-gray-50 p-2 rounded">
+                                    <div className="flex items-center space-x-2">
+                                      {getPaymentMethodIcon(txn.method)}
+                                      <div>
+                                        <div className="font-medium">{txn.method} - ${txn.amount}</div>
+                                        <div className="text-xs text-muted-foreground">{txn.date} • {txn.transactionId}</div>
                                       </div>
-                                      <Badge variant="outline" className="text-xs">
-                                        {txn.status}
-                                      </Badge>
                                     </div>
-                                  ))}
-                                </div>
-                              )}
+                                    <Badge variant="outline" className="text-xs">
+                                      {txn.status}
+                                    </Badge>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
                           )}
                         </div>
@@ -1332,25 +1468,56 @@ const PatientDetails = React.forwardRef<{
         <TabsContent value="payments" className="space-y-4">
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>Payment History</CardTitle>
-                <div className="flex items-center gap-3">
-                  <div className="text-right">
-                    <div className="text-sm text-muted-foreground">Total Transactions</div>
-                    <div className="text-2xl font-semibold">{allTransactions.length}</div>
-                  </div>
-                  <Button 
-                    size="sm"
-                    onClick={() => {
-                      setSelectedAppointmentForPayment(null);
-                      setShowPaymentDialog(true);
-                    }}
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Payment
-                  </Button>
+                <div className="flex justify-between items-center flex-wrap gap-2">
+                    <CardTitle>Payment History</CardTitle>
+                    <div className="flex flex-col items-end gap-1">
+                        <Button 
+                            size="sm"
+                            onClick={() => {
+                            setSelectedAppointmentForPayment(null);
+                            setShowPaymentDialog(true);
+                            }}
+                        >
+                            <Plus className="h-4 w-4 mr-2" />
+                            Add Payment
+                        </Button>
+                        <div className="text-sm text-muted-foreground">
+                            Total Transactions: <span className="font-semibold">{filteredTransactions.length}</span>
+                        </div>
+                    </div>
                 </div>
-              </div>
+                <div className="flex items-center space-x-2 pt-2">
+                    <Select value={paymentMethodFilter} onValueChange={setPaymentMethodFilter}>
+                        <SelectTrigger className="w-[180px]">
+                            <SelectValue placeholder="Filter by payment method" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {uniquePaymentMethods.map(method => (
+                                <SelectItem key={method} value={method}>{method === 'all' ? 'All Methods' : method}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                    <Select value={paymentDoctorFilter} onValueChange={setPaymentDoctorFilter}>
+                        <SelectTrigger className="w-[180px]">
+                            <SelectValue placeholder="Filter by doctor" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {uniquePaymentDoctors.map(doctor => (
+                                <SelectItem key={doctor} value={doctor}>{doctor === 'all' ? 'All Doctors' : doctor}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                    <Select value={paymentProcedureFilter} onValueChange={setPaymentProcedureFilter}>
+                        <SelectTrigger className="w-[180px]">
+                            <SelectValue placeholder="Filter by procedure" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {uniquePaymentProcedures.map(proc => (
+                                <SelectItem key={proc} value={proc}>{proc === 'all' ? 'All Procedures' : proc}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
@@ -1400,8 +1567,8 @@ const PatientDetails = React.forwardRef<{
                 {/* Transaction List */}
                 <div className="space-y-3">
                   <h3 className="font-medium">All Transactions</h3>
-                  {allTransactions.length > 0 ? (
-                    allTransactions.map((txn) => (
+                  {filteredTransactions.length > 0 ? (
+                    filteredTransactions.map((txn) => (
                       <div key={txn.id} className="border rounded-lg p-4">
                         <div className="flex items-start justify-between mb-2">
                           <div className="flex items-center space-x-3">
@@ -1442,7 +1609,7 @@ const PatientDetails = React.forwardRef<{
                     ))
                   ) : (
                     <div className="text-center py-8 text-muted-foreground">
-                      No payment transactions found
+                      No payment transactions found for the selected filters.
                     </div>
                   )}
                 </div>
