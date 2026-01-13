@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useImperativeHandle } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
 import { toast } from "sonner";
@@ -541,6 +542,7 @@ const PatientDetails = React.forwardRef<{
   setIsModified
 }, ref) => {
   const { openEditModal, refreshPatients, appointments } = useAppointmentModal();
+  const { openPaymentModal } = usePaymentModal();
   const [formData, setFormData] = useState({
     firstName: patient.firstName || patient.name?.split(' ')[0] || '',
     lastName: patient.lastName || patient.name?.split(' ').slice(1).join(' ') || '',
@@ -569,8 +571,6 @@ const PatientDetails = React.forwardRef<{
   const [patientAppointments, setPatientAppointments] = useState<Appointment[]>([]);
 
   // Payment state and helpers (local to PatientDetails)
-  const [showPaymentDialog, setShowPaymentDialog] = useState(false);
-  const [selectedAppointmentForPayment, setSelectedAppointmentForPayment] = useState<string | null>(null);
   const [allTransactions, setAllTransactions] = useState<any[]>([]);
   const [mockAppointmentHistoryLocal, setMockAppointmentHistoryLocal] = useState<any[]>([]);
   const [expandedTransactions, setExpandedTransactions] = useState<Set<string>>(new Set());
@@ -664,225 +664,6 @@ const PatientDetails = React.forwardRef<{
         return <Badge className="bg-gray-100 text-gray-800">Unpaid</Badge>;
     }
   };
-
-  const recordTransaction = (txn: any) => {
-    // dedupe transaction addition by id
-    setAllTransactions((prev: any[]) => {
-      if (!txn || !txn.id) return prev;
-      if (prev.find((p: any) => p.id === txn.id)) return prev;
-      return [txn, ...prev];
-    });
-
-    setMockAppointmentHistoryLocal((prev: any[]) => prev.map((a: any) => {
-      const isTarget = (a.id && a.id === txn.appointmentId) || (!a.id && (txn.appointmentId == null || txn.appointmentId === undefined));
-      if (isTarget) {
-        const existing = a.transactions || [];
-        const combined = [...existing, txn];
-        // dedupe by id
-        const deduped = Array.from(new Map(combined.map((t: any) => [t.id, t])).values());
-        const totalPaid = deduped.reduce((s: number, t: any) => s + (t.amount || 0), 0);
-        return { ...a, transactions: deduped, totalPaid };
-      }
-      return a;
-    }));
-  };
-
-  // RecordPaymentForm placed inside PatientDetails so it can access local mockAppointmentHistoryLocal
-  function RecordPaymentFormLocal({ appointmentId, onClose, onSave }: { appointmentId: string | null; onClose: () => void; onSave: (txn: any) => void; }) {
-    const [selectedAppointment, setSelectedAppointment] = useState<string | null>(appointmentId || null);
-    const [paymentMethod, setPaymentMethod] = useState<string | null>(null);
-    const [amount, setAmount] = useState<string>('');
-    const [paymentDate, setPaymentDate] = useState<string>(new Date().toISOString().split('T')[0]);
-    const [notes, setNotes] = useState<string>('');
-
-  // Use the entire appointment list for selection (user requested all appointments available)
-  const appointmentsForSelect = mockAppointmentHistoryLocal;
-  const selectedApt = appointmentsForSelect.find((a: any) => a.id === selectedAppointment) || (appointmentId ? appointmentsForSelect.find((a: any) => a.id === appointmentId) : undefined);
-  const outstandingBalance = selectedApt ? ((selectedApt.cost || 0) - (selectedApt.totalPaid || 0)) : 0;
-
-    const handleSubmit = async () => {
-      const amt = parseFloat(amount) || 0;
-      if (!selectedAppointment && !appointmentId) {
-        toast.error('Select an appointment');
-        return;
-      }
-      if (!paymentMethod) {
-        toast.error('Select payment method');
-        return;
-      }
-
-      const aptId = selectedAppointment || appointmentId!;
-
-      try {
-        const body = {
-          appointmentId: aptId,
-          amount: amt,
-          method: paymentMethod,
-          date: paymentDate,
-          transactionId: `T-${Math.random().toString(36).slice(2,9).toUpperCase()}`,
-          notes,
-        };
-
-        const res = await fetch(`http://localhost:3001/api/payments`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-
-        const json = await res.json();
-        if (!res.ok) {
-          toast.error(json?.message || 'Failed to record payment');
-          return;
-        }
-
-        const returnedPayment = json.data?.payment || {
-          id: `pay-${Date.now()}`,
-          appointmentId: aptId,
-          amount: amt,
-          method: paymentMethod,
-          date: paymentDate,
-          transactionId: body.transactionId,
-          notes,
-          status: 'completed'
-        };
-
-        // If backend returned updated appointment, merge into local history
-        const updatedApt = json.data?.appointment;
-        if (updatedApt) {
-          setMockAppointmentHistoryLocal((prev: any[]) => prev.map((a: any) => {
-            if (a.id === updatedApt.id) {
-              return {
-                ...a,
-                cost: updatedApt.price ?? a.cost,
-                totalPaid: updatedApt.totalPaid ?? a.totalPaid ?? 0,
-                paymentStatus: updatedApt.paymentStatus ?? a.paymentStatus,
-                transactions: updatedApt.transactions ?? (a.transactions || []),
-              };
-            }
-            return a;
-          }));
-        }
-
-        // update local UI state (transactions list) from backend's appointment transactions when available
-        if (updatedApt && Array.isArray(updatedApt.transactions)) {
-          // dedupe by id
-          const uniqueTxns = Array.from(new Map(updatedApt.transactions.map((t: any) => [t.id, t])).values());
-          setAllTransactions(uniqueTxns.slice().reverse());
-        } else {
-          // fallback if backend did not return appointment: insert returnedPayment once
-          setAllTransactions((prev) => {
-            if (!returnedPayment || !returnedPayment.id) return prev;
-            if (prev.find((p: any) => p.id === returnedPayment.id)) return prev;
-            return [returnedPayment, ...prev];
-          });
-        }
-
-  // Refresh patients/appointments if available
-  try { refreshPatients(); } catch {}
-  onClose();
-  // call onSave only to surface UI notification; avoid mutation in onSave to prevent duplicates
-  try { onSave && onSave(returnedPayment); } catch {}
-  toast.success('Payment recorded');
-      } catch (err) {
-        console.error('Error recording payment', err);
-        toast.error('Error recording payment');
-      }
-    };
-
-    return (
-      <div className="space-y-4">
-        {!appointmentId && (
-          <div>
-            <Label>Select Appointment</Label>
-            <Select value={selectedAppointment || ''} onValueChange={(v) => setSelectedAppointment(v || null)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select appointment" />
-              </SelectTrigger>
-              <SelectContent>
-                {appointmentsForSelect.map((apt: any) => (
-                    <SelectItem key={apt.id} value={apt.id}>
-                      {apt.type} - {apt.date} (Balance: ${( (apt.cost || 0) - (apt.totalPaid || 0) ).toFixed(2)})
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-        {appointmentId && (
-          <div className="bg-gray-50 p-3 rounded-lg">
-            <div className="text-sm font-medium mb-1">Appointment Details</div>
-            <div className="text-sm text-muted-foreground">
-              {selectedApt?.type} - {selectedApt?.date}
-            </div>
-            <div className="text-sm font-medium text-red-600 mt-1">
-              Outstanding Balance: ${outstandingBalance}
-            </div>
-          </div>
-        )}
-        <div>
-          <Label>Payment Method</Label>
-          <Select value={paymentMethod || ''} onValueChange={(v) => setPaymentMethod(v || null)}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select payment method" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="Credit Card">Credit Card</SelectItem>
-              <SelectItem value="Cash">Cash</SelectItem>
-              <SelectItem value="Debit Card">Debit Card</SelectItem>
-              <SelectItem value="Insurance">Insurance</SelectItem>
-              <SelectItem value="Check">Check</SelectItem>
-              <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label>Payment Amount</Label>
-          <div className="relative">
-            <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input 
-              type="number" 
-              step="0.01" 
-              min="0"
-              max={outstandingBalance || undefined}
-              placeholder="0.00" 
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              className="pl-9"
-            />
-          </div>
-          {outstandingBalance > 0 && parseFloat(amount) > outstandingBalance && (
-            <p className="text-xs text-red-600 mt-1">Amount exceeds outstanding balance</p>
-          )}
-          {outstandingBalance > 0 && (
-            <div className="flex items-center justify-between text-xs text-muted-foreground mt-1">
-              <span>Outstanding: ${outstandingBalance}</span>
-              <button type="button" onClick={() => setAmount(String(outstandingBalance))} className="text-primary font-semibold underline-offset-2 hover:underline">Pay in full</button>
-            </div>
-          )}
-        </div>
-        <div>
-          <Label>Payment Date</Label>
-          <Input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
-        </div>
-        <div>
-          <Label>Transaction Notes (Optional)</Label>
-          <Textarea placeholder="Additional payment details..." value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
-        </div>
-        <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
-          <div className="flex items-start space-x-2">
-            <CheckCircle className="h-4 w-4 text-blue-600 mt-0.5" />
-            <div className="text-xs text-blue-900">Transaction ID will be auto-generated upon submission</div>
-          </div>
-        </div>
-        <div className="flex justify-end space-x-2 pt-2 border-t">
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSubmit} className="bg-primary hover:bg-primary/90" disabled={!selectedAppointment && !appointmentId || !paymentMethod || !amount || parseFloat(amount) <= 0}>
-            <CheckCircle className="h-4 w-4 mr-2" />Record Payment
-          </Button>
-        </div>
-      </div>
-    );
-  }
 
   useImperativeHandle(ref, () => ({
     save: handleUpdatePatient,
@@ -1419,8 +1200,9 @@ const PatientDetails = React.forwardRef<{
                                 size="sm" 
                                 variant="outline"
                                 onClick={() => {
-                                  setSelectedAppointmentForPayment(appointment.id);
-                                  setShowPaymentDialog(true);
+                                  if (patient.id && patient.name) {
+                                    openPaymentModal(patient.id, patient.name, mockAppointmentHistoryLocal, appointment.id);
+                                  }
                                 }}
                               >
                                 <DollarSign className="h-3 w-3 mr-1" />
@@ -1474,8 +1256,9 @@ const PatientDetails = React.forwardRef<{
                         <Button 
                             size="sm"
                             onClick={() => {
-                            setSelectedAppointmentForPayment(null);
-                            setShowPaymentDialog(true);
+                              if (patient.id && patient.name) {
+                                openPaymentModal(patient.id, patient.name, mockAppointmentHistoryLocal, null);
+                              }
                             }}
                         >
                             <Plus className="h-4 w-4 mr-2" />
@@ -1618,24 +1401,7 @@ const PatientDetails = React.forwardRef<{
           </Card>
         </TabsContent>
       </Tabs>
-      {/* Record Payment Dialog */}
-      <Dialog open={showPaymentDialog} onOpenChange={setShowPaymentDialog}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Record Payment</DialogTitle>
-          </DialogHeader>
-          <div className="py-2">
-            <RecordPaymentFormLocal
-              appointmentId={selectedAppointmentForPayment}
-              onClose={() => setShowPaymentDialog(false)}
-              onSave={(txn) => {
-                recordTransaction(txn);
-                toast.success('Payment recorded');
-              }}
-            />
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Record Payment Dialog is now a separate component */}
     </div>
   );
 });

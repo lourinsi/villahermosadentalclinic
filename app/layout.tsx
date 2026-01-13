@@ -1,4 +1,5 @@
 import { AppointmentModalProvider } from "@/hooks/useAppointmentModal";
+import { PaymentModalProvider } from "@/hooks/usePaymentModal";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
@@ -7,6 +8,7 @@ import { CreateAppointmentModal } from "@/components/CreateAppointmentModal";
 import { ScheduleAppointmentModal } from "@/components/ScheduleAppointmentModal";
 import { AddPatientModal } from "@/components/AddPatientModal";
 import { EditAppointmentModal } from "@/components/EditAppointmentModal";
+import { RecordPaymentModal } from "@/components/RecordPaymentModal";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -34,12 +36,15 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <AppointmentModalProvider>
-          {children}
-          <Toaster />
-          <CreateAppointmentModal />
-          <ScheduleAppointmentModal />
-          <AddPatientModal />
-          <EditAppointmentModal />
+          <PaymentModalProvider>
+            {children}
+            <Toaster />
+            <CreateAppointmentModal />
+            <ScheduleAppointmentModal />
+            <AddPatientModal />
+            <EditAppointmentModal />
+            <RecordPaymentModal />
+          </PaymentModalProvider>
         </AppointmentModalProvider>
       </body>
     </html>
