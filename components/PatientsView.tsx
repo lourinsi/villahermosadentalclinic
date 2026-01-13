@@ -658,6 +658,7 @@ const PatientDetails = React.forwardRef<{
 
       try {
         const body = {
+          appointmentId: aptId,
           amount: amt,
           method: paymentMethod,
           date: paymentDate,
@@ -665,7 +666,7 @@ const PatientDetails = React.forwardRef<{
           notes,
         };
 
-        const res = await fetch(`http://localhost:3001/api/appointments/${aptId}/pay`, {
+        const res = await fetch(`http://localhost:3001/api/payments`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
@@ -677,8 +678,9 @@ const PatientDetails = React.forwardRef<{
           return;
         }
 
-        const returnedTxn = json.data?.transaction || {
-          id: `txn-${Date.now()}`,
+        const returnedPayment = json.data?.payment || {
+          id: `pay-${Date.now()}`,
+          appointmentId: aptId,
           amount: amt,
           method: paymentMethod,
           date: paymentDate,
@@ -710,11 +712,11 @@ const PatientDetails = React.forwardRef<{
           const uniqueTxns = Array.from(new Map(updatedApt.transactions.map((t: any) => [t.id, t])).values());
           setAllTransactions(uniqueTxns.slice().reverse());
         } else {
-          // fallback if backend did not return appointment: insert returnedTxn once
+          // fallback if backend did not return appointment: insert returnedPayment once
           setAllTransactions((prev) => {
-            if (!returnedTxn || !returnedTxn.id) return prev;
-            if (prev.find((p: any) => p.id === returnedTxn.id)) return prev;
-            return [returnedTxn, ...prev];
+            if (!returnedPayment || !returnedPayment.id) return prev;
+            if (prev.find((p: any) => p.id === returnedPayment.id)) return prev;
+            return [returnedPayment, ...prev];
           });
         }
 
@@ -722,7 +724,7 @@ const PatientDetails = React.forwardRef<{
   try { refreshPatients(); } catch {}
   onClose();
   // call onSave only to surface UI notification; avoid mutation in onSave to prevent duplicates
-  try { onSave && onSave(returnedTxn); } catch {}
+  try { onSave && onSave(returnedPayment); } catch {}
   toast.success('Payment recorded');
       } catch (err) {
         console.error('Error recording payment', err);
@@ -942,7 +944,36 @@ const PatientDetails = React.forwardRef<{
       });
 
       setMockAppointmentHistoryLocal(mapped);
-    }, [patientAppointments]);
+
+      // Fetch payments from new payments collection and merge into history
+      if (patient?.id) {
+        fetch(`http://localhost:3001/api/payments/patient/${patient.id}`)
+          .then(res => res.json())
+          .then(json => {
+            if (json?.success && Array.isArray(json.data)) {
+              const payments = json.data;
+              // group payments by appointmentId and update appointment history
+              setMockAppointmentHistoryLocal((prev: any[]) => {
+                return prev.map((apt: any) => {
+                  const aptPayments = payments.filter((p: any) => p.appointmentId === apt.id);
+                  if (aptPayments.length > 0) {
+                    const totalPaid = aptPayments.reduce((s: number, p: any) => s + (p.amount || 0), 0);
+                    const cost = apt.cost || 0;
+                    return {
+                      ...apt,
+                      totalPaid,
+                      transactions: aptPayments,
+                      paymentStatus: totalPaid >= cost ? 'paid' : (totalPaid > 0 ? 'half-paid' : 'unpaid'),
+                    };
+                  }
+                  return apt;
+                });
+              });
+            }
+          })
+          .catch(err => console.warn('[Payments] Failed to fetch patient payments:', err));
+      }
+    }, [patientAppointments, patient?.id]);
 
     // Populate the allTransactions list from the appointment history so persisted
     // transactions show immediately in the Payments tab without needing to add a new payment
@@ -1209,8 +1240,8 @@ const PatientDetails = React.forwardRef<{
 
                       return (
                         <div key={appointment.id || `apt-${index}`} className="border rounded-lg p-4 space-y-3">
-                          <div className="flex items-start justify-between">
-                            <div className="space-y-2 flex-1">
+                          <div className="grid grid-cols-2 gap-x-4 items-start">
+                            <div className="space-y-2">
                               <div className="flex items-center space-x-3">
                                 <div className="text-sm">
                                   <div className="font-medium text-base">{appointment.type}</div>
@@ -1223,20 +1254,7 @@ const PatientDetails = React.forwardRef<{
                                 <div className="text-muted-foreground">{appointment.notes}</div>
                               </div>
                             </div>
-                            <div className="text-right space-y-2">
-                                                      <Button 
-                                                        variant="ghost" 
-                                                        size="sm" 
-                                                        className="h-8 w-8 p-0"
-                                                        onClick={() => {
-                                                          // find original appointment object by id
-                                                          const original = patientAppointments.find((x: Appointment) => x.id === appointment.id);
-                                                          if (original) openEditModal(original);
-                                                        }}
-                                                      >
-                          <Eye className="h-4 w-4" />
-                          <span className="sr-only">View Appointment</span>
-                        </Button>
+                            <div className="space-y-2 text-right">
                               <div>
                                 <div className="text-sm font-medium">Total: ${appointment.cost}</div>
                                 <div className="text-sm text-muted-foreground">Paid: ${appointment.totalPaid}</div>
@@ -1246,6 +1264,21 @@ const PatientDetails = React.forwardRef<{
                                   </div>
                                 )}
                               </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between pt-4 mt-4 border-t">
+                              <Button 
+                                                        variant="outline" 
+                                                        size="sm"
+                                                        onClick={() => {
+                                                          // find original appointment object by id
+                                                          const original = patientAppointments.find((x: Appointment) => x.id === appointment.id);
+                                                          if (original) openEditModal(original, true);
+                                                        }}
+                                                      >
+                          <Eye className="h-4 w-4 mr-2" />
+                          View Appointment
+                        </Button>
                               <Button 
                                 size="sm" 
                                 variant="outline"
@@ -1258,7 +1291,6 @@ const PatientDetails = React.forwardRef<{
                                 Record Payment
                               </Button>
                             </div>
-                          </div>
                           {appointment.transactions.length > 0 && (
                             <div className="border-t pt-3 mt-3">
                               <div className="flex items-center justify-between mb-2">

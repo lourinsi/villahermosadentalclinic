@@ -8,6 +8,7 @@ interface AppointmentModalContextType {
   isScheduleModalOpen: boolean;
   isAddPatientModalOpen: boolean;
   isEditModalOpen: boolean;
+  isPatientFieldReadOnly: boolean;
   selectedAppointment: Appointment | null;
   newAppointmentDate?: Date;
   newAppointmentTime?: string;
@@ -19,7 +20,7 @@ interface AppointmentModalContextType {
   closeScheduleModal: () => void;
   openAddPatientModal: () => void;
   closeAddPatientModal: () => void;
-  openEditModal: (appointment: Appointment) => void;
+  openEditModal: (appointment: Appointment, isPatientReadOnly?: boolean) => void;
   closeEditModal: () => void;
   refreshAppointments: (filters?: AppointmentFilters) => void;
   refreshPatients: () => void;
@@ -39,6 +40,7 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
   const [isScheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [isAddPatientModalOpen, setAddPatientModalOpen] = useState(false);
   const [isEditModalOpen, setEditModalOpen] = useState(false);
+  const [isPatientFieldReadOnly, setPatientFieldReadOnly] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
@@ -75,13 +77,15 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
   const openAddPatientModal = () => setAddPatientModalOpen(true);
   const closeAddPatientModal = () => setAddPatientModalOpen(false);
   
-  const openEditModal = (appointment: Appointment) => {
+  const openEditModal = (appointment: Appointment, isPatientReadOnly: boolean = false) => {
     setSelectedAppointment(appointment);
+    setPatientFieldReadOnly(isPatientReadOnly);
     setEditModalOpen(true);
   };
   const closeEditModal = () => {
     setEditModalOpen(false);
     setSelectedAppointment(null);
+    setPatientFieldReadOnly(false);
   };
 
   const value = {
@@ -89,6 +93,7 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
     isScheduleModalOpen,
     isAddPatientModalOpen,
     isEditModalOpen,
+    isPatientFieldReadOnly,
     selectedAppointment,
     newAppointmentDate,
     newAppointmentTime,

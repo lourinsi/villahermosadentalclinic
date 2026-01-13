@@ -28,7 +28,8 @@ export function EditAppointmentModal() {
     selectedAppointment: appointment, // Rename selectedAppointment to appointment for consistency
     updateAppointment, 
     deleteAppointment, 
-    refreshAppointments 
+    refreshAppointments,
+    isPatientFieldReadOnly
   } = useAppointmentModal();
   const [form, setForm] = useState<Partial<Appointment>>({});
   const [isLoading, setIsLoading] = useState(false);
@@ -286,6 +287,11 @@ export function EditAppointmentModal() {
         <div className="space-y-4">
           <div className="space-y-2">
             <Label>Patient</Label>
+            {isPatientFieldReadOnly && form.patientName ? (
+              <div className="bg-gray-100 p-2 rounded-lg border border-gray-200">
+                <div className="text-sm font-medium text-gray-800">{form.patientName}</div>
+              </div>
+            ) : (
             <Select
               value={selectedPatientOption}
               onValueChange={(value) => {
@@ -332,6 +338,7 @@ export function EditAppointmentModal() {
                 )}
               </SelectContent>
             </Select>
+            )}
           </div>
 
           {isCreatingNewPatient && (
@@ -515,36 +522,6 @@ export function EditAppointmentModal() {
                   <SelectItem value="cancelled">Cancelled</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Payment Status</Label>
-              <Select 
-                value={form.paymentStatus || 'unpaid'} 
-                onValueChange={(v) => setForm(prev => ({ ...prev, paymentStatus: v as any }))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Payment Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="paid">Paid</SelectItem>
-                  <SelectItem value="unpaid">Unpaid</SelectItem>
-                  <SelectItem value="half-paid">Half Paid</SelectItem>
-                  <SelectItem value="overdue">Overdue</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="balance">Balance Left ($)</Label>
-              <Input
-                id="balance"
-                type="number"
-                value={form.balance !== undefined ? form.balance : ""}
-                onChange={(e) => setForm(prev => ({ ...prev, balance: parseFloat(e.target.value) || 0 }))}
-                min="0"
-                step="0.01"
-              />
             </div>
           </div>
 
