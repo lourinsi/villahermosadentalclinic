@@ -9,6 +9,7 @@ import { CalendarView } from "@/components/CalendarView";
 import { SettingsView } from "@/components/SettingsView";
 import { StaffView } from "@/components/Staff";
 import { AllAppointmentsView } from "@/components/AllAppointmentsView";
+import ProtectedRoute from "@/components/ProtectedRoute";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 
 export default function Home() {
@@ -37,8 +38,10 @@ export default function Home() {
   };
 
   return (
-    <AdminLayout>
-      {renderContent()}
-    </AdminLayout>
+    <ProtectedRoute>
+      <AdminLayout>
+        {renderContent()}
+      </AdminLayout>
+    </ProtectedRoute>
   );
 }
