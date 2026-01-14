@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo } from "react";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { Eraser, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Plus, Undo2, Trash2 } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./ui/dropdown-menu";
+import { Eraser, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Plus, Undo2, Trash2, MoreVertical } from "lucide-react";
 import { toast } from "sonner";
 import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
 
@@ -323,27 +324,6 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
                 </Button>
               </div>
             </div>
-            <div className="flex space-x-2">
-              <Button 
-                variant="brand" 
-                size="sm" 
-                onClick={handleCreateNew}
-                className="bg-violet-600 hover:bg-violet-700"
-              >
-                <Plus className="h-4 w-4 mr-1" />
-                New Chart
-              </Button>
-              <Button variant="outline" size="sm" onClick={handleClear}>
-                <RotateCcw className="h-4 w-4 mr-1" />
-                Clear
-              </Button>
-              <Button variant="destructive" size="sm" onClick={handleDeleteEmptyCharts} disabled={records.length === 0}>
-                <Trash2 className="h-4 w-4 mr-1" />
-                Delete Empty Charts
-              </Button>
-
-
-            </div>
           </div>
         </CardContent>
       </Card>
@@ -367,18 +347,47 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
       {/* Dental Chart Diagram */}
       <Card>
         <CardHeader className="relative"> {/* Add relative for positioning */}
-          <CardTitle>Dental Chart Diagram</CardTitle>
-          {records.length > 0 && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="absolute top-4 right-4 text-red-500 hover:text-red-700" // Position top-right
-              onClick={handleDeleteChart}
-              title="Delete current chart"
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          )}
+          <div className="flex justify-between items-center">
+            <CardTitle>Dental Chart Diagram</CardTitle>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-gray-600 hover:text-gray-900"
+                  title="Chart options"
+                >
+                  <MoreVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={handleCreateNew}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  New Chart
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleClear}>
+                  <RotateCcw className="h-4 w-4 mr-2" />
+                  Clear
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem 
+                  onClick={handleDeleteEmptyCharts} 
+                  disabled={records.length === 0}
+                  className="text-red-600"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Empty Charts
+                </DropdownMenuItem>
+                <DropdownMenuItem 
+                  onClick={handleDeleteChart}
+                  className="text-red-600"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Current Chart
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="space-y-8 pb-4">

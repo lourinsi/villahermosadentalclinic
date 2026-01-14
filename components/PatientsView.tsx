@@ -7,6 +7,7 @@ import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { toast } from "sonner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "./ui/dialog";
@@ -29,7 +30,9 @@ import {
   AlertTriangle,
   DollarSign,
   CreditCard,
-  Trash
+  Trash,
+  MoreVertical,
+  Bell
 } from "lucide-react";
 import { EditAppointmentModal } from "./EditAppointmentModal";
 import { EditPaymentModal } from "./EditPaymentModal";
@@ -84,6 +87,9 @@ export function PatientsView() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isPatientDetailsModified, setIsPatientDetailsModified] = useState(false);
   const [isPatientDetailsModalOpen, setIsPatientDetailsModalOpen] = useState(false);
+  const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
+  const [messagePatient, setMessagePatient] = useState<Patient | null>(null);
+  const [messageContent, setMessageContent] = useState("");
   
   const [isConfirmUnsavedChangesOpen, setIsConfirmUnsavedChangesOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -271,6 +277,41 @@ export function PatientsView() {
     setIsConfirmUnsavedChangesOpen(false);
   };
 
+  const handleSendMessage = async () => {
+    if (!messagePatient || !messageContent.trim()) {
+      toast.error("Please enter a message");
+      return;
+    }
+
+    try {
+      const response = await fetch("http://localhost:3001/api/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patientId: messagePatient.id,
+          patientEmail: messagePatient.email,
+          patientPhone: messagePatient.phone,
+          patientName: messagePatient.name || `${messagePatient.firstName} ${messagePatient.lastName}`,
+          message: messageContent
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        toast.success("Message sent to patient via email and SMS");
+        setMessageContent("");
+        setMessagePatient(null);
+        setIsMessageModalOpen(false);
+      } else {
+        toast.error(result.message || "Failed to send message");
+      }
+    } catch (err) {
+      console.error("Error sending message:", err);
+      toast.error("Error sending message");
+    }
+  };
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -392,6 +433,19 @@ export function PatientsView() {
                         >
                           <Eye className="h-3 w-3 mr-1" />
                           View
+                        </Button>
+                        
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setMessagePatient(patient);
+                            setIsMessageModalOpen(true);
+                          }}
+                          title="Send message to patient"
+                        >
+                          <Bell className="h-3 w-3 mr-1" />
+                          Message
                         </Button>
                         
                         <Button 
@@ -525,6 +579,49 @@ export function PatientsView() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={isMessageModalOpen} onOpenChange={setIsMessageModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Send Message to Patient</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {messagePatient && (
+              <div className="text-sm text-muted-foreground">
+                <p><strong>Patient:</strong> {messagePatient.name || `${messagePatient.firstName} ${messagePatient.lastName}`}</p>
+                <p><strong>Email:</strong> {messagePatient.email}</p>
+                <p><strong>Phone:</strong> {messagePatient.phone}</p>
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="message">Message</Label>
+              <Textarea
+                id="message"
+                placeholder="Enter your message here. It will be sent via email and SMS..."
+                value={messageContent}
+                onChange={(e) => setMessageContent(e.target.value)}
+                className="min-h-24"
+              />
+              <p className="text-xs text-muted-foreground">
+                This message will be sent to the patient via email and text message.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setIsMessageModalOpen(false);
+              setMessageContent("");
+              setMessagePatient(null);
+            }}>
+              Cancel
+            </Button>
+            <Button variant="brand" onClick={handleSendMessage} disabled={!messageContent.trim()}>
+              <Bell className="h-4 w-4 mr-2" />
+              Send Message
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -1429,9 +1526,58 @@ const PatientDetails = React.forwardRef<{
                               </div>
                             </div>
                           </div>
-                          <div className="text-right">
-                            <div className="text-lg font-semibold text-green-600">${txn.amount}</div>
-                            <div className="text-xs text-muted-foreground">{txn.date}</div>
+                          <div className="flex items-start gap-3">
+                            <div className="text-right">
+                              <div className="text-lg font-semibold text-green-600">${txn.amount}</div>
+                              <div className="text-xs text-muted-foreground">{txn.date}</div>
+                            </div>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8"
+                                >
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem 
+                                  onClick={() => {
+                                    if (patient.id && patient.name) {
+                                      openEditPaymentModal(txn.id, txn, patient.id, mockAppointmentHistoryLocal);
+                                    }
+                                  }}
+                                >
+                                  <Edit className="h-4 w-4 mr-2" />
+                                  Edit
+                                </DropdownMenuItem>
+                                <DropdownMenuItem 
+                                  onClick={() => {
+                                    if (confirm("Are you sure you want to delete this payment?")) {
+                                      const updatedHistory = mockAppointmentHistoryLocal.map(apt => {
+                                        if (apt.id === txn.appointmentId) {
+                                          const newTransactions = apt.transactions?.filter((t: any) => t.id !== txn.id) || [];
+                                          const newTotalPaid = newTransactions.reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
+                                          return {
+                                            ...apt,
+                                            transactions: newTransactions,
+                                            totalPaid: newTotalPaid
+                                          };
+                                        }
+                                        return apt;
+                                      });
+                                      setMockAppointmentHistoryLocal(updatedHistory);
+                                      toast.success("Payment deleted successfully");
+                                    }
+                                  }}
+                                  className="text-red-600"
+                                >
+                                  <Trash className="h-4 w-4 mr-2" />
+                                  Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                         </div>
                         <div className="flex items-center justify-between text-sm pt-2 border-t">
