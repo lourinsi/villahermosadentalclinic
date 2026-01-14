@@ -15,22 +15,24 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { 
-  Search, 
-  Plus, 
-  Phone, 
-  Mail, 
-  Calendar, 
-  FileText, 
+import {
+  Search,
+  Plus,
+  Phone,
+  Mail,
+  Calendar,
+  FileText,
   Edit,
   Eye,
   Clock,
   CheckCircle,
   AlertTriangle,
   DollarSign,
-  CreditCard
+  CreditCard,
+  Trash
 } from "lucide-react";
 import { EditAppointmentModal } from "./EditAppointmentModal";
+import { EditPaymentModal } from "./EditPaymentModal";
 import { Appointment } from "../hooks/useAppointments";
 import { DentalChart } from "./DentalChart";
 import { getAppointmentTypeName } from "../lib/appointment-types";
@@ -477,6 +479,7 @@ export function PatientsView() {
       </Dialog>
 
       <EditAppointmentModal />
+      <EditPaymentModal />
 
       <Dialog open={isPatientDeleteDialogOpen} onOpenChange={setIsPatientDeleteDialogOpen}>
         <DialogContent className="max-w-md">
@@ -542,7 +545,7 @@ const PatientDetails = React.forwardRef<{
   setIsModified
 }, ref) => {
   const { openEditModal, refreshPatients, appointments } = useAppointmentModal();
-  const { openPaymentModal } = usePaymentModal();
+  const { openPaymentModal, openEditPaymentModal } = usePaymentModal();
   const [formData, setFormData] = useState({
     firstName: patient.firstName || patient.name?.split(' ')[0] || '',
     lastName: patient.lastName || patient.name?.split(' ').slice(1).join(' ') || '',
@@ -908,6 +911,41 @@ const PatientDetails = React.forwardRef<{
     onDeletePatient(patient);
   };
 
+  const handleDeletePayment = async (paymentId: string, appointmentId: string) => {
+    console.log("=== DELETE PAYMENT STARTED ===");
+    console.log("Payment ID:", paymentId);
+    console.log("Appointment ID:", appointmentId);
+    
+    try {
+      const deleteUrl = `http://localhost:3001/api/payments/${paymentId}`;
+      console.log("DELETE URL:", deleteUrl);
+      
+      const response = await fetch(deleteUrl, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      console.log("Response Status:", response.status);
+      console.log("Response OK:", response.ok);
+      
+      const result = await response.json();
+      console.log("Response JSON:", result);
+      
+      if (result.success) {
+        toast.success("Payment deleted successfully");
+        console.log("Delete successful, refreshing patients...");
+        // Refresh the appointments to reflect the deletion
+        refreshPatients();
+      } else {
+        console.log("Delete failed with message:", result.message);
+        toast.error(result.message || "Failed to delete payment");
+      }
+    } catch (err) {
+      console.error("Error deleting payment:", err);
+      toast.error("Error deleting payment");
+    }
+  };
+
   const handleSaveAndClose = async () => {
     const success = await handleUpdatePatient();
     if (success) {
@@ -1229,9 +1267,32 @@ const PatientDetails = React.forwardRef<{
                                         <div className="text-xs text-muted-foreground">{txn.date} • {txn.transactionId}</div>
                                       </div>
                                     </div>
-                                    <Badge variant="outline" className="text-xs">
-                                      {txn.status}
-                                    </Badge>
+                                    <div className="flex items-center gap-1">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-8 w-8 p-0"
+                                        onClick={() => {
+                                          openEditPaymentModal(txn.id, txn, patient.id, mockAppointmentHistoryLocal);
+                                        }}
+                                      >
+                                        <Edit className="h-4 w-4" />
+                                        <span className="sr-only">Edit Payment</span>
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                        onClick={() => {
+                                          if (confirm(`Are you sure you want to delete this payment (${txn.method} - $${txn.amount})?`)) {
+                                            handleDeletePayment(txn.id, appointment.id);
+                                          }
+                                        }}
+                                      >
+                                        <Trash className="h-4 w-4" />
+                                        <span className="sr-only">Delete Payment</span>
+                                      </Button>
+                                    </div>
                                   </div>
                                 ))}
                               </div>
@@ -1244,7 +1305,7 @@ const PatientDetails = React.forwardRef<{
                 )}
               </div>
             </CardContent>
-          </Card>
+          </Card> 
         </TabsContent>
 
         <TabsContent value="payments" className="space-y-4">

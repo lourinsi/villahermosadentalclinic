@@ -8,7 +8,10 @@ interface PaymentModalContextType {
   patientId: string | null;
   patientName: string | null;
   appointments: any[];
+  paymentId: string | null;
+  paymentData: any | null;
   openPaymentModal: (patientId: string, patientName: string, appointments: any[], appointmentId?: string | null) => void;
+  openEditPaymentModal: (paymentId: string, paymentData: any, patientId?: string | null, appointments?: any[]) => void;
   closePaymentModal: () => void;
 }
 
@@ -20,12 +23,26 @@ export const PaymentModalProvider = ({ children }: { children: ReactNode }) => {
   const [patientId, setPatientId] = useState<string | null>(null);
   const [patientName, setPatientName] = useState<string | null>(null);
   const [appointments, setAppointments] = useState<any[]>([]);
+  const [paymentId, setPaymentId] = useState<string | null>(null);
+  const [paymentData, setPaymentData] = useState<any | null>(null);
 
   const openPaymentModal = (pId: string, pName: string, apts: any[], aptId: string | null = null) => {
     setPatientId(pId);
     setPatientName(pName);
     setAppointments(apts);
     setAppointmentId(aptId);
+    setPaymentId(null);
+    setPaymentData(null);
+    setPaymentModalOpen(true);
+  };
+
+  const openEditPaymentModal = (pId: string, pData: any, pIdParam?: string | null, apts?: any[]) => {
+    setPaymentId(pId);
+    setPaymentData(pData);
+    setAppointmentId(pData.appointmentId || null);
+    setPatientId(pIdParam || pData.patientId || null);
+    setPatientName(null);
+    setAppointments(apts || []);
     setPaymentModalOpen(true);
   };
 
@@ -35,15 +52,20 @@ export const PaymentModalProvider = ({ children }: { children: ReactNode }) => {
     setPatientId(null);
     setPatientName(null);
     setAppointments([]);
+    setPaymentId(null);
+    setPaymentData(null);
   };
-  
+
   const value = {
     isPaymentModalOpen,
     appointmentId,
     patientId,
     patientName,
     appointments,
+    paymentId,
+    paymentData,
     openPaymentModal,
+    openEditPaymentModal,
     closePaymentModal,
   };
 

@@ -31,6 +31,7 @@ export function RecordPaymentModal() {
     patientId,
     patientName,
     appointments,
+    paymentData,
   } = usePaymentModal();
   const { refreshPatients } = useAppointmentModal();
 
@@ -104,52 +105,69 @@ export function RecordPaymentModal() {
     }
   };
 
+  // Only show if we're NOT in edit mode (paymentData would be set for edit mode)
+  if (paymentData) {
+    return null;
+  }
+
   return (
     <Dialog open={isPaymentModalOpen} onOpenChange={closePaymentModal}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>Record Payment for {patientName}</DialogTitle>
         </DialogHeader>
-        <div className="py-2">
-          <div className="space-y-4">
-            {!appointmentId && (
-              <div>
-                <Label>Select Appointment</Label>
-                <Select
-                  value={selectedAppointment || ""}
-                  onValueChange={(v) => setSelectedAppointment(v || null)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select appointment" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {appointments.map((apt: any) => (
-                      <SelectItem key={apt.id} value={apt.id}>
-                        {apt.type} - {apt.date} (Balance: $
-                        {(
-                          (apt.cost || 0) - (apt.totalPaid || 0)
-                        ).toFixed(2)})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-            {appointmentId && selectedApt && (
-              <div className="bg-gray-50 p-3 rounded-lg">
-                <div className="text-sm font-medium mb-1">
-                  Appointment Details
-                </div>
-                <div className="text-sm text-muted-foreground">
-                  {selectedApt?.type} - {selectedApt?.date}
-                </div>
-                <div className="text-sm font-medium text-red-600 mt-1">
-                  Outstanding Balance: ${outstandingBalance.toFixed(2)}
-                </div>
-              </div>
-            )}
+        <div className="space-y-4">
+          {!appointmentId && (
             <div>
-              <Label>Payment Method</Label>
+              <Label className="text-base font-semibold mb-2 block">Select Appointment</Label>
+              <Select
+                value={selectedAppointment || ""}
+                onValueChange={(v) => setSelectedAppointment(v || null)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select appointment" />
+                </SelectTrigger>
+                <SelectContent>
+                  {appointments.map((apt: any) => (
+                    <SelectItem key={apt.id} value={apt.id}>
+                      {apt.type} - {apt.date} (Balance: $
+                      {(
+                        (apt.cost || 0) - (apt.totalPaid || 0)
+                      ).toFixed(2)})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          
+          {(appointmentId || selectedAppointment) && selectedApt && (
+            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-4 rounded-lg border border-blue-200">
+              <div className="text-sm font-semibold text-blue-900 mb-3">Appointment & Payment Summary</div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <div className="text-xs text-blue-700 font-medium mb-1">Appointment Type</div>
+                  <div className="text-sm font-semibold text-gray-900">{selectedApt?.type}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-blue-700 font-medium mb-1">Appointment Date</div>
+                  <div className="text-sm font-semibold text-gray-900">{selectedApt?.date}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-blue-700 font-medium mb-1">Total Cost</div>
+                  <div className="text-sm font-semibold text-gray-900">${(selectedApt?.cost || 0).toFixed(2)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-blue-700 font-medium mb-1">Outstanding Balance</div>
+                  <div className="text-sm font-bold text-red-600">${outstandingBalance.toFixed(2)}</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-4">
+            <div>
+              <Label className="text-sm font-semibold">Payment Method</Label>
               <Select
                 value={paymentMethod || ""}
                 onValueChange={(v) => setPaymentMethod(v || null)}
@@ -167,8 +185,9 @@ export function RecordPaymentModal() {
                 </SelectContent>
               </Select>
             </div>
+            
             <div>
-              <Label>Payment Amount</Label>
+              <Label className="text-sm font-semibold">Payment Amount</Label>
               <div className="relative">
                 <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -188,7 +207,7 @@ export function RecordPaymentModal() {
                 </p>
               )}
               {outstandingBalance > 0 && (
-                <div className="flex items-center justify-between text-xs text-muted-foreground mt-1">
+                <div className="flex items-center justify-between text-xs text-muted-foreground mt-2">
                   <span>Outstanding: ${outstandingBalance.toFixed(2)}</span>
                   <button
                     type="button"
@@ -200,16 +219,18 @@ export function RecordPaymentModal() {
                 </div>
               )}
             </div>
+            
             <div>
-              <Label>Payment Date</Label>
+              <Label className="text-sm font-semibold">Payment Date</Label>
               <Input
                 type="date"
                 value={paymentDate}
                 onChange={(e) => setPaymentDate(e.target.value)}
               />
             </div>
+            
             <div>
-              <Label>Transaction Notes (Optional)</Label>
+              <Label className="text-sm font-semibold">Transaction Notes (Optional)</Label>
               <Textarea
                 placeholder="Additional payment details..."
                 value={notes}
@@ -217,32 +238,34 @@ export function RecordPaymentModal() {
                 rows={3}
               />
             </div>
+            
             <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
               <div className="flex items-start space-x-2">
-                <CheckCircle className="h-4 w-4 text-blue-600 mt-0.5" />
+                <CheckCircle className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
                 <div className="text-xs text-blue-900">
                   Transaction ID will be auto-generated upon submission
                 </div>
               </div>
             </div>
-            <div className="flex justify-end space-x-2 pt-2 border-t">
-              <Button variant="outline" onClick={closePaymentModal}>
-                Cancel
-              </Button>
-              <Button
-                onClick={handleSubmit}
-                className="bg-primary hover:bg-primary/90"
-                disabled={
-                  (!selectedAppointment && !appointmentId) ||
-                  !paymentMethod ||
-                  !amount ||
-                  parseFloat(amount) <= 0
-                }
-              >
-                <CheckCircle className="h-4 w-4 mr-2" />
-                Record Payment
-              </Button>
-            </div>
+          </div>
+
+          <div className="flex justify-end space-x-2 pt-2 border-t">
+            <Button variant="outline" onClick={closePaymentModal}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              className="bg-primary hover:bg-primary/90"
+              disabled={
+                (!selectedAppointment && !appointmentId) ||
+                !paymentMethod ||
+                !amount ||
+                parseFloat(amount) <= 0
+              }
+            >
+              <CheckCircle className="h-4 w-4 mr-2" />
+              Record Payment
+            </Button>
           </div>
         </div>
       </DialogContent>
