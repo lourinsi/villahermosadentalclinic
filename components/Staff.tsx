@@ -10,14 +10,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "./ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "./ui/dialog";
 import { Textarea } from "./ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { Calendar as CalendarComponent } from "./ui/calendar";
-import { 
-  Users, 
-  UserPlus, 
-  DollarSign, 
+import {
+  Users,
+  UserPlus,
+  DollarSign,
   TrendingUp,
   Search,
   Filter,
@@ -32,7 +33,11 @@ import {
   CreditCard,
   CalendarRange,
   X,
-  Eye
+  Eye,
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  Clock
 }from "lucide-react";
 
 export interface Staff {
@@ -148,6 +153,19 @@ export function StaffView() {
   const [financialActionLoading, setFinancialActionLoading] = useState<string | null>(null);
   const [isSavingFinancialRecord, setIsSavingFinancialRecord] = useState(false);
   const [isDeletingFinancialRecord, setIsDeletingFinancialRecord] = useState(false);
+  const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
+  const [scheduleStaff, setScheduleStaff] = useState<Staff | null>(null);
+  const [scheduleDate, setScheduleDate] = useState<Date>(new Date());
+  const [staffAppointments, setStaffAppointments] = useState<any[]>([]);
+  const [isLoadingSchedule, setIsLoadingSchedule] = useState(false);
+  const [viewAppointment, setViewAppointment] = useState<any | null>(null);
+  const [isViewAppointmentOpen, setIsViewAppointmentOpen] = useState(false);
+  const [editAppointment, setEditAppointment] = useState<any | null>(null);
+  const [isEditAppointmentOpen, setIsEditAppointmentOpen] = useState(false);
+  const [deleteAppointment, setDeleteAppointment] = useState<any | null>(null);
+  const [isDeleteAppointmentOpen, setIsDeleteAppointmentOpen] = useState(false);
+  const [isSavingAppointment, setIsSavingAppointment] = useState(false);
+  const [isDeletingAppointment, setIsDeletingAppointment] = useState(false);
 
   const fetchAllStaffData = async () => {
     setIsLoading(true);
@@ -443,6 +461,123 @@ export function StaffView() {
   const openDeleteFinancialRecord = (record: StaffFinancialRecord) => {
     setFinancialRecordToDelete(record);
     setIsDeleteFinancialDialogOpen(true);
+  };
+
+  const openScheduleDialog = async (staff: Staff) => {
+    setScheduleStaff(staff);
+    setScheduleDate(new Date());
+    setIsScheduleDialogOpen(true);
+    await fetchStaffAppointments(staff.name, new Date());
+  };
+
+  const fetchStaffAppointments = async (doctorName: string, date: Date) => {
+    setIsLoadingSchedule(true);
+    try {
+      // Get the start and end of the month for the selected date
+      const startOfMonth = new Date(date.getFullYear(), date.getMonth(), 1);
+      const endOfMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+
+      const startDate = startOfMonth.toISOString().split('T')[0];
+      const endDate = endOfMonth.toISOString().split('T')[0];
+
+      const response = await fetch(
+        `http://localhost:3001/api/appointments?doctor=${encodeURIComponent(doctorName)}&startDate=${startDate}&endDate=${endDate}`
+      );
+
+      if (!response.ok) throw new Error("Failed to fetch appointments");
+
+      const data = await response.json();
+      setStaffAppointments(data.data || []);
+    } catch (error) {
+      console.error("Error fetching staff appointments:", error);
+      setStaffAppointments([]);
+    } finally {
+      setIsLoadingSchedule(false);
+    }
+  };
+
+  const handleScheduleMonthChange = (newDate: Date) => {
+    setScheduleDate(newDate);
+    if (scheduleStaff) {
+      fetchStaffAppointments(scheduleStaff.name, newDate);
+    }
+  };
+
+  const getAppointmentsForDate = (date: Date) => {
+    // Use local date formatting to avoid timezone issues
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const dateStr = `${year}-${month}-${day}`;
+    return staffAppointments.filter(apt => apt.date === dateStr);
+  };
+
+  const formatTime = (time: string) => {
+    if (!time) return '';
+    const [hours, minutes] = time.split(':');
+    const hour = parseInt(hours);
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const hour12 = hour % 12 || 12;
+    return `${hour12}:${minutes} ${ampm}`;
+  };
+
+  const handleViewAppointment = (apt: any) => {
+    setViewAppointment(apt);
+    setIsViewAppointmentOpen(true);
+  };
+
+  const handleEditAppointment = (apt: any) => {
+    setEditAppointment({ ...apt });
+    setIsEditAppointmentOpen(true);
+  };
+
+  const handleDeleteAppointmentClick = (apt: any) => {
+    setDeleteAppointment(apt);
+    setIsDeleteAppointmentOpen(true);
+  };
+
+  const handleSaveAppointment = async () => {
+    if (!editAppointment) return;
+    setIsSavingAppointment(true);
+    try {
+      const response = await fetch(`http://localhost:3001/api/appointments/${editAppointment.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editAppointment),
+      });
+      if (!response.ok) throw new Error("Failed to update appointment");
+      toast.success("Appointment updated successfully");
+      setIsEditAppointmentOpen(false);
+      if (scheduleStaff) {
+        fetchStaffAppointments(scheduleStaff.name, scheduleDate);
+      }
+    } catch (error) {
+      console.error("Error updating appointment:", error);
+      toast.error("Failed to update appointment");
+    } finally {
+      setIsSavingAppointment(false);
+    }
+  };
+
+  const handleConfirmDeleteAppointment = async () => {
+    if (!deleteAppointment) return;
+    setIsDeletingAppointment(true);
+    try {
+      const response = await fetch(`http://localhost:3001/api/appointments/${deleteAppointment.id}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) throw new Error("Failed to delete appointment");
+      toast.success("Appointment deleted successfully");
+      setIsDeleteAppointmentOpen(false);
+      if (scheduleStaff) {
+        fetchStaffAppointments(scheduleStaff.name, scheduleDate);
+      }
+    } catch (error) {
+      console.error("Error deleting appointment:", error);
+      toast.error("Failed to delete appointment");
+    } finally {
+      setIsDeletingAppointment(false);
+    }
   };
 
   const handleDeleteFinancialRecord = async () => {
@@ -786,13 +921,16 @@ export function StaffView() {
                           </TableCell>
                           <TableCell>
                             <div className="flex space-x-2">
-                              <Button variant="outline" size="sm" onClick={() => openStaffDetails(staff)}>
+                              <Button variant="outline" size="sm" onClick={() => openStaffDetails(staff)} title="View Details">
                                 <Eye className="h-3 w-3" />
                               </Button>
-                              <Button variant="outline" size="sm" onClick={() => openEditStaffDialog(staff)}>
+                              <Button variant="outline" size="sm" onClick={() => openScheduleDialog(staff)} title="View Schedule">
+                                <CalendarDays className="h-3 w-3" />
+                              </Button>
+                              <Button variant="outline" size="sm" onClick={() => openEditStaffDialog(staff)} title="Edit">
                                 <Edit className="h-3 w-3" />
                               </Button>
-                              <Button variant="outline" size="sm" onClick={() => openDeleteStaffDialog(staff)}>
+                              <Button variant="outline" size="sm" onClick={() => openDeleteStaffDialog(staff)} title="Delete">
                                 <Trash2 className="h-3 w-3" />
                               </Button>
                             </div>
@@ -1467,6 +1605,386 @@ export function StaffView() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsAttendanceDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleAttendanceSave}>Save Attendance</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Staff Schedule Dialog */}
+      <Dialog open={isScheduleDialogOpen} onOpenChange={setIsScheduleDialogOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CalendarDays className="h-5 w-5 text-violet-600" />
+              {scheduleStaff?.name}'s Schedule
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-auto">
+            {/* Month Navigation */}
+            <div className="flex items-center justify-between mb-4">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const newDate = new Date(scheduleDate);
+                  newDate.setMonth(newDate.getMonth() - 1);
+                  handleScheduleMonthChange(newDate);
+                }}
+              >
+                <ChevronLeft className="h-4 w-4 mr-1" />
+                Previous
+              </Button>
+              <h3 className="text-lg font-semibold">
+                {scheduleDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+              </h3>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const newDate = new Date(scheduleDate);
+                  newDate.setMonth(newDate.getMonth() + 1);
+                  handleScheduleMonthChange(newDate);
+                }}
+              >
+                Next
+                <ChevronRight className="h-4 w-4 ml-1" />
+              </Button>
+            </div>
+
+            {isLoadingSchedule ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <div className="inline-block">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-600 mx-auto mb-2"></div>
+                  Loading schedule...
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Calendar Grid */}
+                <div className="grid grid-cols-7 gap-1">
+                  {/* Day Headers */}
+                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
+                    <div key={day} className="text-center text-sm font-medium text-muted-foreground py-2">
+                      {day}
+                    </div>
+                  ))}
+
+                  {/* Calendar Days */}
+                  {(() => {
+                    const year = scheduleDate.getFullYear();
+                    const month = scheduleDate.getMonth();
+                    const firstDay = new Date(year, month, 1);
+                    const lastDay = new Date(year, month + 1, 0);
+                    const daysInMonth = lastDay.getDate();
+                    const startingDay = firstDay.getDay();
+
+                    const days = [];
+
+                    // Empty cells for days before the first day of the month
+                    for (let i = 0; i < startingDay; i++) {
+                      days.push(
+                        <div key={`empty-${i}`} className="min-h-[80px] bg-gray-50 rounded-md"></div>
+                      );
+                    }
+
+                    // Days of the month
+                    for (let day = 1; day <= daysInMonth; day++) {
+                      const currentDate = new Date(year, month, day);
+                      const appointments = getAppointmentsForDate(currentDate);
+                      const isToday = new Date().toDateString() === currentDate.toDateString();
+
+                      days.push(
+                        <div
+                          key={day}
+                          className={`min-h-[80px] border rounded-md p-1 ${
+                            isToday ? 'border-violet-500 bg-violet-50' : 'border-gray-200'
+                          }`}
+                        >
+                          <div className={`text-sm font-medium mb-1 ${isToday ? 'text-violet-600' : ''}`}>
+                            {day}
+                          </div>
+                          <div className="space-y-1">
+                            {appointments.slice(0, 3).map((apt, idx) => (
+                              <div
+                                key={idx}
+                                className="text-xs bg-violet-100 text-violet-800 rounded px-1 py-0.5 truncate"
+                                title={`${formatTime(apt.time)} - ${apt.patientName}`}
+                              >
+                                <Clock className="h-2.5 w-2.5 inline mr-0.5" />
+                                {formatTime(apt.time)}
+                              </div>
+                            ))}
+                            {appointments.length > 3 && (
+                              <div className="text-xs text-muted-foreground">
+                                +{appointments.length - 3} more
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    return days;
+                  })()}
+                </div>
+
+                {/* Appointment List for Selected Month */}
+                <div className="mt-6">
+                  <h4 className="font-medium mb-3 flex items-center gap-2">
+                    <Calendar className="h-4 w-4" />
+                    Appointments this month ({staffAppointments.length})
+                  </h4>
+                  {staffAppointments.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-4">
+                      No appointments scheduled for this month
+                    </p>
+                  ) : (
+                    <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                      {staffAppointments
+                        .sort((a, b) => {
+                          const dateCompare = a.date.localeCompare(b.date);
+                          if (dateCompare !== 0) return dateCompare;
+                          return (a.time || '').localeCompare(b.time || '');
+                        })
+                        .map((apt, idx) => (
+                          <div
+                            key={idx}
+                            className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="text-center min-w-[50px]">
+                                <div className="text-lg font-bold text-violet-600">
+                                  {new Date(apt.date + 'T00:00:00').getDate()}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  {new Date(apt.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })}
+                                </div>
+                              </div>
+                              <div>
+                                <p className="font-medium">{apt.patientName}</p>
+                                <p className="text-sm text-muted-foreground">
+                                  <Clock className="h-3 w-3 inline mr-1" />
+                                  {formatTime(apt.time)}
+                                  {apt.duration && ` · ${apt.duration} min`}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Badge className={
+                                apt.status === "completed" ? "bg-green-100 text-green-800" :
+                                apt.status === "confirmed" ? "bg-blue-100 text-blue-800" :
+                                apt.status === "cancelled" ? "bg-red-100 text-red-800" :
+                                "bg-yellow-100 text-yellow-800"
+                              }>
+                                {apt.status}
+                              </Badge>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                    <MoreVertical className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem onClick={() => handleViewAppointment(apt)}>
+                                    <Eye className="h-4 w-4 mr-2" />
+                                    View
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleEditAppointment(apt)}>
+                                    <Edit className="h-4 w-4 mr-2" />
+                                    Edit
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => handleDeleteAppointmentClick(apt)}
+                                    className="text-red-600"
+                                  >
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Delete
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsScheduleDialogOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Appointment Dialog (Read-only) */}
+      <Dialog open={isViewAppointmentOpen} onOpenChange={setIsViewAppointmentOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="h-5 w-5 text-violet-600" />
+              Appointment Details
+            </DialogTitle>
+            <DialogDescription>View appointment information (read-only)</DialogDescription>
+          </DialogHeader>
+          {viewAppointment && (
+            <div className="space-y-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs text-muted-foreground">Patient Name</p>
+                  <p className="font-medium">{viewAppointment.patientName}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Status</p>
+                  <Badge className={
+                    viewAppointment.status === "completed" ? "bg-green-100 text-green-800" :
+                    viewAppointment.status === "confirmed" ? "bg-blue-100 text-blue-800" :
+                    viewAppointment.status === "cancelled" ? "bg-red-100 text-red-800" :
+                    "bg-yellow-100 text-yellow-800"
+                  }>
+                    {viewAppointment.status}
+                  </Badge>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs text-muted-foreground">Date</p>
+                  <p className="font-medium">
+                    {new Date(viewAppointment.date + 'T00:00:00').toLocaleDateString('en-US', {
+                      weekday: 'long',
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric'
+                    })}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Time</p>
+                  <p className="font-medium">{formatTime(viewAppointment.time)}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs text-muted-foreground">Duration</p>
+                  <p className="font-medium">{viewAppointment.duration || 30} minutes</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Doctor</p>
+                  <p className="font-medium">{viewAppointment.doctor}</p>
+                </div>
+              </div>
+              {viewAppointment.notes && (
+                <div>
+                  <p className="text-xs text-muted-foreground">Notes</p>
+                  <p className="font-medium">{viewAppointment.notes}</p>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsViewAppointmentOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Appointment Dialog */}
+      <Dialog open={isEditAppointmentOpen} onOpenChange={setIsEditAppointmentOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Edit className="h-5 w-5 text-violet-600" />
+              Edit Appointment
+            </DialogTitle>
+          </DialogHeader>
+          {editAppointment && (
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Patient Name</Label>
+                <Input value={editAppointment.patientName} disabled className="bg-gray-50" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Date</Label>
+                  <Input
+                    type="date"
+                    value={editAppointment.date}
+                    onChange={(e) => setEditAppointment({ ...editAppointment, date: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Time</Label>
+                  <Input
+                    type="time"
+                    value={editAppointment.time}
+                    onChange={(e) => setEditAppointment({ ...editAppointment, time: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Duration (minutes)</Label>
+                  <Input
+                    type="number"
+                    value={editAppointment.duration || 30}
+                    onChange={(e) => setEditAppointment({ ...editAppointment, duration: Number(e.target.value) })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Status</Label>
+                  <Select
+                    value={editAppointment.status}
+                    onValueChange={(value) => setEditAppointment({ ...editAppointment, status: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="scheduled">Scheduled</SelectItem>
+                      <SelectItem value="confirmed">Confirmed</SelectItem>
+                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                      <SelectItem value="cancelled">Cancelled</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Notes</Label>
+                <Textarea
+                  value={editAppointment.notes || ''}
+                  onChange={(e) => setEditAppointment({ ...editAppointment, notes: e.target.value })}
+                  placeholder="Add notes..."
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditAppointmentOpen(false)}>Cancel</Button>
+            <Button onClick={handleSaveAppointment} disabled={isSavingAppointment}>
+              {isSavingAppointment ? "Saving..." : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Appointment Confirmation Dialog */}
+      <Dialog open={isDeleteAppointmentOpen} onOpenChange={setIsDeleteAppointmentOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete Appointment</DialogTitle>
+            <DialogDescription>This action cannot be undone.</DialogDescription>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground py-4">
+            {deleteAppointment && (
+              <>Are you sure you want to delete the appointment for <strong>{deleteAppointment.patientName}</strong> on {new Date(deleteAppointment.date + 'T00:00:00').toLocaleDateString()}?</>
+            )}
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDeleteAppointmentOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleConfirmDeleteAppointment} disabled={isDeletingAppointment}>
+              {isDeletingAppointment ? "Deleting..." : "Delete"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

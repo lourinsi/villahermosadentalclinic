@@ -1,12 +1,12 @@
 "use client";
 
-import AdminLayout from "@/components/AdminLayout";
+import DoctorLayout from "@/components/DoctorLayout";
 import ProtectedRoute from "@/components/ProtectedRoute";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <ProtectedRoute allowedRoles={["admin"]}>
-      <AdminLayout>{children}</AdminLayout>
+    <ProtectedRoute allowedRoles={["doctor", "admin"]}>
+      <DoctorLayout>{children}</DoctorLayout>
     </ProtectedRoute>
   );
 }

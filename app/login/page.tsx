@@ -30,7 +30,24 @@ export default function LoginPage() {
       setIsSubmitting(true);
       await login(username, password);
       toast.success("Login successful!");
-      router.push("/");
+
+      // Check the stored user role to redirect appropriately
+      // We need to fetch the user data after login to determine role
+      const response = await fetch("http://localhost:3001/api/auth/verify", {
+        method: "GET",
+        credentials: "include",
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.user?.role === "doctor") {
+          router.push("/doctor/dashboard");
+        } else {
+          router.push("/admin/dashboard");
+        }
+      } else {
+        router.push("/admin/dashboard");
+      }
     } catch (error) {
       console.error("[LOGIN] Error:", error);
       toast.error(error instanceof Error ? error.message : "Login failed. Please try again.");
@@ -56,7 +73,7 @@ export default function LoginPage() {
             Villahermosa Dental Clinic
           </CardTitle>
           <CardDescription className="text-gray-600">
-            Admin Dashboard Login
+            Staff Portal Login
           </CardDescription>
         </CardHeader>
 
@@ -138,13 +155,17 @@ export default function LoginPage() {
             {/* Demo Credentials */}
             <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
               <p className="text-xs font-semibold text-blue-900 mb-2">Demo Credentials:</p>
-              <div className="space-y-1 text-xs text-blue-800 font-mono">
-                <p>
-                  <span className="font-bold">Username:</span> admin
-                </p>
-                <p>
-                  <span className="font-bold">Password:</span> password
-                </p>
+              <div className="grid grid-cols-2 gap-4 text-xs text-blue-800 font-mono">
+                <div>
+                  <p className="font-bold text-blue-900 mb-1">Admin:</p>
+                  <p>Username: admin</p>
+                  <p>Password: password</p>
+                </div>
+                <div>
+                  <p className="font-bold text-violet-900 mb-1">Doctor:</p>
+                  <p>Username: [Doctor Name]</p>
+                  <p>Password: doctor123</p>
+                </div>
               </div>
             </div>
 
