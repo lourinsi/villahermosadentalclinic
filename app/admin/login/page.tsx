@@ -7,10 +7,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
-import { Lock, User, Loader2, Heart, ArrowLeft } from "lucide-react";
+import { Lock, User, Loader2, Settings, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 
-export default function PatientLoginPage() {
+export default function AdminLoginPage() {
   const { login, logout, isLoading } = useAuth();
   const router = useRouter();
   const [username, setUsername] = useState("");
@@ -39,20 +39,20 @@ export default function PatientLoginPage() {
 
       if (response.ok) {
         const data = await response.json();
-        if (data.user?.role === "patient" || data.user?.role === "user") {
-          toast.success("Login successful!");
-          router.push("/");
+        if (data.user?.role === "admin") {
+          toast.success("Admin login successful!");
+          router.push("/admin/dashboard");
         } else {
           // Wrong portal! Logout immediately
           await logout();
-          toast.error("Unauthorized: This portal is for Patients only. Admins and Doctors must use their respective portals.");
+          toast.error("Unauthorized: This portal is for Admins only.");
         }
       } else {
         await logout();
-        router.push("/");
+        toast.error("Verification failed. Please try again.");
       }
     } catch (error) {
-      console.error("[PATIENT LOGIN] Error:", error);
+      console.error("[ADMIN LOGIN] Error:", error);
       toast.error(error instanceof Error ? error.message : "Login failed. Please try again.");
     } finally {
       setIsSubmitting(false);
@@ -60,31 +60,31 @@ export default function PatientLoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-50 to-emerald-100 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
       {/* Decorative background elements */}
-      <div className="absolute top-0 left-0 w-96 h-96 bg-green-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse"></div>
-      <div className="absolute bottom-0 right-0 w-96 h-96 bg-emerald-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse"></div>
+      <div className="absolute top-0 left-0 w-96 h-96 bg-blue-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse"></div>
+      <div className="absolute bottom-0 right-0 w-96 h-96 bg-indigo-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse"></div>
 
       <Card className="w-full max-w-md shadow-2xl relative z-10 border-0">
         <CardHeader className="space-y-2 text-center pb-8">
           <Link
             href="/"
-            className="flex items-center text-green-600 hover:text-green-700 text-sm font-medium mb-4 transition-colors justify-center"
+            className="flex items-center text-blue-600 hover:text-blue-700 text-sm font-medium mb-4 transition-colors justify-center"
           >
             <ArrowLeft className="w-4 h-4 mr-1" />
             Back to Home
           </Link>
 
           <div className="flex justify-center mb-4">
-            <div className="bg-gradient-to-br from-green-500 to-emerald-600 p-3 rounded-lg">
-              <Heart className="w-8 h-8 text-white" />
+            <div className="bg-gradient-to-br from-blue-500 to-indigo-600 p-3 rounded-lg">
+              <Settings className="w-8 h-8 text-white" />
             </div>
           </div>
           <CardTitle className="text-3xl font-bold text-gray-900">
-            Patient Portal
+            Admin Portal
           </CardTitle>
           <CardDescription className="text-gray-600">
-            Health & Appointment Management
+            Clinic Management System
           </CardDescription>
         </CardHeader>
 
@@ -104,7 +104,7 @@ export default function PatientLoginPage() {
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   disabled={isLoading || isSubmitting}
-                  className="pl-10 h-10 border-gray-300 focus:border-green-500 focus:ring-green-500"
+                  className="pl-10 h-10 border-gray-300 focus:border-blue-500 focus:ring-blue-500"
                   autoComplete="username"
                 />
               </div>
@@ -124,7 +124,7 @@ export default function PatientLoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   disabled={isLoading || isSubmitting}
-                  className="pl-10 pr-10 h-10 border-gray-300 focus:border-green-500 focus:ring-green-500"
+                  className="pl-10 pr-10 h-10 border-gray-300 focus:border-blue-500 focus:ring-blue-500"
                   autoComplete="current-password"
                 />
                 <button
@@ -151,7 +151,7 @@ export default function PatientLoginPage() {
             <Button
               type="submit"
               disabled={isLoading || isSubmitting}
-              className="w-full h-10 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-medium rounded-lg transition-all duration-200 mt-6"
+              className="w-full h-10 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-medium rounded-lg transition-all duration-200 mt-6"
             >
               {isSubmitting ? (
                 <>
@@ -175,10 +175,10 @@ export default function PatientLoginPage() {
               <p className="text-xs font-semibold text-gray-700">Other Portals:</p>
               <div className="flex gap-2 flex-wrap">
                 <Link
-                  href="/admin/login"
-                  className="flex-1 text-center text-xs text-blue-600 hover:text-blue-700 font-medium py-2 rounded hover:bg-blue-50 transition-colors"
+                  href="/login"
+                  className="flex-1 text-center text-xs text-green-600 hover:text-green-700 font-medium py-2 rounded hover:bg-green-50 transition-colors"
                 >
-                  Admin Login
+                  Patient Login
                 </Link>
                 <Link
                   href="/doctor/login"
@@ -190,11 +190,11 @@ export default function PatientLoginPage() {
             </div>
 
             {/* Demo Credentials */}
-            <div className="mt-6 p-4 bg-green-50 rounded-lg border border-green-200">
-              <p className="text-xs font-semibold text-green-900 mb-2">Demo Credentials:</p>
-              <p className="text-xs text-green-800 font-mono">
-                <strong>Username:</strong> [Your Name]<br />
-                <strong>Password:</strong> patient123
+            <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+              <p className="text-xs font-semibold text-blue-900 mb-2">Demo Credentials:</p>
+              <p className="text-xs text-blue-800 font-mono">
+                <strong>Username:</strong> admin<br />
+                <strong>Password:</strong> password
               </p>
             </div>
 
