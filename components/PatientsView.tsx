@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useImperativeHandle } from "react";
+import React, { useState, useEffect, useRef, useImperativeHandle, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
@@ -72,7 +72,11 @@ interface Patient {
   dentalCharts?: { date: string; data: string; isEmpty: boolean }[];
 }
 
-export function PatientsView() {
+interface PatientsViewProps {
+  doctorFilter?: string; // When set, only show patients this doctor has seen
+}
+
+export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
@@ -96,10 +100,48 @@ export function PatientsView() {
   const patientDetailsRef = useRef<{ save: () => Promise<boolean> } | null>(null);
   const itemsPerPage = 10;
   const { openScheduleModal, openAddPatientModal, refreshPatients, refreshTrigger, appointments, openEditModal } = useAppointmentModal();
+
+  // State to hold doctor's appointments (for filtering patients by doctor)
+  const [doctorAppointments, setDoctorAppointments] = useState<Appointment[]>([]);
+
+  // Fetch doctor's appointments when doctorFilter is set
+  useEffect(() => {
+    if (!doctorFilter) {
+      setDoctorAppointments([]);
+      return;
+    }
+
+    const fetchDoctorAppointments = async () => {
+      try {
+        const response = await fetch(`http://localhost:3001/api/appointments?doctor=${encodeURIComponent(doctorFilter)}`);
+        const result = await response.json();
+        if (result.success && result.data) {
+          setDoctorAppointments(result.data);
+        }
+      } catch (error) {
+        console.error("Error fetching doctor appointments:", error);
+        setDoctorAppointments([]);
+      }
+    };
+
+    fetchDoctorAppointments();
+  }, [doctorFilter, refreshTrigger]);
+
+  // Get unique patient IDs from doctor's appointments
+  const doctorPatientIds = useMemo(() => {
+    if (!doctorFilter || doctorAppointments.length === 0) return null;
+    const ids = new Set<string>();
+    doctorAppointments.forEach(apt => {
+      if (apt.patientId) ids.add(apt.patientId);
+    });
+    return ids;
+  }, [doctorFilter, doctorAppointments]);
+
   // Fetch patients when page, search, status filter, or refresh trigger changes
   useEffect(() => {
     fetchPatients(currentPage);
-  }, [currentPage, searchTerm, statusFilter, refreshTrigger, appointments]);
+  }, [currentPage, searchTerm, statusFilter, refreshTrigger, appointments, doctorPatientIds]);
+
   const fetchPatients = async (page = 1) => {
     // Add a timeout so the fetch can't hang indefinitely in the client
     const controller = new AbortController();
@@ -108,6 +150,20 @@ export function PatientsView() {
 
     try {
       setIsLoading(true);
+
+      // If doctor filter is set but we don't have patient IDs yet, show loading
+      if (doctorFilter && doctorPatientIds === null) {
+        return;
+      }
+
+      // If doctor filter is set and no patients found, show empty
+      if (doctorFilter && doctorPatientIds && doctorPatientIds.size === 0) {
+        setPaginatedPatients([]);
+        setTotalPages(1);
+        setTotalFiltered(0);
+        return;
+      }
+
       const q = encodeURIComponent(searchTerm || "");
       const statusParam = statusFilter || "all";
       const res = await fetch(
@@ -118,13 +174,21 @@ export function PatientsView() {
       const result = await res.json();
 
       if (result && result.success) {
-        const data = result.data || [];
+        let data = result.data || [];
         const meta = result.meta || { total: 0, page, limit: itemsPerPage, totalPages: 1 };
+
+        // Filter by doctor's patients if doctorFilter is set
+        if (doctorFilter && doctorPatientIds) {
+          data = data.filter((patient: Patient) => doctorPatientIds.has(patient.id || ''));
+        }
 
         const todayStr = formatDateToYYYYMMDD(new Date());
 
+        // Use doctor appointments if available, otherwise use shared appointments
+        const appointmentsToUse = doctorFilter ? doctorAppointments : appointments;
+
         const transformedPatients = data.map((patient: Patient) => {
-          const patientAppointments = appointments.filter(
+          const patientAppointments = appointmentsToUse.filter(
             (apt: Appointment) => apt.patientId === patient.id || apt.patientName === `${patient.firstName} ${patient.lastName}`
           );
 
@@ -170,9 +234,17 @@ export function PatientsView() {
           };
         });
 
-        setPaginatedPatients(transformedPatients);
-        setTotalPages(meta.totalPages || 1);
-        setTotalFiltered(meta.total || 0);
+        // Update pagination for filtered results
+        if (doctorFilter && doctorPatientIds) {
+          const filteredTotal = transformedPatients.length;
+          setPaginatedPatients(transformedPatients);
+          setTotalPages(1); // Client-side filtering, so single page
+          setTotalFiltered(filteredTotal);
+        } else {
+          setPaginatedPatients(transformedPatients);
+          setTotalPages(meta.totalPages || 1);
+          setTotalFiltered(meta.total || 0);
+        }
       } else {
         setPaginatedPatients([]);
         setTotalPages(1);
@@ -200,11 +272,6 @@ export function PatientsView() {
       setIsLoading(false);
     }
   };
-
-    // Fetch patients when page, search, status filter, or refresh trigger changes
-  useEffect(() => {
-    fetchPatients(currentPage);
-  }, [currentPage, searchTerm, statusFilter, refreshTrigger, appointments]);
 
   const getStatusBadge = (status: string | undefined) => {
     switch (status) {
@@ -316,13 +383,21 @@ export function PatientsView() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Patients</h1>
-          <p className="text-muted-foreground">Manage patient information and appointments</p>
+          <h1 className="text-2xl font-semibold text-gray-900">
+            {doctorFilter ? "My Patients" : "Patients"}
+          </h1>
+          <p className="text-muted-foreground">
+            {doctorFilter
+              ? "View patients you have treated"
+              : "Manage patient information and appointments"}
+          </p>
         </div>
-        <Button variant="brand" onClick={handleAddPatient}>
-          <Plus className="h-4 w-4 mr-2" />
-          Add New Patient
-        </Button>
+        {!doctorFilter && (
+          <Button variant="brand" onClick={handleAddPatient}>
+            <Plus className="h-4 w-4 mr-2" />
+            Add New Patient
+          </Button>
+        )}
       </div>
 
       {/* Search and Filters */}
@@ -527,6 +602,7 @@ export function PatientsView() {
               }}
               isModified={isPatientDetailsModified}
               setIsModified={setIsPatientDetailsModified}
+              doctorFilter={doctorFilter}
             />
           )}
         </DialogContent>
@@ -634,12 +710,14 @@ const PatientDetails = React.forwardRef<{
   onDeletePatient: (p: Patient) => void;
   isModified: boolean;
   setIsModified: (isModified: boolean) => void;
+  doctorFilter?: string;
 }>(({
   patient,
   onClose,
   onDeletePatient,
   isModified,
-  setIsModified
+  setIsModified,
+  doctorFilter
 }, ref) => {
   const { openEditModal, refreshPatients, appointments } = useAppointmentModal();
   const { openPaymentModal, openEditPaymentModal } = usePaymentModal();
@@ -850,14 +928,43 @@ const PatientDetails = React.forwardRef<{
   }, [patient]);
 
   useEffect(() => {
-    const filtered = appointments.filter((apt: Appointment) =>
-      apt.patientId === patient.id ||
-      apt.patientName === `${patient.firstName} ${patient.lastName}` ||
-      apt.patientName === patient.name
-    ).sort((a: Appointment, b: Appointment) => parseBackendDateToLocal(b.date).getTime() - parseBackendDateToLocal(a.date).getTime());
+    // If doctorFilter is set, fetch appointments directly from API for this patient
+    // This ensures we get the doctor's appointments even if shared state is empty
+    if (doctorFilter) {
+      const fetchPatientAppointments = async () => {
+        try {
+          const patientName = patient.name || `${patient.firstName} ${patient.lastName}`;
+          const response = await fetch(
+            `http://localhost:3001/api/appointments?doctor=${encodeURIComponent(doctorFilter)}`
+          );
+          const result = await response.json();
+          if (result.success && result.data) {
+            // Filter to only this patient's appointments
+            const filtered = result.data.filter((apt: Appointment) =>
+              apt.patientId === patient.id ||
+              apt.patientName === patientName
+            ).sort((a: Appointment, b: Appointment) =>
+              parseBackendDateToLocal(b.date).getTime() - parseBackendDateToLocal(a.date).getTime()
+            );
+            setPatientAppointments(filtered);
+          }
+        } catch (error) {
+          console.error("Error fetching patient appointments:", error);
+          setPatientAppointments([]);
+        }
+      };
+      fetchPatientAppointments();
+    } else {
+      // Admin view - use shared appointments state
+      const filtered = appointments.filter((apt: Appointment) =>
+        apt.patientId === patient.id ||
+        apt.patientName === `${patient.firstName} ${patient.lastName}` ||
+        apt.patientName === patient.name
+      ).sort((a: Appointment, b: Appointment) => parseBackendDateToLocal(b.date).getTime() - parseBackendDateToLocal(a.date).getTime());
 
-    setPatientAppointments(filtered);
-  }, [appointments, patient]);
+      setPatientAppointments(filtered);
+    }
+  }, [appointments, patient, doctorFilter]);
 
     // Map patientAppointments into local appointment history shape used for payments
     useEffect(() => {
@@ -1252,16 +1359,19 @@ const PatientDetails = React.forwardRef<{
                                 <SelectItem value="overdue">Overdue</SelectItem>
                             </SelectContent>
                         </Select>
-                        <Select value={historyDoctorFilter} onValueChange={setHistoryDoctorFilter}>
-                            <SelectTrigger className="w-[180px]">
-                                <SelectValue placeholder="Filter by doctor" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {uniqueDoctors.map(doctor => (
-                                    <SelectItem key={doctor} value={doctor}>{doctor === 'all' ? 'All Doctors' : doctor}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                        {/* Hide doctor filter when viewing as a doctor - they only see their own appointments */}
+                        {!doctorFilter && (
+                          <Select value={historyDoctorFilter} onValueChange={setHistoryDoctorFilter}>
+                              <SelectTrigger className="w-[180px]">
+                                  <SelectValue placeholder="Filter by doctor" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                  {uniqueDoctors.map(doctor => (
+                                      <SelectItem key={doctor} value={doctor}>{doctor === 'all' ? 'All Doctors' : doctor}</SelectItem>
+                                  ))}
+                              </SelectContent>
+                          </Select>
+                        )}
                         <Select value={historyProcedureFilter} onValueChange={setHistoryProcedureFilter}>
                             <SelectTrigger className="w-[180px]">
                                 <SelectValue placeholder="Filter by procedure" />
@@ -1438,16 +1548,19 @@ const PatientDetails = React.forwardRef<{
                             ))}
                         </SelectContent>
                     </Select>
-                    <Select value={paymentDoctorFilter} onValueChange={setPaymentDoctorFilter}>
-                        <SelectTrigger className="w-[180px]">
-                            <SelectValue placeholder="Filter by doctor" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {uniquePaymentDoctors.map(doctor => (
-                                <SelectItem key={doctor} value={doctor}>{doctor === 'all' ? 'All Doctors' : doctor}</SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
+                    {/* Hide doctor filter when viewing as a doctor */}
+                    {!doctorFilter && (
+                      <Select value={paymentDoctorFilter} onValueChange={setPaymentDoctorFilter}>
+                          <SelectTrigger className="w-[180px]">
+                              <SelectValue placeholder="Filter by doctor" />
+                          </SelectTrigger>
+                          <SelectContent>
+                              {uniquePaymentDoctors.map(doctor => (
+                                  <SelectItem key={doctor} value={doctor}>{doctor === 'all' ? 'All Doctors' : doctor}</SelectItem>
+                              ))}
+                          </SelectContent>
+                      </Select>
+                    )}
                     <Select value={paymentProcedureFilter} onValueChange={setPaymentProcedureFilter}>
                         <SelectTrigger className="w-[180px]">
                             <SelectValue placeholder="Filter by procedure" />
