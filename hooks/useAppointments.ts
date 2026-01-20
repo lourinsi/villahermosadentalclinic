@@ -27,6 +27,7 @@ export interface AppointmentFilters {
   endDate?: string;
   search?: string;
   doctor?: string;
+  patientId?: string;
   type?: string;
   status?: string;
 }
@@ -45,6 +46,7 @@ export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFi
         if (filters?.endDate) queryParams.append("endDate", filters.endDate);
         if (filters?.search) queryParams.append("search", filters.search);
         if (filters?.doctor) queryParams.append("doctor", filters.doctor);
+        if (filters?.patientId) queryParams.append("patientId", filters.patientId);
         if (filters?.type) queryParams.append("type", filters.type);
         if (filters?.status) queryParams.append("status", filters.status);
 

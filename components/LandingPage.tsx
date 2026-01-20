@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,17 +18,20 @@ import {
   Heart,
   Clock,
   Shield,
+  Calendar,
 } from "lucide-react";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
+import { PublicBookingModal } from "@/components/PublicBookingModal";
 
 export default function LandingPage() {
   const router = useRouter();
+  const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
 
   return (
     <div className="min-h-screen flex flex-col bg-white">
       {/* Header */}
-      <Header />
+      <Header onBookAppointment={() => setIsBookingModalOpen(true)} />
 
       {/* Hero Section */}
       <section className="bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 py-20 px-4 md:px-8">
@@ -48,6 +51,13 @@ export default function LandingPage() {
               className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-6 text-lg"
             >
               Patient Login <ArrowRight className="ml-2 w-5 h-5" />
+            </Button>
+            <Button
+              onClick={() => router.push("/login")}
+              size="lg"
+              className="bg-green-600 hover:bg-green-700 text-white px-8 py-6 text-lg"
+            >
+              Register <Users className="ml-2 w-5 h-5" />
             </Button>
             <Button
               onClick={() => router.push("/admin/login")}
@@ -156,15 +166,32 @@ export default function LandingPage() {
           <p className="text-lg mb-8 opacity-90">
             Schedule your appointment today and experience excellent dental care
           </p>
-          <Button
-            onClick={() => router.push("/login")}
-            size="lg"
-            className="bg-white text-blue-600 hover:bg-gray-100 px-8 py-6 text-lg font-semibold"
-          >
-            Book an Appointment <ArrowRight className="ml-2 w-5 h-5" />
-          </Button>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <Button
+              onClick={() => setIsBookingModalOpen(true)}
+              size="lg"
+              className="bg-white text-blue-600 hover:bg-gray-100 px-8 py-6 text-lg font-semibold"
+            >
+              <Calendar className="mr-2 w-5 h-5" />
+              Book Now
+            </Button>
+            <Button
+              onClick={() => router.push("/book")}
+              size="lg"
+              variant="outline"
+              className="border-white text-white hover:bg-white/20 px-8 py-6 text-lg font-semibold"
+            >
+              Detailed Booking <ArrowRight className="ml-2 w-5 h-5" />
+            </Button>
+          </div>
         </div>
       </section>
+
+      {/* Booking Modal */}
+      <PublicBookingModal 
+        isOpen={isBookingModalOpen} 
+        onClose={() => setIsBookingModalOpen(false)} 
+      />
 
       {/* Footer */}
       <Footer />

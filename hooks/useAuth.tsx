@@ -5,6 +5,8 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 interface User {
   username: string;
   role: string;
+  patientId?: string;
+  staffId?: string;
 }
 
 interface AuthContextType {
@@ -45,6 +47,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setUser({
           username: data.user.username,
           role: data.user.role,
+          patientId: data.user.patientId,
+          staffId: data.user.staffId,
         });
       } else {
         setIsAuthenticated(false);
@@ -81,6 +85,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setUser({
         username: data.user.username,
         role: data.user.role,
+        patientId: data.user.patientId,
+        staffId: data.user.staffId,
       });
 
       // Store token in localStorage for client-side use (optional)
