@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { DateRange } from "react-day-picker";
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { Card, CardContent } from "./ui/card";
 import { Button } from "./ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import {
@@ -11,20 +11,30 @@ import {
   Calendar as CalendarIcon,
   CalendarRange,
   Clock,
-  Users as UsersIcon,
+  Stethoscope,
+  Trash2,
+  AlertCircle,
+  CreditCard,
+  Filter,
+  Users,
+  DollarSign
 } from "lucide-react";
-import { useAppointments, Appointment } from "../hooks/useAppointments";
+import { Appointment } from "../hooks/useAppointments";
+import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { Badge } from "./ui/badge";
-import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
+import { formatTimeTo12h, TIME_SLOTS } from "../lib/time-slots";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { Calendar } from "./ui/calendar";
 import { Label } from "./ui/label";
-import { APPOINTMENT_TYPES, getAppointmentTypeName } from "../lib/appointment-types";
+import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
 import { useAuth } from "@/hooks/useAuth.tsx";
+import { Plus } from "lucide-react";
+import { toast } from "sonner";
 
-type ViewMode = "month" | "week" | "day";
+type ViewMode = "month" | "week" | "day" | "custom";
 
 const appointmentColors: Record<string, { bg: string; text: string; border: string }> = {
   "Routine Cleaning": { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" },
@@ -38,17 +48,63 @@ const appointmentColors: Record<string, { bg: string; text: string; border: stri
 
 export function PatientCalendarView() {
   const { user } = useAuth();
-  const patientId = user?.patientId;
+  const parentId = user?.patientId;
 
   const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [isLoadingView, setIsLoadingView] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<string>("scheduled");
 
-  const { appointments, isLoading } = useAppointments(undefined, { patientId });
+  const { openPatientBookingModal, appointments, isLoading, refreshAppointments, deleteAppointment, updateAppointment } = useAppointmentModal();
+  const { openPatientPaymentModal } = usePaymentModal();
 
-  const getViewRange = (date: Date) => {
+  const handleDelete = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this pending appointment?")) return;
+    
+    setIsProcessing(true);
+    try {
+      await deleteAppointment(id);
+      toast.success("Appointment deleted successfully");
+      setSelectedAppointment(null);
+      refreshAppointments(filters);
+    } catch (error) {
+      toast.error("Failed to delete appointment");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleRequestCancellation = async (appointment: Appointment) => {
+    if (!confirm("Would you like to request a cancellation for this confirmed appointment? The doctor will be notified.")) return;
+
+    setIsProcessing(true);
+    try {
+      // For now, we'll update the notes or status to indicate a cancellation request
+      // Ideally, there should be a 'cancellation_requested' status or a notification system
+      await updateAppointment(appointment.id, { 
+        notes: appointment.notes + "\n[CANCELLATION REQUESTED BY PATIENT]",
+        status: "tentative" // Using tentative to indicate it's being reviewed
+      });
+      toast.success("Cancellation request sent to the doctor.");
+      setSelectedAppointment(null);
+      refreshAppointments(filters);
+    } catch (error) {
+      toast.error("Failed to send cancellation request");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handlePay = (appointment: Appointment) => {
+    openPatientPaymentModal(appointments, appointment.id);
+    setSelectedAppointment(null);
+  };
+  
+  const getViewRange = useCallback((date: Date) => {
     const start = new Date(date);
     const end = new Date(date);
     start.setHours(0, 0, 0, 0);
@@ -75,9 +131,50 @@ export function PatientCalendarView() {
       monthEnd.setHours(23, 59, 59, 999);
       return { start: monthStart, end: monthEnd };
     }
-    
+
+    if (viewMode === 'custom' && dateRange?.from && dateRange?.to) {
+      const start = new Date(dateRange.from);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(dateRange.to);
+      end.setHours(23, 59, 59, 999);
+      return { start, end };
+    }
+
     return { start, end };
-  };
+  }, [viewMode, dateRange]);
+
+  const filters = useMemo(() => {
+    const { start, end } = getViewRange(selectedDate);
+    
+    let fetchStartStr: string | undefined;
+    let fetchEndStr: string | undefined;
+
+    if (viewMode === 'custom' && dateRange?.from && dateRange?.to) {
+      fetchStartStr = formatDateToYYYYMMDD(dateRange.from);
+      fetchEndStr = formatDateToYYYYMMDD(dateRange.to);
+    } else {
+      // For day, week, month, use the range calculated by getViewRange
+      // Actually, Admin portal uses a monthly range for day/week/month to avoid too many fetches
+      const monthStart = new Date(start.getFullYear(), start.getMonth(), 1);
+      const monthEnd = new Date(end.getFullYear(), end.getMonth() + 1, 0);
+      monthEnd.setHours(23, 59, 59, 999);
+      fetchStartStr = formatDateToYYYYMMDD(monthStart);
+      fetchEndStr = formatDateToYYYYMMDD(monthEnd);
+    }
+
+    return { 
+      parentId,
+      status: statusFilter === "all" ? undefined : statusFilter,
+      startDate: fetchStartStr,
+      endDate: fetchEndStr
+    };
+  }, [parentId, statusFilter, viewMode, selectedDate, dateRange, getViewRange]);
+
+  useEffect(() => {
+    if (parentId) {
+      refreshAppointments(filters);
+    }
+  }, [filters, refreshAppointments]);
 
   useEffect(() => {
     setIsLoadingView(true);
@@ -86,7 +183,6 @@ export function PatientCalendarView() {
   }, [viewMode, selectedDate, appointments]);
 
 
-  const timeSlots = TIME_SLOTS;
   const formatTime = formatTimeTo12h;
 
   const formatDateLabel = (date: Date) => {
@@ -100,8 +196,13 @@ export function PatientCalendarView() {
       return `${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
     } else if (viewMode === "month") {
       return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    } else if (viewMode === "custom") {
+      if (dateRange?.from && dateRange?.to) {
+        return `${dateRange.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${dateRange.to.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+      }
+      return "Select Range";
     }
-    return "Select Range";
+    return "Select Date";
   };
 
   const navigateDate = (direction: 'prev' | 'next') => {
@@ -112,6 +213,18 @@ export function PatientCalendarView() {
       newDate.setDate(selectedDate.getDate() + (direction === 'next' ? 7 : -7));
     } else if (viewMode === 'month') {
       newDate.setMonth(selectedDate.getMonth() + (direction === 'next' ? 1 : -1));
+    } else if (viewMode === 'custom' && dateRange?.from && dateRange?.to) {
+      const diffTime = Math.abs(dateRange.to.getTime() - dateRange.from.getTime());
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+      const shift = direction === 'next' ? diffDays : -diffDays;
+      
+      const newFrom = new Date(dateRange.from);
+      newFrom.setDate(newFrom.getDate() + shift);
+      const newTo = new Date(dateRange.to);
+      newTo.setDate(newTo.getDate() + shift);
+      
+      setDateRange({ from: newFrom, to: newTo });
+      return;
     }
     setSelectedDate(newDate);
   };
@@ -128,6 +241,84 @@ export function PatientCalendarView() {
     return days;
   };
 
+  const timeToMinutes = (time: string): number => {
+    const [hours, minutes] = time.split(':').map(Number);
+    return hours * 60 + minutes;
+  };
+
+  const appointmentsOverlap = (apt1: Appointment, apt2: Appointment): boolean => {
+    const start1 = timeToMinutes(apt1.time);
+    const end1 = start1 + (apt1.duration || 30);
+    const start2 = timeToMinutes(apt2.time);
+    const end2 = start2 + (apt2.duration || 30);
+    
+    return start1 < end2 && start2 < end1;
+  };
+
+  const organizeAppointmentsIntoColumns = (appointments: Appointment[]) => {
+    if (appointments.length === 0) return { columns: [], appointmentColumns: new Map<string, number>(), maxOverlappingAt: new Map<string, number>() };
+    
+    const sorted = [...appointments].sort((a, b) => {
+      const timeCompare = timeToMinutes(a.time) - timeToMinutes(b.time);
+      if (timeCompare !== 0) return timeCompare;
+      return (b.duration || 30) - (a.duration || 30);
+    });
+
+    const columns: Appointment[][] = [];
+    const appointmentColumns = new Map<string, number>();
+    
+    sorted.forEach((apt: Appointment) => {
+      let columnIndex = 0;
+      while (columnIndex < columns.length) {
+        const hasOverlap = columns[columnIndex].some(existingApt => 
+          appointmentsOverlap(apt, existingApt)
+        );
+        if (!hasOverlap) break;
+        columnIndex++;
+      }
+      
+      if (columnIndex === columns.length) {
+        columns.push([]);
+      }
+      
+      columns[columnIndex].push(apt);
+      appointmentColumns.set(apt.id, columnIndex);
+    });
+
+    const maxOverlappingAt = new Map<string, number>();
+    const clusters: Appointment[][] = [];
+    sorted.forEach((apt: Appointment) => {
+      let addedToCluster = false;
+      for (const cluster of clusters) {
+        if (cluster.some(c => appointmentsOverlap(apt, c))) {
+          cluster.push(apt);
+          addedToCluster = true;
+          break;
+        }
+      }
+      if (!addedToCluster) {
+        clusters.push([apt]);
+      }
+    });
+
+    clusters.forEach(cluster => {
+      const maxCol = Math.max(...cluster.map(a => appointmentColumns.get(a.id) ?? 0)) + 1;
+      cluster.forEach(a => {
+        maxOverlappingAt.set(a.id, maxCol);
+      });
+    });
+
+    return { columns, appointmentColumns, maxOverlappingAt };
+  };
+
+  const calculateAppointmentStyle = (duration: number = 60) => {
+    const slotHeight = 80;
+    const slotsOccupied = duration / 30;
+    return {
+      height: `${slotHeight * slotsOccupied - 4}px`
+    };
+  };
+
   const getAppointmentsForDate = (date: Date) => {
     const dateStr = formatDateToYYYYMMDD(date);
     return appointments.filter(apt => apt.date === dateStr);
@@ -135,6 +326,269 @@ export function PatientCalendarView() {
 
   const getColorForType = (type: string) => {
     return appointmentColors[type] || appointmentColors["Other"];
+  };
+
+  const renderDayView = () => {
+    const dayAppointments = getAppointmentsForDate(selectedDate);
+    const { appointmentColumns, maxOverlappingAt } = organizeAppointmentsIntoColumns(dayAppointments);
+
+    const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
+    dayAppointments.forEach((apt: Appointment) => {
+      const startTimeMinutes = timeToMinutes(apt.time);
+      const duration = apt.duration || 30;
+      const endTimeMinutes = startTimeMinutes + duration;
+
+      for (let m = startTimeMinutes; m < endTimeMinutes; m++) {
+        if (m >= 0 && m < isMinuteOccupied.length) {
+          isMinuteOccupied[m] = true;
+        }
+      }
+    });
+
+    const isSlotCovered = (timeSlot: string): boolean => {
+      const slotStartMinutes = timeToMinutes(timeSlot);
+      for (let m = slotStartMinutes; m < slotStartMinutes + 30; m++) {
+        if (isMinuteOccupied[m]) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    return (
+      <div className="space-y-0 relative bg-white">
+        {TIME_SLOTS.map((timeSlot) => {
+          const appointmentsStartingAtSlot = dayAppointments.filter((apt: Appointment) => apt.time === timeSlot);
+          const currentSlotIsCovered = isSlotCovered(timeSlot);
+          const isPast = new Date(`${formatDateToYYYYMMDD(selectedDate)}T${timeSlot}`) < new Date();
+
+          return (
+            <div key={timeSlot} className="flex items-start min-h-[80px] border-b border-gray-100 relative group">
+              {!currentSlotIsCovered && !isPast && (
+                <div
+                  className="absolute inset-y-2 left-32 right-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-10 hover:bg-violet-50/50 rounded-xl border-2 border-dashed border-transparent hover:border-violet-200/50 group/plus"
+                  onClick={() => openPatientBookingModal(selectedDate, timeSlot)}
+                >
+                  <Plus className="h-6 w-6 text-violet-300 transition-colors group-hover/plus:text-violet-600" />
+                </div>
+              )}
+
+              <div className="w-28 pl-4 pt-2 text-sm text-muted-foreground font-medium sticky left-0 bg-white z-10 pointer-events-none">
+                {formatTime(timeSlot)}
+              </div>
+              
+              <div className="flex-1 relative min-h-[80px]">
+                {appointmentsStartingAtSlot.map((appointment: Appointment) => {
+                  const columnIndex = appointmentColumns.get(appointment.id) ?? 0;
+                  const totalColumns = maxOverlappingAt.get(appointment.id) ?? 1;
+                  const typeName = getAppointmentTypeName(appointment.type, appointment.customType);
+                  const colors = getColorForType(typeName);
+                  
+                  const width = `${100 / totalColumns}%`;
+                  const left = `${(columnIndex * 100) / totalColumns}%`;
+                  
+                  return (
+                    <div 
+                      key={appointment.id}
+                      className={`absolute top-0 ${colors?.bg} ${colors?.text} ${colors?.border} border-l-4 rounded-lg p-3 shadow-sm hover:shadow-md transition-all cursor-pointer z-20 overflow-hidden`}
+                      style={{
+                        ...calculateAppointmentStyle(appointment.duration),
+                        width: `calc(${width} - 4px)`,
+                        left: `calc(${left} + 2px)`,
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedAppointment(appointment);
+                      }}
+                    >
+                      <div className="flex flex-col h-full">
+                        <div className="font-semibold text-sm truncate pr-2">
+                          {appointment.patientName}
+                        </div>
+                        <div className="text-xs opacity-90 truncate">
+                          {typeName} • {appointment.duration || 30}min
+                        </div>
+                        <div className="text-xs opacity-80 mt-1 truncate flex items-center gap-1">
+                          <Stethoscope className="h-3 w-3" /> Dr. {appointment.doctor}
+                        </div>
+                        <Badge variant="outline" className="text-[10px] bg-white/50 backdrop-blur-sm mt-auto self-start">
+                          {appointment.status}
+                        </Badge>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderWeekView = () => {
+    const weekDays = getWeekDays(selectedDate);
+    const dayLayouts = weekDays.map(day => {
+      const dayAppointments = getAppointmentsForDate(day);
+      const layout = organizeAppointmentsIntoColumns(dayAppointments);
+      
+      const isMinuteOccupied = new Array(24 * 60).fill(false);
+      dayAppointments.forEach(apt => {
+        const startTimeMinutes = timeToMinutes(apt.time);
+        const duration = apt.duration || 30;
+        const endTimeMinutes = startTimeMinutes + duration;
+        for (let m = startTimeMinutes; m < endTimeMinutes; m++) {
+            if (m >= 0 && m < isMinuteOccupied.length) isMinuteOccupied[m] = true;
+        }
+      });
+
+      return { day, appointments: dayAppointments, layout, isMinuteOccupied };
+    });
+    
+    return (
+      <div className="overflow-x-auto">
+        <div className="min-w-[1000px]">
+          <div className="flex border-b-2 border-gray-200 sticky top-0 bg-white z-10">
+            <div className="w-20 flex-shrink-0"></div>
+            {weekDays.map((day, idx) => (
+              <div key={idx} className="flex-1 text-center py-3 border-l border-gray-100">
+                <div className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">
+                  {day.toLocaleDateString('en-US', { weekday: 'short' })}
+                </div>
+                <div className={`text-lg font-bold mt-1 ${
+                  day.toDateString() === new Date().toDateString() 
+                    ? 'text-violet-600' 
+                    : 'text-gray-900'
+                }`}>
+                  {day.getDate()}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="relative">
+            {TIME_SLOTS.map((timeSlot) => (
+              <div key={timeSlot} className="flex min-h-[80px] border-b border-gray-50">
+                <div className="w-20 flex-shrink-0 pt-2 pr-4 text-right text-sm font-medium text-muted-foreground sticky left-0 bg-white z-10">
+                  {formatTime(timeSlot)}
+                </div>
+                {weekDays.map((day, idx) => {
+                  const { layout, isMinuteOccupied, appointments } = dayLayouts[idx];
+                  const appointmentsForSlot = appointments.filter(apt => apt.time === timeSlot);
+                  const { appointmentColumns, maxOverlappingAt } = layout;
+
+                  const slotStartMinutes = timeToMinutes(timeSlot);
+                  let currentSlotIsCovered = false;
+                  for (let m = slotStartMinutes; m < slotStartMinutes + 30; m++) {
+                      if (isMinuteOccupied[m]) {
+                          currentSlotIsCovered = true;
+                          break;
+                      }
+                  }
+                  
+                  return (
+                    <div 
+                      key={idx} 
+                      className="flex-1 border-l border-gray-100 relative min-h-[80px] group"
+                    >
+                        {!currentSlotIsCovered && (
+                            <div
+                            className="absolute inset-1 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-10 hover:bg-violet-50/50 rounded border border-dashed border-transparent hover:border-violet-200/50"
+                            onClick={() => openPatientBookingModal(day, timeSlot)}
+                            >
+                            <Plus className="h-5 w-5 text-violet-300" />
+                            </div>
+                        )}
+
+                      <div className="relative w-full h-full">
+                        {appointmentsForSlot.map((appointment: Appointment) => {
+                          const columnIndex = appointmentColumns.get(appointment.id) ?? 0;
+                          const totalColumns = maxOverlappingAt.get(appointment.id) ?? 1;
+                          const typeName = getAppointmentTypeName(appointment.type, appointment.customType);
+                          const colors = getColorForType(typeName);
+                          
+                          const width = `${100 / totalColumns}%`;
+                          const left = `${(columnIndex * 100) / totalColumns}%`;
+
+                          return (
+                            <div 
+                              key={appointment.id}
+                              className={`absolute top-0 ${colors?.bg} ${colors?.text} ${colors?.border} border-l-4 rounded-lg p-2 shadow-sm hover:shadow-md transition-all cursor-pointer z-20 overflow-hidden text-xs`}
+                              style={{
+                                ...calculateAppointmentStyle(appointment.duration),
+                                width: `calc(${width} - 4px)`,
+                                left: `calc(${left} + 2px)`,
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedAppointment(appointment);
+                              }}
+                            >
+                              <div className="flex justify-between items-start">
+                                <div className="font-semibold truncate pr-1">{appointment.patientName}</div>
+                              </div>
+                              <div className="truncate opacity-90">{typeName}</div>
+                              <div className="truncate opacity-75 mt-0.5">{appointment.doctor}</div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderCustomView = () => {
+    const sortedAppointments = [...appointments].sort((a, b) => parseBackendDateToLocal(a.date).getTime() - parseBackendDateToLocal(b.date).getTime());
+    
+    return (
+      <div className="space-y-4 p-4">
+        {sortedAppointments.length === 0 ? (
+          <div className="text-center py-12 text-muted-foreground bg-gray-50 rounded-lg border-2 border-dashed">
+            <CalendarIcon className="h-12 w-12 mx-auto mb-4 opacity-20" />
+            <p>No appointments found for the selected range.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {sortedAppointments.map((apt: Appointment) => {
+              const typeName = getAppointmentTypeName(apt.type, apt.customType);
+              const colors = getColorForType(typeName);
+              return (
+                <Card key={apt.id} className="overflow-hidden hover:shadow-md transition-shadow cursor-pointer" onClick={() => { setSelectedAppointment(apt); }}>
+                  <div className={`h-1 ${colors.bg.replace('bg-', 'bg-').split(' ')[0]}`} />
+                  <CardContent className="p-4">
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="font-bold text-lg">{apt.patientName}</div>
+                      <Badge className={`${colors.bg} ${colors.text} border-none`}>{typeName}</Badge>
+                    </div>
+                    <div className="space-y-2 text-sm text-muted-foreground">
+                      <div className="flex items-center gap-2">
+                        <CalendarIcon className="h-4 w-4" />
+                        <span>{parseBackendDateToLocal(apt.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} at {apt.time}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Clock className="h-4 w-4" />
+                        <span>{apt.duration || 60} minutes</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Stethoscope className="h-4 w-4" />
+                        <span>Dr. {apt.doctor}</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
   };
 
   const renderMonthView = () => {
@@ -218,7 +672,16 @@ export function PatientCalendarView() {
 
   return (
     <div className="p-6 space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">My Appointments</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-gray-900">My Appointments</h1>
+        <Button 
+          onClick={() => openPatientBookingModal()} 
+          className="bg-blue-600 hover:bg-blue-700 text-white gap-2"
+        >
+          <Plus className="h-4 w-4" />
+          Book Appointment
+        </Button>
+      </div>
       
       <Card className="shadow-sm border-none bg-white">
         <CardContent className="p-4">
@@ -241,32 +704,80 @@ export function PatientCalendarView() {
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0 shadow-2xl border-none" align="start">
-                   <Calendar
-                      mode="single"
-                      selected={selectedDate}
-                      onSelect={(date: Date | undefined) => {
-                        if (date) {
-                          setSelectedDate(date);
-                          setShowDatePicker(false);
-                        }
-                      }}
-                      className="rounded-md border shadow-sm"
-                    />
+                  <div className="p-4 space-y-4 bg-white rounded-xl">
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase tracking-wider text-gray-400">View Mode</Label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {(["day", "week", "month", "custom"] as const).map((mode) => (
+                          <Button
+                            key={mode}
+                            variant={viewMode === mode ? "default" : "outline"}
+                            size="sm"
+                            className="h-9 capitalize font-medium"
+                            onClick={() => {
+                              setViewMode(mode);
+                              if (mode !== "custom") setShowDatePicker(false);
+                            }}
+                          >
+                            {mode}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="border-t pt-4">
+                      <Label className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3 block">
+                        {viewMode === "custom" ? "Select Date Range" : "Select Date"}
+                      </Label>
+                      {viewMode === "custom" ? (
+                        <Calendar
+                          mode="range"
+                          selected={dateRange}
+                          onSelect={(range: DateRange | undefined) => {
+                            if (dateRange?.from && dateRange?.to && range?.from && !range.to) {
+                                setDateRange({ from: range.from, to: undefined });
+                            } else {
+                                setDateRange(range);
+                            }
+                          }}
+                          className="rounded-md border shadow-sm"
+                        />
+                      ) : (
+                        <Calendar
+                          mode="single"
+                          selected={selectedDate}
+                          onSelect={(date: Date | undefined) => {
+                            if (date) {
+                              setSelectedDate(date);
+                              setShowDatePicker(false);
+                            }
+                          }}
+                          className="rounded-md border shadow-sm"
+                        />
+                      )}
+                    </div>
+                  </div>
                 </PopoverContent>
               </Popover>
             </div>
 
             <div className="flex items-center space-x-3">
-              <Select value={viewMode} onValueChange={(value) => setViewMode(value as ViewMode)}>
-                  <SelectTrigger className="w-[120px] h-10 shadow-sm">
-                    <SelectValue placeholder="View" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="month">Month</SelectItem>
-                    <SelectItem value="week">Week</SelectItem>
-                    <SelectItem value="day">Day</SelectItem>
-                  </SelectContent>
-              </Select>
+              <div className="flex items-center gap-2">
+                <Filter className="h-4 w-4 text-gray-400" />
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <SelectTrigger className="w-[140px] h-10 shadow-sm">
+                      <SelectValue placeholder="Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Statuses</SelectItem>
+                      <SelectItem value="scheduled">Scheduled</SelectItem>
+                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="confirmed">Confirmed</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                      <SelectItem value="cancelled">Cancelled</SelectItem>
+                    </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
         </CardContent>
@@ -279,23 +790,110 @@ export function PatientCalendarView() {
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-violet-600"></div>
               </div>
             ) : (
-                renderMonthView() // Simplified to just month view for now
+              viewMode === "day" ? renderDayView() : 
+              viewMode === "week" ? renderWeekView() : 
+              viewMode === "month" ? renderMonthView() : 
+              renderCustomView()
             )}
         </CardContent>
       </Card>
       
       <Dialog open={!!selectedAppointment} onOpenChange={() => setSelectedAppointment(null)}>
-        <DialogContent>
+        <DialogContent className="max-w-md">
             <DialogHeader>
                 <DialogTitle>Appointment Details</DialogTitle>
             </DialogHeader>
             {selectedAppointment && (
-                <div className="space-y-4">
-                    <div><strong>Doctor:</strong> {selectedAppointment.doctor}</div>
-                    <div><strong>Service:</strong> {getAppointmentTypeName(selectedAppointment.type, selectedAppointment.customType)}</div>
-                    <div><strong>Date:</strong> {formatDateToYYYYMMDD(parseBackendDateToLocal(selectedAppointment.date))}</div>
-                    <div><strong>Time:</strong> {formatTimeTo12h(selectedAppointment.time)}</div>
-                    <div><strong>Status:</strong> <Badge>{selectedAppointment.status}</Badge></div>
+                <div className="space-y-6">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <Label className="text-gray-500 text-xs uppercase tracking-wider">Patient</Label>
+                        <p className="font-semibold text-gray-900">{selectedAppointment.patientName}</p>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-gray-500 text-xs uppercase tracking-wider">Doctor</Label>
+                        <p className="font-semibold text-gray-900">Dr. {selectedAppointment.doctor}</p>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-gray-500 text-xs uppercase tracking-wider">Service</Label>
+                        <p className="font-semibold text-gray-900">{getAppointmentTypeName(selectedAppointment.type, selectedAppointment.customType)}</p>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-gray-500 text-xs uppercase tracking-wider">Status</Label>
+                        <div>
+                          <Badge variant={selectedAppointment.status === 'scheduled' ? 'default' : 'secondary'}>
+                            {selectedAppointment.status.toUpperCase()}
+                          </Badge>
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-gray-500 text-xs uppercase tracking-wider">Date</Label>
+                        <div className="flex items-center gap-2 font-medium text-gray-900">
+                          <CalendarIcon className="h-4 w-4 text-violet-500" />
+                          {formatDateToYYYYMMDD(parseBackendDateToLocal(selectedAppointment.date))}
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-gray-500 text-xs uppercase tracking-wider">Time</Label>
+                        <div className="flex items-center gap-2 font-medium text-gray-900">
+                          <Clock className="h-4 w-4 text-violet-500" />
+                          {formatTimeTo12h(selectedAppointment.time)}
+                        </div>
+                      </div>
+                    </div>
+
+                    {selectedAppointment.notes && (
+                      <div className="space-y-1 border-t pt-4">
+                        <Label className="text-gray-500 text-xs uppercase tracking-wider">Notes</Label>
+                        <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-md italic">&quot;{selectedAppointment.notes}&quot;</p>
+                      </div>
+                    )}
+
+                    <DialogFooter className="flex-col sm:flex-row gap-2 pt-4 border-t">
+                      {selectedAppointment.status === 'pending' && (
+                        <Button 
+                          variant="destructive" 
+                          className="w-full gap-2" 
+                          onClick={() => handleDelete(selectedAppointment.id)}
+                          disabled={isProcessing}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Delete Appointment
+                        </Button>
+                      )}
+
+                      {(selectedAppointment.status === 'scheduled' || selectedAppointment.status === 'confirmed') && (
+                        <Button 
+                          variant="outline" 
+                          className="w-full gap-2 border-amber-200 text-amber-700 hover:bg-amber-50" 
+                          onClick={() => handleRequestCancellation(selectedAppointment)}
+                          disabled={isProcessing}
+                        >
+                          <AlertCircle className="h-4 w-4" />
+                          Request Cancellation
+                        </Button>
+                      )}
+
+                      {selectedAppointment.paymentStatus !== 'paid' && selectedAppointment.status !== 'cancelled' && (
+                        <Button 
+                          className="w-full bg-blue-600 hover:bg-blue-700 text-white gap-2" 
+                          onClick={() => handlePay(selectedAppointment)}
+                          disabled={isProcessing}
+                        >
+                          <CreditCard className="h-4 w-4" />
+                          Pay Now
+                        </Button>
+                      )}
+
+                      <Button 
+                        variant="ghost" 
+                        onClick={() => setSelectedAppointment(null)}
+                        className="w-full"
+                        disabled={isProcessing}
+                      >
+                        Close
+                      </Button>
+                    </DialogFooter>
                 </div>
             )}
         </DialogContent>

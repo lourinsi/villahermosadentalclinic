@@ -10,11 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 
 
 
-import { cn } from "../lib/utils";
 import { Calendar, Clock, User, Stethoscope, ChevronsUpDown } from "lucide-react";
-import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
-import { Command, CommandEmpty, CommandInput, CommandList, CommandItem } from "./ui/command";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { useDoctors } from "../hooks/useDoctors";
 import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
@@ -58,8 +56,14 @@ export function CreateAppointmentModal() {
     newAppointmentTime,
     addAppointment, 
     refreshPatients, 
-    refreshAppointments 
+    refreshAppointments,
+    appointments
   } = useAppointmentModal();
+  const { user } = useAuth();
+
+  const [dateAppointments, setDateAppointments] = useState<any[]>([]);
+  const [isLoadingDateAppointments, setIsLoadingDateAppointments] = useState(false);
+
   const [formData, setFormData] = useState<AppointmentFormData>({
     patientName: "",
     patientId: "",
@@ -69,7 +73,7 @@ export function CreateAppointmentModal() {
     type: -1,
     customType: "",
     price: 0,
-    doctor: "",
+    doctor: user?.role === "doctor" ? user.username : "",
     notes: "",
     status: "scheduled",
     paymentStatus: "unpaid",
@@ -151,7 +155,7 @@ export function CreateAppointmentModal() {
         type: -1,
         customType: "",
         price: 0,
-        doctor: "",
+        doctor: user?.role === "doctor" ? user.username : "",
         notes: "",
         status: "scheduled",
         paymentStatus: "unpaid",
@@ -170,6 +174,31 @@ export function CreateAppointmentModal() {
       reloadDoctors();
     }
   }, [isCreateModalOpen, newAppointmentDate, newAppointmentTime, reloadDoctors]);
+
+  // Fetch all appointments for the selected date to check for clinic-wide conflicts
+  // This bypasses view filters to ensure global conflict detection
+  useEffect(() => {
+    const fetchDateAppointments = async () => {
+      if (!formData.date || !isCreateModalOpen) {
+        setDateAppointments([]);
+        return;
+      }
+      setIsLoadingDateAppointments(true);
+      try {
+        const response = await fetch(`http://localhost:3001/api/appointments?startDate=${formData.date}&endDate=${formData.date}`);
+        const result = await response.json();
+        if (result.success) {
+          setDateAppointments(result.data || []);
+        }
+      } catch (error) {
+        console.error("Error fetching appointments for date:", error);
+      } finally {
+        setIsLoadingDateAppointments(false);
+      }
+    };
+
+    fetchDateAppointments();
+  }, [formData.date, isCreateModalOpen]);
 
   // Infinite scroll observer
   const observer = useRef<IntersectionObserver | null>(null);
@@ -205,9 +234,12 @@ export function CreateAppointmentModal() {
     }
 
     try {
-      const appointmentDateTime = new Date(`${formData.date}T${formData.time}`);
-      if (isNaN(appointmentDateTime.getTime()) || appointmentDateTime.getTime() <= Date.now()) {
-        toast.error("Cannot schedule an appointment in the past. Choose a future date/time.");
+      const selectedDate = new Date(`${formData.date}T00:00:00`);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      if (selectedDate < today) {
+        toast.error("Cannot schedule an appointment for a past date.");
         return;
       }
     } catch (err) {
@@ -276,23 +308,10 @@ export function CreateAppointmentModal() {
       closeCreateModal();
     } catch (error) {
       console.error("Error creating appointment:", error);
-      toast.error("Failed to create appointment");
+      const errorMessage = error instanceof Error ? error.message : "Failed to create appointment";
+      toast.error(errorMessage);
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  const handlePatientSelect = (value: string) => {
-    if (value === "new") {
-      setShowNewPatient(true);
-      setFormData(prev => ({ ...prev, patientId: "", patientName: "" }));
-      return;
-    }
-
-    const found = patients.find(p => p.id === value);
-    if (found) {
-      setShowNewPatient(false);
-      setFormData(prev => ({ ...prev, patientId: found.id, patientName: found.name }));
     }
   };
 
@@ -306,6 +325,27 @@ export function CreateAppointmentModal() {
     const filteredPatients = patients.filter(p => p.id !== selectedPatientId);
     return [selectedPatient, ...filteredPatients];
   }, [patients, formData.patientId]);
+
+  const isSlotBusy = useCallback((time: string, duration: number) => {
+    if (!formData.date || !dateAppointments) return false;
+    
+    const [hours, minutes] = time.split(':').map(Number);
+    const newStart = hours * 60 + minutes;
+    const newEnd = newStart + duration;
+
+    return dateAppointments.some(apt => {
+      // Basic check: not cancelled
+      if (apt.status === 'cancelled') return false;
+      
+      const [aptHours, aptMinutes] = apt.time.split(':').map(Number);
+      const aptStart = aptHours * 60 + aptMinutes;
+      const aptDuration = apt.duration || 30;
+      const aptEnd = aptStart + aptDuration;
+
+      // Overlap logic: (StartA < EndB) && (EndA > StartB)
+      return (newStart < aptEnd) && (newEnd > aptStart);
+    });
+  }, [formData.date, dateAppointments]);
 
   return (
     <Dialog open={isCreateModalOpen} onOpenChange={closeCreateModal}>
@@ -496,11 +536,14 @@ export function CreateAppointmentModal() {
                     <SelectValue placeholder="Select time" />
                   </SelectTrigger>
                   <SelectContent>
-                    {TIME_SLOTS.map((slot, index) => (
-                      <SelectItem key={slot} value={index.toString()}>
-                        {formatTimeTo12h(slot)}
-                      </SelectItem>
-                    ))}
+                    {TIME_SLOTS.map((slot, index) => {
+                      const busy = isSlotBusy(slot, formData.duration);
+                      return (
+                        <SelectItem key={slot} value={index.toString()} disabled={busy}>
+                          {formatTimeTo12h(slot)} {busy && "(Occupied)"}
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
               </div>
@@ -572,10 +615,14 @@ export function CreateAppointmentModal() {
                     <SelectValue placeholder="Select duration" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="30">30 mins</SelectItem>
-                    <SelectItem value="60">1 hour</SelectItem>
-                    <SelectItem value="90">1.5 hours</SelectItem>
-                    <SelectItem value="120">2 hours</SelectItem>
+                    {[30, 60, 90, 120].map((mins) => {
+                      const busy = formData.time ? isSlotBusy(formData.time, mins) : false;
+                      return (
+                        <SelectItem key={mins} value={String(mins)} disabled={busy}>
+                          {mins >= 60 ? `${mins / 60} hour${mins / 60 > 1 ? 's' : ''}` : `${mins} mins`} {busy && "(Conflict)"}
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
               </div>

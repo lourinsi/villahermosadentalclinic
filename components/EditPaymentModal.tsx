@@ -217,7 +217,7 @@ export function EditPaymentModal() {
                 <div>
                   <div className="text-xs text-blue-700 font-medium mb-1">Outstanding Balance</div>
                   <div className="text-sm font-bold text-red-600">${(
-                    (appointments.find((a: any) => a.id === selectedAppointment)?.cost || 0) - 
+                    (appointments.find((a: any) => a.id === selectedAppointment)?.price || 0) - 
                     (appointments.find((a: any) => a.id === selectedAppointment)?.totalPaid || 0)
                   ).toFixed(2)}</div>
                 </div>

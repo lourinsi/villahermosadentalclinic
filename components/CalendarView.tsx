@@ -365,16 +365,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
 
           return (
             <div key={timeSlot} className="flex items-start min-h-[80px] border-b border-gray-100 relative group">
-              {/* Plus button area - Conditional rendering based on whether appointments exist or cover the slot */}
-              {currentSlotIsCovered ? ( // If any part of the slot is covered
-                /* Position for occupied slots: under the time label, restricted width */
-                <div
-                  className="absolute top-8 left-4 w-20 h-10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-30 hover:bg-violet-50/50 rounded-xl border-2 border-dashed border-transparent hover:border-violet-200/50 group/plus"
-                  onClick={() => openCreateModal(selectedDate, timeSlot)} // Clicking still creates at this slot
-                >
-                  <Plus className="h-5 w-5 text-violet-300 transition-colors group-hover/plus:text-violet-600" />
-                </div>
-              ) : (
+              {!currentSlotIsCovered && (
                 /* Wide position for empty slots: centered in the main area */
                 <div
                   className="absolute inset-y-2 left-32 right-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-10 hover:bg-violet-50/50 rounded-xl border-2 border-dashed border-transparent hover:border-violet-200/50 group/plus"
@@ -537,14 +528,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                       className="flex-1 border-l border-gray-100 relative min-h-[80px] group"
                     >
                         {/* Plus button */}
-                        {currentSlotIsCovered ? (
-                            <div
-                            className="absolute top-1 right-1 w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-30 hover:bg-violet-50/50 rounded border border-dashed border-transparent hover:border-violet-200/50"
-                            onClick={() => openCreateModal(day, timeSlot)}
-                            >
-                            <Plus className="h-3 w-3 text-violet-300" />
-                            </div>
-                        ) : (
+                        {!currentSlotIsCovered && (
                             <div
                             className="absolute inset-1 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-10 hover:bg-violet-50/50 rounded border border-dashed border-transparent hover:border-violet-200/50"
                             onClick={() => openCreateModal(day, timeSlot)}

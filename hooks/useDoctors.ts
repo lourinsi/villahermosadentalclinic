@@ -4,7 +4,9 @@ export interface DoctorOption {
   id: string;
   name: string;
   role: string;
+  specialization?: string;
   email?: string;
+  profilePicture?: string;
 }
 
 const STAFF_API = "http://localhost:3001/api/staff?limit=100";
@@ -29,7 +31,9 @@ export function useDoctors(refreshKey?: number) {
             id: String(staff.id ?? staff.email ?? staff.name),
             name: staff.name,
             role: staff.role,
+            specialization: staff.specialization,
             email: staff.email,
+            profilePicture: staff.profilePicture,
           }))
         );
       } else {

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useImperativeHandle, useMemo } from "react";
+import React, { useState, useEffect, useRef, useImperativeHandle } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
@@ -10,7 +10,7 @@ import { Badge } from "./ui/badge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { toast } from "sonner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "./ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogFooter } from "./ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Label } from "./ui/label";
@@ -22,7 +22,6 @@ import {
   Phone,
   Mail,
   Calendar,
-  FileText,
   Edit,
   Eye,
   Clock,
@@ -32,7 +31,8 @@ import {
   CreditCard,
   Trash,
   MoreVertical,
-  Bell
+  Bell,
+  User as UserIcon
 } from "lucide-react";
 import { EditAppointmentModal } from "./EditAppointmentModal";
 import { EditPaymentModal } from "./EditPaymentModal";
@@ -69,6 +69,9 @@ interface Patient {
   emergencyContact?: string;
   emergencyPhone?: string;
   notes?: string;
+  parentId?: string;
+  isPrimary?: boolean;
+  relationship?: string;
   dentalCharts?: { date: string; data: string; isEmpty: boolean }[];
 }
 
@@ -99,7 +102,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   const [isSaving, setIsSaving] = useState(false);
   const patientDetailsRef = useRef<{ save: () => Promise<boolean> } | null>(null);
   const itemsPerPage = 10;
-  const { openScheduleModal, openAddPatientModal, refreshPatients, refreshTrigger, appointments, openEditModal } = useAppointmentModal();
+  const { openScheduleModal, openAddPatientModal, refreshPatients, refreshTrigger, appointments } = useAppointmentModal();
 
   // State to hold doctor's appointments (for filtering patients by doctor)
   const [doctorAppointments, setDoctorAppointments] = useState<Appointment[]>([]);
@@ -127,20 +130,15 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
     fetchDoctorAppointments();
   }, [doctorFilter, refreshTrigger]);
 
-  // Get unique patient IDs from doctor's appointments
-  const doctorPatientIds = useMemo(() => {
-    if (!doctorFilter || doctorAppointments.length === 0) return null;
-    const ids = new Set<string>();
-    doctorAppointments.forEach(apt => {
-      if (apt.patientId) ids.add(apt.patientId);
-    });
-    return ids;
-  }, [doctorFilter, doctorAppointments]);
+  // Reset page when search or status changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter]);
 
   // Fetch patients when page, search, status filter, or refresh trigger changes
   useEffect(() => {
     fetchPatients(currentPage);
-  }, [currentPage, searchTerm, statusFilter, refreshTrigger, appointments, doctorPatientIds]);
+  }, [currentPage, searchTerm, statusFilter, refreshTrigger, appointments]);
 
   const fetchPatients = async (page = 1) => {
     // Add a timeout so the fetch can't hang indefinitely in the client
@@ -151,36 +149,19 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
     try {
       setIsLoading(true);
 
-      // If doctor filter is set but we don't have patient IDs yet, show loading
-      if (doctorFilter && doctorPatientIds === null) {
-        return;
-      }
-
-      // If doctor filter is set and no patients found, show empty
-      if (doctorFilter && doctorPatientIds && doctorPatientIds.size === 0) {
-        setPaginatedPatients([]);
-        setTotalPages(1);
-        setTotalFiltered(0);
-        return;
-      }
-
       const q = encodeURIComponent(searchTerm || "");
       const statusParam = statusFilter || "all";
+      const doctorParam = doctorFilter ? `&doctor=${encodeURIComponent(doctorFilter)}` : "";
       const res = await fetch(
-        `http://localhost:3001/api/patients?page=${page}&limit=${itemsPerPage}&search=${q}&status=${statusParam}`,
+        `http://localhost:3001/api/patients?page=${page}&limit=${itemsPerPage}&search=${q}&status=${statusParam}${doctorParam}`,
         { signal: controller.signal }
       );
 
       const result = await res.json();
 
       if (result && result.success) {
-        let data = result.data || [];
+        const data = result.data || [];
         const meta = result.meta || { total: 0, page, limit: itemsPerPage, totalPages: 1 };
-
-        // Filter by doctor's patients if doctorFilter is set
-        if (doctorFilter && doctorPatientIds) {
-          data = data.filter((patient: Patient) => doctorPatientIds.has(patient.id || ''));
-        }
 
         const todayStr = formatDateToYYYYMMDD(new Date());
 
@@ -219,32 +200,18 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
           }
 
           return {
-            id: patient.id,
+            ...patient,
             name: `${patient.firstName} ${patient.lastName}`,
-            firstName: patient.firstName,
-            lastName: patient.lastName,
-            email: patient.email,
-            phone: patient.phone,
-            dateOfBirth: patient.dateOfBirth,
             lastVisit: effectiveLastVisit,
             nextAppointment: nextApt,
             status: status,
-            insurance: patient.insurance,
             balance: 0,
           };
         });
 
-        // Update pagination for filtered results
-        if (doctorFilter && doctorPatientIds) {
-          const filteredTotal = transformedPatients.length;
-          setPaginatedPatients(transformedPatients);
-          setTotalPages(1); // Client-side filtering, so single page
-          setTotalFiltered(filteredTotal);
-        } else {
-          setPaginatedPatients(transformedPatients);
-          setTotalPages(meta.totalPages || 1);
-          setTotalFiltered(meta.total || 0);
-        }
+        setPaginatedPatients(transformedPatients);
+        setTotalPages(meta.totalPages || 1);
+        setTotalFiltered(meta.total || 0);
       } else {
         setPaginatedPatients([]);
         setTotalPages(1);
@@ -406,9 +373,23 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
           <div className="flex items-center space-x-4">
             <div className="relative flex-1 max-w-md">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Search patients..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-9" />
+              <Input 
+                placeholder="Search patients..." 
+                value={searchTerm} 
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }} 
+                className="pl-9" 
+              />
             </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <Select 
+              value={statusFilter} 
+              onValueChange={(value) => {
+                setStatusFilter(value);
+                setCurrentPage(1);
+              }}
+            >
               <SelectTrigger className="w-[140px]">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
@@ -595,7 +576,6 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
             <PatientDetails
               ref={patientDetailsRef}
               patient={selectedPatient}
-              onClose={() => setSelectedPatient(null)}
               onDeletePatient={(p) => {
                 setPatientToDelete(p);
                 setIsPatientDeleteDialogOpen(true);
@@ -706,14 +686,12 @@ const PatientDetails = React.forwardRef<{
   save: () => Promise<boolean>;
 }, {
   patient: Patient;
-  onClose: () => void;
   onDeletePatient: (p: Patient) => void;
   isModified: boolean;
   setIsModified: (isModified: boolean) => void;
   doctorFilter?: string;
 }>(({
   patient,
-  onClose,
   onDeletePatient,
   isModified,
   setIsModified,
@@ -745,8 +723,10 @@ const PatientDetails = React.forwardRef<{
   });
 
   const [isSaving, setIsSaving] = useState(false);
-  const [isConfirmUnsavedChangesOpen, setIsConfirmUnsavedChangesOpen] = useState(false); // New state
   const [patientAppointments, setPatientAppointments] = useState<Appointment[]>([]);
+  const [familyMembers, setFamilyMembers] = useState<Patient[]>([]);
+  const [parentPatient, setParentPatient] = useState<Patient | null>(null);
+  const [isLoadingFamily, setIsLoadingFamily] = useState(false);
 
   // Payment state and helpers (local to PatientDetails)
   const [allTransactions, setAllTransactions] = useState<any[]>([]);
@@ -842,6 +822,41 @@ const PatientDetails = React.forwardRef<{
         return <Badge className="bg-gray-100 text-gray-800">Unpaid</Badge>;
     }
   };
+
+  useEffect(() => {
+    const fetchFamilyData = async () => {
+      if (!patient?.id) return;
+
+      try {
+        setIsLoadingFamily(true);
+        
+        // 1. If this patient has a parentId, fetch the parent
+        if (patient.parentId && patient.parentId !== patient.id) {
+          const parentRes = await fetch(`http://localhost:3001/api/patients/${patient.parentId}`);
+          const parentJson = await parentRes.json();
+          if (parentJson.success) {
+            setParentPatient(parentJson.data);
+          }
+        } else {
+          setParentPatient(null);
+        }
+
+        // 2. Fetch all dependents (patients where parentId is this patient's id)
+        const familyRes = await fetch(`http://localhost:3001/api/patients?parentId=${patient.id}`);
+        const familyJson = await familyRes.json();
+        if (familyJson.success) {
+          // Filter out the current patient from the family list
+          setFamilyMembers(familyJson.data.filter((m: Patient) => m.id !== patient.id));
+        }
+      } catch (err) {
+        console.error("Error fetching family data:", err);
+      } finally {
+        setIsLoadingFamily(false);
+      }
+    };
+
+    fetchFamilyData();
+  }, [patient]);
 
   useImperativeHandle(ref, () => ({
     save: handleUpdatePatient,
@@ -1020,7 +1035,7 @@ const PatientDetails = React.forwardRef<{
                   const aptPayments = payments.filter((p: any) => p.appointmentId === apt.id);
                   if (aptPayments.length > 0) {
                     const totalPaid = aptPayments.reduce((s: number, p: any) => s + (p.amount || 0), 0);
-                    const cost = apt.cost || 0;
+                    const price = apt.price || 0;
                     
                     let paymentStatus;
                     const oneWeekAgo = new Date();
@@ -1028,13 +1043,13 @@ const PatientDetails = React.forwardRef<{
                     const aptDateStr = (apt.date || '').split(' ')[0];
                     const appointmentDate = parseBackendDateToLocal(aptDateStr);
 
-                    if (totalPaid > cost && cost > 0) {
+                    if (totalPaid > price && price > 0) {
                       paymentStatus = 'over-paid';
-                    } else if (totalPaid > 0 && totalPaid < cost) {
+                    } else if (totalPaid > 0 && totalPaid < price) {
                       paymentStatus = 'half-paid';
-                    } else if (totalPaid >= cost && cost > 0) {
+                    } else if (totalPaid >= price && price > 0) {
                       paymentStatus = 'paid';
-                    } else if (totalPaid === 0 && cost > 0 && appointmentDate < oneWeekAgo) {
+                    } else if (totalPaid === 0 && price > 0 && appointmentDate < oneWeekAgo) {
                       paymentStatus = 'overdue';
                     } else {
                       paymentStatus = 'unpaid';
@@ -1150,24 +1165,6 @@ const PatientDetails = React.forwardRef<{
     }
   };
 
-  const handleSaveAndClose = async () => {
-    const success = await handleUpdatePatient();
-    if (success) {
-      onClose(); // Call parent's onClose only if save was successful
-    }
-    setIsConfirmUnsavedChangesOpen(false);
-  };
-
-  const handleDiscardAndClose = () => {
-    setIsModified(false); // Clear modified state
-    onClose(); // Call parent's onClose
-    setIsConfirmUnsavedChangesOpen(false);
-  };
-
-  const handleCancelClose = () => {
-    setIsConfirmUnsavedChangesOpen(false); // Close the prompt, stay in the modal
-  };
-
   return (
     <div className="space-y-4">
       <div className="flex justify-end space-x-2 pb-4 border-b">
@@ -1182,12 +1179,18 @@ const PatientDetails = React.forwardRef<{
       </div>
 
       <Tabs defaultValue="info" className="w-full">
-  <TabsList className="grid w-full grid-cols-5">
+  <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger
             value="info"
             className="data-[state=active]:bg-violet-500 data-[state=active]:text-white hover:bg-violet-100"
           >
             Personal Info
+          </TabsTrigger>
+          <TabsTrigger
+            value="family"
+            className="data-[state=active]:bg-violet-500 data-[state=active]:text-white hover:bg-violet-100"
+          >
+            Family
           </TabsTrigger>
           <TabsTrigger
             value="records"
@@ -1302,6 +1305,132 @@ const PatientDetails = React.forwardRef<{
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+        
+        <TabsContent value="family" className="space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center">
+                  <UserIcon className="h-5 w-5 mr-2 text-violet-600" />
+                  Family Relationship
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="p-4 rounded-lg bg-gray-50 border">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-sm font-medium text-gray-500">Account Type</span>
+                    <Badge variant={patient.isPrimary ? "brand" : "outline"}>
+                      {patient.isPrimary ? "Primary Account" : "Dependent Account"}
+                    </Badge>
+                  </div>
+                  
+                  {!patient.isPrimary && parentPatient && (
+                    <div className="mt-4 pt-4 border-t">
+                      <span className="text-sm font-medium text-gray-500 block mb-2">Primary Account Holder</span>
+                      <div className="flex items-center p-3 bg-white rounded border">
+                        <div className="h-10 w-10 rounded-full bg-violet-100 flex items-center justify-center mr-3">
+                          <UserIcon className="h-6 w-6 text-violet-600" />
+                        </div>
+                        <div>
+                          <div className="font-semibold text-gray-900">{parentPatient.name}</div>
+                          <div className="text-xs text-gray-500">Parent / Guardian</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {patient.isPrimary && (
+                    <div className="mt-2 text-sm text-gray-600">
+                      This is the primary account. This patient manages their own appointments and those of their dependents.
+                    </div>
+                  )}
+                </div>
+
+                {patient.isPrimary && (
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <h3 className="font-medium text-gray-900">Family Members / Dependents</h3>
+                    </div>
+                    
+                    {isLoadingFamily ? (
+                      <div className="text-center py-4">
+                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-violet-600 mx-auto"></div>
+                      </div>
+                    ) : familyMembers.length === 0 ? (
+                      <div className="text-center py-8 bg-gray-50 rounded-lg border-2 border-dashed">
+                        <p className="text-sm text-gray-500">No family members registered.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {familyMembers.map((member) => (
+                          <div key={member.id} className="flex items-center justify-between p-3 bg-white border rounded-lg hover:shadow-sm transition-shadow">
+                            <div className="flex items-center">
+                              <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center mr-3">
+                                <UserIcon className="h-5 w-5 text-blue-600" />
+                              </div>
+                              <div>
+                                <div className="text-sm font-semibold">{member.name}</div>
+                                <div className="text-xs text-gray-500">{member.relationship || "Family Member"}</div>
+                              </div>
+                            </div>
+                            <Button variant="ghost" size="sm" onClick={() => {
+                              toast.info(`Viewing ${member.name}'s profile from the main list is recommended.`);
+                            }}>
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center">
+                  <Clock className="h-5 w-5 mr-2 text-blue-600" />
+                  Family Shared Info
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-3">
+                  <div className="p-3 bg-blue-50/50 border border-blue-100 rounded-lg">
+                    <p className="text-xs text-blue-700 font-medium mb-1">Inherited Contact Details</p>
+                    <div className="grid grid-cols-2 gap-4 text-sm mt-2">
+                      <div>
+                        <span className="text-gray-500 block">Email</span>
+                        <span className="font-medium">{patient.email}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 block">Phone</span>
+                        <span className="font-medium">{patient.phone}</span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="p-3 bg-blue-50/50 border border-blue-100 rounded-lg">
+                    <p className="text-xs text-blue-700 font-medium mb-1">Inherited Address</p>
+                    <p className="text-sm">
+                      {patient.address}<br />
+                      {patient.city}, {patient.zipCode}
+                    </p>
+                  </div>
+
+                  <div className="p-3 bg-blue-50/50 border border-blue-100 rounded-lg">
+                    <p className="text-xs text-blue-700 font-medium mb-1">Family Insurance</p>
+                    <p className="text-sm font-medium">{patient.insurance || "None specified"}</p>
+                  </div>
+                </div>
+                
+                <p className="text-xs text-gray-500 italic">
+                  * Dependents automatically inherit contact, address, and insurance information from the primary account holder.
+                </p>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
         <TabsContent value="records" className="space-y-4">
@@ -1418,11 +1547,11 @@ const PatientDetails = React.forwardRef<{
                             </div>
                             <div className="space-y-2 text-right">
                               <div>
-                                <div className="text-sm font-medium">Total: ${appointment.cost}</div>
+                                <div className="text-sm font-medium">Total: ${appointment.price}</div>
                                 <div className="text-sm text-muted-foreground">Paid: ${appointment.totalPaid}</div>
-                                {appointment.cost - appointment.totalPaid > 0 && (
+                                {(appointment.price || 0) - (appointment.totalPaid || 0) > 0 && (
                                   <div className="text-sm font-medium text-red-600">
-                                    Balance: ${appointment.cost - appointment.totalPaid}
+                                    Balance: ${(appointment.price || 0) - (appointment.totalPaid || 0)}
                                   </div>
                                 )}
                               </div>
@@ -1596,7 +1725,7 @@ const PatientDetails = React.forwardRef<{
                         <div>
                           <p className="text-sm text-muted-foreground">Outstanding</p>
                           <p className="text-2xl font-semibold text-red-600">
-                            ${mockAppointmentHistoryLocal.reduce((sum: number, apt: any) => sum + ((apt.cost || 0) - (apt.totalPaid || 0)), 0)}
+                            ${mockAppointmentHistoryLocal.reduce((sum: number, apt: any) => sum + ((apt.price || 0) - (apt.totalPaid || 0)), 0)}
                           </p>
                         </div>
                         <AlertTriangle className="h-8 w-8 text-red-600" />
@@ -1609,7 +1738,7 @@ const PatientDetails = React.forwardRef<{
                         <div>
                           <p className="text-sm text-muted-foreground">Total Billed</p>
                           <p className="text-2xl font-semibold">
-                            ${mockAppointmentHistoryLocal.reduce((sum: number, apt: any) => sum + (apt.cost || 0), 0)}
+                            ${mockAppointmentHistoryLocal.reduce((sum: number, apt: any) => sum + (apt.price || 0), 0)}
                           </p>
                         </div>
                         <DollarSign className="h-8 w-8 text-gray-600" />

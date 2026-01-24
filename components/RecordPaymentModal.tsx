@@ -22,13 +22,13 @@ import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { toast } from "sonner";
 import { CheckCircle, DollarSign } from "lucide-react";
+import { Appointment } from "@/hooks/useAppointments";
 
 export function RecordPaymentModal() {
   const {
     isPaymentModalOpen,
     closePaymentModal,
     appointmentId,
-    patientId,
     patientName,
     appointments,
     paymentData,
@@ -58,7 +58,7 @@ export function RecordPaymentModal() {
   ) || (appointmentId ? appointments.find((a: any) => a.id === appointmentId) : undefined);
   
   const outstandingBalance = selectedApt
-    ? (selectedApt.cost || 0) - (selectedApt.totalPaid || 0)
+    ? (selectedApt.price || 0) - (selectedApt.totalPaid || 0)
     : 0;
 
   const handleSubmit = async () => {
@@ -132,7 +132,7 @@ export function RecordPaymentModal() {
                     <SelectItem key={apt.id} value={apt.id}>
                       {apt.type} - {apt.date} (Balance: $
                       {(
-                        (apt.cost || 0) - (apt.totalPaid || 0)
+                        (apt.price || 0) - (apt.totalPaid || 0)
                       ).toFixed(2)})
                     </SelectItem>
                   ))}
@@ -154,8 +154,8 @@ export function RecordPaymentModal() {
                   <div className="text-sm font-semibold text-gray-900">{selectedApt?.date}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-blue-700 font-medium mb-1">Total Cost</div>
-                  <div className="text-sm font-semibold text-gray-900">${(selectedApt?.cost || 0).toFixed(2)}</div>
+                  <div className="text-xs text-blue-700 font-medium mb-1">Total Price</div>
+                  <div className="text-sm font-semibold text-gray-900">${(selectedApt?.price || 0).toFixed(2)}</div>
                 </div>
                 <div>
                   <div className="text-xs text-blue-700 font-medium mb-1">Outstanding Balance</div>

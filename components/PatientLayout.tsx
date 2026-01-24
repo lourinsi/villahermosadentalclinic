@@ -24,6 +24,7 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
 
   const navItems = [
     { href: "/patient/account", label: "My Account" },
+    { href: "/patient/family", label: "Family Members" },
     { href: "/patient/appointments", label: "My Appointments" },
     { href: "/patient/doctors", label: "Find Doctors" },
     { href: "/patient/orders", label: "Orders" },

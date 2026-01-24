@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,13 +17,20 @@ import { APPOINTMENT_TYPES } from "@/lib/appointment-types";
 import { TIME_SLOTS, formatTimeTo12h } from "@/lib/time-slots";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { useDoctors } from "@/hooks/useDoctors";
+import { useAuth } from "@/hooks/useAuth.tsx";
+import { Patient } from "@/lib/patient-types";
 
 export default function PublicBookingPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { doctors, isLoadingDoctors } = useDoctors();
+  const { user, isAuthenticated } = useAuth();
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [dateError, setDateError] = useState("");
+  const [familyMembers, setFamilyMembers] = useState<Patient[]>([]);
+  const [isLoadingFamily, setIsLoadingFamily] = useState(false);
+  const [selectedPatientId, setSelectedPatientId] = useState<string>("me");
 
   const [formData, setFormData] = useState({
     firstName: "",
@@ -36,7 +43,87 @@ export default function PublicBookingPage() {
     customType: "",
     doctor: "",
     notes: "",
+    patientId: "",
   });
+
+  useEffect(() => {
+    const doctorParam = searchParams.get("doctor");
+    const dateParam = searchParams.get("date");
+    const timeParam = searchParams.get("time");
+    
+    if (doctorParam || dateParam || timeParam) {
+      setFormData(prev => ({ 
+        ...prev, 
+        doctor: doctorParam || prev.doctor,
+        date: dateParam || prev.date,
+        time: timeParam || prev.time
+      }));
+      setStep(2); // Jump to second step if any detail is pre-selected
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    const fetchFamily = async () => {
+      if (isAuthenticated && user?.patientId) {
+        try {
+          setIsLoadingFamily(true);
+          const response = await fetch(`http://localhost:3001/api/patients?parentId=${user.patientId}`);
+          const result = await response.json();
+          if (result.success) {
+            setFamilyMembers(result.data);
+            
+            // Pre-fill with user's own data if they are found
+            const me = result.data.find((p: Patient) => p.id === user.patientId);
+            if (me) {
+              setFormData(prev => ({
+                ...prev,
+                firstName: me.firstName || "",
+                lastName: me.lastName || "",
+                email: me.email || "",
+                phone: me.phone || "",
+                patientId: me.id || "",
+              }));
+            }
+          }
+        } catch (error) {
+          console.error("Error fetching family members:", error);
+        } finally {
+          setIsLoadingFamily(false);
+        }
+      }
+    };
+
+    fetchFamily();
+  }, [isAuthenticated, user]);
+
+  const handlePatientChange = (value: string) => {
+    setSelectedPatientId(value);
+    if (value === "me" || value === user?.patientId) {
+      const me = familyMembers.find(p => p.id === user?.patientId);
+      if (me) {
+        setFormData(prev => ({
+          ...prev,
+          firstName: me.firstName || "",
+          lastName: me.lastName || "",
+          email: me.email || "",
+          phone: me.phone || "",
+          patientId: me.id || "",
+        }));
+      }
+    } else {
+      const member = familyMembers.find(p => p.id === value);
+      if (member) {
+        setFormData(prev => ({
+          ...prev,
+          firstName: member.firstName || "",
+          lastName: member.lastName || "",
+          email: member.email || "",
+          phone: member.phone || "",
+          patientId: member.id || "",
+        }));
+      }
+    }
+  };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -148,6 +235,30 @@ export default function PublicBookingPage() {
             <CardContent className="p-0">
               {step === 1 && (
                 <div className="p-8 space-y-6">
+                  {isAuthenticated && familyMembers.length > 0 && (
+                    <div className="space-y-2">
+                      <Label htmlFor="patientSelect">Who are you booking for?</Label>
+                      <Select value={selectedPatientId} onValueChange={handlePatientChange} disabled={isLoadingFamily}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder={isLoadingFamily ? "Loading family members..." : "Select patient"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={user?.patientId || "me"}>Myself</SelectItem>
+                          {familyMembers
+                            .filter((m) => m.id !== user?.patientId)
+                            .map((member) => (
+                              <SelectItem key={member.id} value={member.id!}>
+                                {member.name} ({member.relationship})
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-sm text-gray-500">
+                        Family members share your contact information.
+                      </p>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                       <Label htmlFor="firstName">First Name *</Label>

@@ -1,11 +1,12 @@
 "use client";
 
-import { createContext, useContext, useState, ReactNode } from "react";
+import { createContext, useContext, useState, ReactNode, useCallback, useMemo } from "react";
 import { useAppointments, Appointment, AppointmentFilters } from "./useAppointments";
 
 interface AppointmentModalContextType {
   isCreateModalOpen: boolean;
   isScheduleModalOpen: boolean;
+  isPatientBookingModalOpen: boolean;
   isAddPatientModalOpen: boolean;
   isEditModalOpen: boolean;
   isPatientFieldReadOnly: boolean;
@@ -14,10 +15,13 @@ interface AppointmentModalContextType {
   newAppointmentTime?: string;
   newAppointmentPatientName?: string;
   newAppointmentPatientId?: string;
+  newAppointmentDoctorName?: string;
   openCreateModal: (date?: Date, time?: string) => void;
   closeCreateModal: () => void;
   openScheduleModal: (patientName?: string, patientId?: string) => void;
   closeScheduleModal: () => void;
+  openPatientBookingModal: (date?: Date, time?: string, doctorName?: string) => void;
+  closePatientBookingModal: () => void;
   openAddPatientModal: () => void;
   closeAddPatientModal: () => void;
   openEditModal: (appointment: Appointment, isPatientReadOnly?: boolean) => void;
@@ -38,6 +42,7 @@ const AppointmentModalContext = createContext<AppointmentModalContextType | unde
 export const AppointmentModalProvider = ({ children }: { children: ReactNode }) => {
   const [isCreateModalOpen, setCreateModalOpen] = useState(false);
   const [isScheduleModalOpen, setScheduleModalOpen] = useState(false);
+  const [isPatientBookingModalOpen, setPatientBookingModalOpen] = useState(false);
   const [isAddPatientModalOpen, setAddPatientModalOpen] = useState(false);
   const [isEditModalOpen, setEditModalOpen] = useState(false);
   const [isPatientFieldReadOnly, setPatientFieldReadOnly] = useState(false);
@@ -48,49 +53,64 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
   const [newAppointmentTime, setNewAppointmentTime] = useState<string>();
   const [newAppointmentPatientName, setNewAppointmentPatientName] = useState<string>();
   const [newAppointmentPatientId, setNewAppointmentPatientId] = useState<string>();
+  const [newAppointmentDoctorName, setNewAppointmentDoctorName] = useState<string>();
 
   const [filters, setFilters] = useState<AppointmentFilters | undefined>(undefined);
 
   const { appointments, isLoading, addAppointment, updateAppointment, deleteAppointment } = useAppointments(refreshTrigger, filters);
 
-  const refreshAppointments = (newFilters?: AppointmentFilters) => {
+  const refreshAppointments = useCallback((newFilters?: AppointmentFilters) => {
     setFilters(newFilters);
     setRefreshTrigger(prev => prev + 1);
-  };
-  const refreshPatients = () => setRefreshTrigger(prev => prev + 1);
-  const refreshFinanceData = () => setRefreshTrigger(prev => prev + 1);
+  }, []);
 
-  const openCreateModal = (date?: Date, time?: string) => {
+  const refreshPatients = useCallback(() => setRefreshTrigger(prev => prev + 1), []);
+  const refreshFinanceData = useCallback(() => setRefreshTrigger(prev => prev + 1), []);
+
+  const openCreateModal = useCallback((date?: Date, time?: string) => {
     setNewAppointmentDate(date);
     setNewAppointmentTime(time);
     setCreateModalOpen(true);
-  };
-  const closeCreateModal = () => setCreateModalOpen(false);
+  }, []);
 
-  const openScheduleModal = (patientName?: string, patientId?: string) => {
+  const closeCreateModal = useCallback(() => setCreateModalOpen(false), []);
+
+  const openScheduleModal = useCallback((patientName?: string, patientId?: string) => {
     setNewAppointmentPatientName(patientName);
     setNewAppointmentPatientId(patientId);
     setScheduleModalOpen(true);
-  };
-  const closeScheduleModal = () => setScheduleModalOpen(false);
+  }, []);
 
-  const openAddPatientModal = () => setAddPatientModalOpen(true);
-  const closeAddPatientModal = () => setAddPatientModalOpen(false);
+  const closeScheduleModal = useCallback(() => setScheduleModalOpen(false), []);
+
+  const openPatientBookingModal = useCallback((date?: Date, time?: string, doctorName?: string) => {
+    setNewAppointmentDate(date);
+    setNewAppointmentTime(time);
+    setNewAppointmentDoctorName(doctorName);
+    setPatientBookingModalOpen(true);
+  }, []);
+
+  const closePatientBookingModal = useCallback(() => setPatientBookingModalOpen(false), []);
+
+  const openAddPatientModal = useCallback(() => setAddPatientModalOpen(true), []);
+  const closeAddPatientModal = useCallback(() => setAddPatientModalOpen(false), []);
   
-  const openEditModal = (appointment: Appointment, isPatientReadOnly: boolean = false) => {
+  const openEditModal = useCallback((appointment: Appointment, isPatientReadOnly: boolean = false) => {
     setSelectedAppointment(appointment);
     setPatientFieldReadOnly(isPatientReadOnly);
     setEditModalOpen(true);
-  };
-  const closeEditModal = () => {
+  }, []);
+
+  const closeEditModal = useCallback(() => {
     setEditModalOpen(false);
     setSelectedAppointment(null);
     setPatientFieldReadOnly(false);
-  };
+  }, []);
 
-  const value = {
+  const value = useMemo(() => ({
     isCreateModalOpen,
     isScheduleModalOpen,
+    isPatientBookingModalOpen,
     isAddPatientModalOpen,
     isEditModalOpen,
     isPatientFieldReadOnly,
@@ -99,10 +119,13 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
     newAppointmentTime,
     newAppointmentPatientName,
     newAppointmentPatientId,
+    newAppointmentDoctorName,
     openCreateModal,
     closeCreateModal,
     openScheduleModal,
     closeScheduleModal,
+    openPatientBookingModal,
+    closePatientBookingModal,
     openAddPatientModal,
     closeAddPatientModal,
     openEditModal,
@@ -116,7 +139,39 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
     addAppointment,
     updateAppointment,
     deleteAppointment,
-  };
+  }), [
+    isCreateModalOpen,
+    isScheduleModalOpen,
+    isPatientBookingModalOpen,
+    isAddPatientModalOpen,
+    isEditModalOpen,
+    isPatientFieldReadOnly,
+    selectedAppointment,
+    newAppointmentDate,
+    newAppointmentTime,
+    newAppointmentPatientName,
+    newAppointmentPatientId,
+    newAppointmentDoctorName,
+    openCreateModal,
+    closeCreateModal,
+    openScheduleModal,
+    closeScheduleModal,
+    openPatientBookingModal,
+    closePatientBookingModal,
+    openAddPatientModal,
+    closeAddPatientModal,
+    openEditModal,
+    closeEditModal,
+    refreshAppointments,
+    refreshPatients,
+    refreshFinanceData,
+    refreshTrigger,
+    appointments,
+    isLoading,
+    addAppointment,
+    updateAppointment,
+    deleteAppointment,
+  ]);
 
   return (
     <AppointmentModalContext.Provider value={value}>

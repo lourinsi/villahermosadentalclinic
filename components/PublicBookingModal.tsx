@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -48,11 +48,57 @@ export function PublicBookingModal({ isOpen, onClose }: PublicBookingModalProps)
     phone: "",
     date: "",
     time: "",
+    duration: 30,
     type: -1,
     customType: "",
     doctor: "",
     notes: "",
   });
+
+  const [dateAppointments, setDateAppointments] = useState<any[]>([]);
+  const [isLoadingAppointments, setIsLoadingAppointments] = useState(false);
+
+  useEffect(() => {
+    const fetchDateAppointments = async () => {
+      if (!formData.date) {
+        setDateAppointments([]);
+        return;
+      }
+      setIsLoadingAppointments(true);
+      try {
+        const response = await fetch(`http://localhost:3001/api/appointments?startDate=${formData.date}&endDate=${formData.date}&anonymize=true`);
+        const result = await response.json();
+        if (result.success) {
+          setDateAppointments(result.data || []);
+        }
+      } catch (error) {
+        console.error("Error fetching appointments for date:", error);
+      } finally {
+        setIsLoadingAppointments(false);
+      }
+    };
+
+    fetchDateAppointments();
+  }, [formData.date]);
+
+  const isSlotBusy = useCallback((time: string) => {
+    if (!formData.date || !dateAppointments) return false;
+    
+    const [hours, minutes] = time.split(':').map(Number);
+    const newStart = hours * 60 + minutes;
+    const newEnd = newStart + 30; // Default public booking duration is 30 mins
+
+    return dateAppointments.some(apt => {
+      if (apt.status === 'cancelled') return false;
+      
+      const [aptHours, aptMinutes] = apt.time.split(':').map(Number);
+      const aptStart = aptHours * 60 + aptMinutes;
+      const aptDuration = apt.duration || 30;
+      const aptEnd = aptStart + aptDuration;
+
+      return (newStart < aptEnd) && (newEnd > aptStart);
+    });
+  }, [formData.date, dateAppointments]);
 
   // Reset form when modal closes
   useEffect(() => {
@@ -459,11 +505,14 @@ export function PublicBookingModal({ isOpen, onClose }: PublicBookingModalProps)
                     <SelectValue placeholder="Select time" />
                   </SelectTrigger>
                   <SelectContent className="max-h-64">
-                    {TIME_SLOTS.map((slot) => (
-                      <SelectItem key={slot} value={slot}>
-                        {formatTimeTo12h(slot)}
-                      </SelectItem>
-                    ))}
+                    {TIME_SLOTS.map((slot) => {
+                      const busy = isSlotBusy(slot);
+                      return (
+                        <SelectItem key={slot} value={slot} disabled={busy}>
+                          {formatTimeTo12h(slot)} {busy && "(Occupied)"}
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
               </div>

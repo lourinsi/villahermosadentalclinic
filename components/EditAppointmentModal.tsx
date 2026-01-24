@@ -29,8 +29,12 @@ export function EditAppointmentModal() {
     updateAppointment, 
     deleteAppointment, 
     refreshAppointments,
+    appointments,
     isPatientFieldReadOnly
   } = useAppointmentModal();
+  const [dateAppointments, setDateAppointments] = useState<any[]>([]);
+  const [isLoadingDateAppointments, setIsLoadingDateAppointments] = useState(false);
+
   const [form, setForm] = useState<Partial<Appointment>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -138,6 +142,31 @@ export function EditAppointmentModal() {
 
   }, [appointment, isEditModalOpen]);
 
+  // Fetch all appointments for the selected date to check for clinic-wide conflicts
+  // This bypasses view filters to ensure global conflict detection
+  useEffect(() => {
+    const fetchDateAppointments = async () => {
+      if (!form.date || !isEditModalOpen) {
+        setDateAppointments([]);
+        return;
+      }
+      setIsLoadingDateAppointments(true);
+      try {
+        const response = await fetch(`http://localhost:3001/api/appointments?startDate=${form.date}&endDate=${form.date}`);
+        const result = await response.json();
+        if (result.success) {
+          setDateAppointments(result.data || []);
+        }
+      } catch (error) {
+        console.error("Error fetching appointments for date:", error);
+      } finally {
+        setIsLoadingDateAppointments(false);
+      }
+    };
+
+    fetchDateAppointments();
+  }, [form.date, isEditModalOpen]);
+
   const sortedPatients = useMemo(() => {
     if (!selectedPatientOption) return allPatients;
 
@@ -148,6 +177,26 @@ export function EditAppointmentModal() {
     return [selectedPatient, ...filteredPatients];
   }, [allPatients, selectedPatientOption]);
 
+
+  const isSlotBusy = useCallback((time: string, duration: number) => {
+    if (!form.date || !dateAppointments) return false;
+    
+    const [hours, minutes] = time.split(':').map(Number);
+    const newStart = hours * 60 + minutes;
+    const newEnd = newStart + duration;
+
+    return dateAppointments.some(apt => {
+      // Exclude current appointment and cancelled ones
+      if (apt.id === appointment?.id || apt.status === 'cancelled') return false;
+      
+      const [aptHours, aptMinutes] = apt.time.split(':').map(Number);
+      const aptStart = aptHours * 60 + aptMinutes;
+      const aptDuration = apt.duration || 30;
+      const aptEnd = aptStart + aptDuration;
+
+      return (newStart < aptEnd) && (newEnd > aptStart);
+    });
+  }, [form.date, dateAppointments, appointment?.id]);
 
   const handleSave = async () => {
     if (form.type == null || form.type < 0) {
@@ -248,7 +297,8 @@ export function EditAppointmentModal() {
       closeEditModal();
     } catch (err) {
       console.error("Error updating appointment:", err);
-      toast.error("Failed to update appointment");
+      const errorMessage = err instanceof Error ? err.message : "Failed to update appointment";
+      toast.error(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -402,11 +452,14 @@ export function EditAppointmentModal() {
                   <SelectValue placeholder="Select time" />
                 </SelectTrigger>
                 <SelectContent>
-                  {TIME_SLOTS.map((slot, index) => (
-                    <SelectItem key={slot} value={index.toString()}>
-                      {formatTimeTo12h(slot)}
-                    </SelectItem>
-                  ))}
+                  {TIME_SLOTS.map((slot, index) => {
+                    const busy = isSlotBusy(slot, form.duration || 60);
+                    return (
+                      <SelectItem key={slot} value={index.toString()} disabled={busy}>
+                        {formatTimeTo12h(slot)} {busy && "(Occupied)"}
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>
@@ -469,10 +522,14 @@ export function EditAppointmentModal() {
                   <SelectValue placeholder="Duration" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="30">30 mins</SelectItem>
-                  <SelectItem value="60">1 hour</SelectItem>
-                  <SelectItem value="90">1.5 hours</SelectItem>
-                  <SelectItem value="120">2 hours</SelectItem>
+                  {[30, 60, 90, 120].map((mins) => {
+                    const busy = form.time ? isSlotBusy(form.time, mins) : false;
+                    return (
+                      <SelectItem key={mins} value={String(mins)} disabled={busy}>
+                        {mins >= 60 ? `${mins / 60} hour${mins / 60 > 1 ? 's' : ''}` : `${mins} mins`} {busy && "(Conflict)"}
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>
