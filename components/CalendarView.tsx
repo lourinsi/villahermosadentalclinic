@@ -1,7 +1,5 @@
 "use client";
 
-"use client";
-
 import { useState, useEffect, useMemo } from "react";
 import { DateRange } from "react-day-picker";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -20,8 +18,8 @@ import {
   Clock,
   X,
   DollarSign,
-  Users as UsersIcon,
-  ListFilter
+  ListFilter,
+  Keyboard
 } from "lucide-react";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { Appointment, AppointmentFilters } from "../hooks/useAppointments";
@@ -29,7 +27,7 @@ import { Badge } from "./ui/badge";
 import { EditAppointmentModal } from "./EditAppointmentModal";
 import { useDoctors } from "../hooks/useDoctors";
 import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "./ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { Calendar } from "./ui/calendar";
 import { Label } from "./ui/label";
@@ -62,14 +60,13 @@ export function CalendarView() {
   const [isLoadingView, setIsLoadingView] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
-  const [fetchedRange, setFetchedRange] = useState({ start: "", end: "" });
+  const [activeRangeType, setActiveRangeType] = useState<"from" | "to">("from");
   
   const { 
     openCreateModal, 
     appointments, 
     deleteAppointment, 
     refreshAppointments, 
-    refreshTrigger,
     openEditModal
   } = useAppointmentModal();
   
@@ -77,6 +74,14 @@ export function CalendarView() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [appointmentToDelete, setAppointmentToDelete] = useState<string | null>(null);
   const { doctors, isLoadingDoctors } = useDoctors();
+  
+  // Filter appointments when "all" status is selected to exclude "pending"
+  const filteredAppointments = useMemo(() => {
+    if (selectedStatus === "all") {
+      return appointments.filter(apt => apt.status !== "pending");
+    }
+    return appointments;
+  }, [appointments, selectedStatus]);
 
   const getViewRange = (date: Date) => {
     const start = new Date(date);
@@ -210,11 +215,6 @@ export function CalendarView() {
     setSelectedDate(newDate);
   };
 
-  const goToToday = () => {
-    setSelectedDate(new Date());
-    setViewMode("day");
-  };
-
   const getWeekDays = (date: Date) => {
     const weekStart = new Date(date);
     weekStart.setDate(date.getDate() - date.getDay());
@@ -230,12 +230,7 @@ export function CalendarView() {
   const getAppointmentsForDate = (date: Date) => {
     const dateStr = formatDateToYYYYMMDD(date);
     // Filtering is now done by the backend, we just need to filter by date for the calendar views
-    return appointments.filter(apt => apt.date === dateStr);
-  };
-
-  const getAppointmentsAtTime = (time: string, date: Date) => {
-    const appointmentsOnDate = getAppointmentsForDate(date);
-    return appointmentsOnDate.filter(apt => apt.time === time);
+    return filteredAppointments.filter(apt => apt.date === dateStr);
   };
 
   const getColorForType = (type: string) => {
@@ -668,7 +663,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
 
   const renderCustomView = () => {
     // Client-side filtering is removed, appointments are pre-filtered
-    const sortedAppointments = [...appointments].sort((a, b) => parseBackendDateToLocal(a.date).getTime() - parseBackendDateToLocal(b.date).getTime());
+    const sortedAppointments = [...filteredAppointments].sort((a, b) => parseBackendDateToLocal(a.date).getTime() - parseBackendDateToLocal(b.date).getTime());
     
     return (
       <div className="space-y-4 p-4">
@@ -766,12 +761,6 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                 </Button>
               </div>
               
-              {/* <Button variant="outline" className="h-10 font-semibold shadow-sm px-4" onClick={goToToday}>
-                Today
-              </Button> */}
-              {/* <Button variant="outline" className="h-10 font-semibold shadow-sm px-4" onClick={goToToday}>
-                Today
-              </Button> */}
               <Popover open={showDatePicker} onOpenChange={setShowDatePicker}>
                 <PopoverTrigger asChild>
                   <Button variant="outline" className="h-10 gap-2 font-semibold shadow-sm px-4">
@@ -779,113 +768,231 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                     <span>{formatDateLabel(selectedDate)}</span>
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-auto p-0 shadow-2xl border-none" align="start">
-                  <div className="p-4 space-y-4 bg-white rounded-xl">
-                    <div className="space-y-2">
-                      <Label className="text-xs font-bold uppercase tracking-wider text-gray-400">View Mode</Label>
-                      <div className="grid grid-cols-2 gap-2">
-                        {(["week", "month", "custom", "all"] as const).map((mode) => (
-                          <Button
-                            key={mode}
-                            variant={viewMode === mode ? "brand" : "outline"}
-                            size="sm"
-                            className="h-9 capitalize font-medium"
-                            onClick={() => {
-                              setSearchTerm("");
-                              setViewMode(mode);
-                              // Retain selectedDate for context in week view
-                              // if (mode === "week") {
-                              //   setSelectedDate(new Date()); 
-                              // }
-                              // Keep the date picker open after changing view mode
-                              // if (mode !== "custom") setShowDatePicker(false);
-                            }}
-                          >
-                            {mode}
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
+                <PopoverContent className="w-auto p-0 shadow-2xl border-none rounded-2xl" align="start">
+                  <div className={`bg-white rounded-2xl overflow-hidden ${viewMode === "custom" ? "min-w-[600px]" : "min-w-[320px]"}`}>
+                    {viewMode === "custom" ? (
+                      <>
+                        {/* Header: Range Summary and Inputs */}
+                        <div className="p-6 border-b flex items-start justify-between">
+                          <div className="space-y-1">
+                            <h3 className="text-2xl font-bold text-gray-900">
+                              {dateRange?.from && dateRange?.to ? (
+                                <>
+                                  {Math.ceil(Math.abs(dateRange.to.getTime() - dateRange.from.getTime()) / (1000 * 60 * 60 * 24)) + 1} days range
+                                </>
+                              ) : (
+                                "Select dates"
+                              )}
+                            </h3>
+                            <p className="text-sm text-gray-500 font-medium">
+                              {dateRange?.from ? (
+                                <>
+                                  {dateRange.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                  {dateRange.to && ` - ${dateRange.to.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`}
+                                </>
+                              ) : (
+                                "Choose your appointment period"
+                              )}
+                            </p>
+                          </div>
 
-                    <div className="border-t pt-4">
-                      <Label className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3 block">
-                        {viewMode === "custom" ? "Select Date Range" : "Select Date"}
-                      </Label>
-                      {viewMode === "custom" ? (
-                        <Calendar
-                          mode="range"
-                          selected={dateRange}
-                          onSelect={(range: DateRange | undefined) => {
-                            setSearchTerm("");
-                            // If a full range was already selected, and user clicks a single new date,
-                            // treat it as starting a brand new range.
-                            if (dateRange?.from && dateRange?.to && range?.from && !range.to) {
-                                setDateRange({ from: range.from, to: undefined });
-                            } else {
-                                setDateRange(range);
-                            }
-                          }}
-                          numberOfMonths={2}
-                          className="rounded-md border shadow-sm"
-                          classNames={{
-                            today: "bg-violet-600 text-white rounded-full",
-                          }}
-                          components={{
-                            MonthCaption: ({ calendarMonth, displayIndex, ...props }: any) => (
-                              <div {...props}>
-                                <span 
-                                  className="hover:text-violet-600 transition-colors cursor-pointer text-sm font-medium"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSearchTerm("");
-                                    setSelectedDate(calendarMonth.date);
-                                    setViewMode("month");
-                                    setShowDatePicker(false);
-                                  }}
-                                >
-                                  {calendarMonth.date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-                                </span>
+                          <div className="flex items-center gap-0 border rounded-xl overflow-hidden shadow-sm">
+                            <button 
+                              onClick={() => setActiveRangeType("from")}
+                              className={`px-4 py-2 border-r bg-white min-w-[140px] text-left transition-colors ${activeRangeType === "from" ? "ring-2 ring-inset ring-violet-600" : "hover:bg-gray-50"}`}
+                            >
+                              <Label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-0.5 cursor-pointer">Start Date</Label>
+                              <div className="text-sm font-semibold text-gray-700">
+                                {dateRange?.from ? dateRange.from.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }) : "MM/DD/YYYY"}
                               </div>
-                            )
-                          }}
-                        />
-                      ) : (
-                        <Calendar
-                          mode="single"
-                          selected={selectedDate}
-                          onSelect={(date: Date | undefined) => {
-                            if (date) {
+                            </button>
+                            <button 
+                              onClick={() => setActiveRangeType("to")}
+                              className={`px-4 py-2 bg-white min-w-[140px] text-left transition-colors ${activeRangeType === "to" ? "ring-2 ring-inset ring-violet-600" : "hover:bg-gray-50"}`}
+                            >
+                              <Label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-0.5 cursor-pointer">End Date</Label>
+                              <div className="text-sm font-semibold text-gray-700">
+                                {dateRange?.to ? dateRange.to.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }) : "MM/DD/YYYY"}
+                              </div>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* View Mode Switcher */}
+                        <div className="px-6 py-3 bg-gray-50/50 border-b flex items-center gap-3">
+                          <span className="text-xs font-bold text-gray-400 uppercase tracking-widest mr-2">View:</span>
+                          <div className="flex items-center bg-white rounded-lg p-1 border shadow-sm">
+                            {(["day", "week", "month", "custom", "all"] as const).map((mode) => (
+                              <Button
+                                key={mode}
+                                variant={viewMode === mode ? "brand" : "ghost"}
+                                size="sm"
+                                className={`h-8 px-4 capitalize font-bold text-xs ${viewMode === mode ? "" : "text-gray-500 hover:text-gray-900"}`}
+                                onClick={() => {
+                                  setSearchTerm("");
+                                  setViewMode(mode);
+                                  if (mode !== "custom") setShowDatePicker(false);
+                                }}
+                              >
+                                {mode}
+                              </Button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Calendar Content */}
+                        <div className="p-4 flex justify-center">
+                          <Calendar
+                            mode="range"
+                            selected={dateRange}
+                            onSelect={(_range: DateRange | undefined, selectedDay: Date) => {
                               setSearchTerm("");
-                              setSelectedDate(date);
-                              setViewMode(viewMode); // Keep the current view mode
-                              // setShowDatePicker(false); // Keep the date picker open
-                            }
-                          }}
-                          className="rounded-md border shadow-sm"
-                          classNames={{
-                            today: "bg-violet-600 text-white rounded-full",
-                          }}
-                          components={{
-                            MonthCaption: ({ calendarMonth, displayIndex, ...props }: any) => (
-                              <div {...props}>
-                                <span 
-                                  className="hover:text-violet-600 transition-colors cursor-pointer text-sm font-medium"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSearchTerm("");
-                                    setSelectedDate(calendarMonth.date);
-                                    setViewMode("month");
-                                    setShowDatePicker(false);
-                                  }}
-                                >
-                                  {calendarMonth.date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-                                </span>
-                              </div>
-                            )
-                          }}
-                        />
-                      )}
-                    </div>
+                              // When using mode="range", the library handles the range logic.
+                              // We use activeRangeType to override/direct which part of the range is being set.
+                              const selectedDate = selectedDay;
+                              
+                              if (activeRangeType === "from") {
+                                if (selectedDate) {
+                                  setDateRange({ from: selectedDate, to: dateRange?.to && selectedDate <= dateRange.to ? dateRange.to : undefined });
+                                  setActiveRangeType("to");
+                                }
+                              } else {
+                                if (selectedDate) {
+                                  if (dateRange?.from && selectedDate < dateRange.from) {
+                                    // If user picks an end date before start date, treat it as new start date
+                                    setDateRange({ from: selectedDate, to: undefined });
+                                    setActiveRangeType("to");
+                                  } else {
+                                    setDateRange({ from: dateRange?.from || selectedDate, to: selectedDate });
+                                  }
+                                }
+                              }
+                            }}
+                            numberOfMonths={2}
+                            className="border-none shadow-none"
+                            classNames={{
+                              months: "flex flex-row gap-8",
+                              month: "space-y-4",
+                              caption: "flex justify-center pt-1 relative items-center",
+                              caption_label: "text-sm font-bold text-gray-900",
+                              nav: "space-x-1 flex items-center",
+                              nav_button: "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100",
+                              nav_button_previous: "absolute left-1",
+                              nav_button_next: "absolute right-1",
+                              table: "w-full border-collapse space-y-1",
+                              head_row: "flex",
+                              head_cell: "text-gray-400 rounded-md w-9 font-bold text-[10px] uppercase",
+                              row: "flex w-full mt-2",
+                              cell: "h-9 w-9 text-center text-sm p-0 relative [&:has([aria-selected].day-range-end)]:rounded-r-full [&:has([aria-selected].day-range-start)]:rounded-l-full first:[&:has([aria-selected])]:rounded-l-full last:[&:has([aria-selected])]:rounded-r-full focus-within:relative focus-within:z-20",
+                              day: "h-9 w-9 p-0 font-bold aria-selected:opacity-100 rounded-full hover:bg-gray-100 transition-colors",
+                              day_range_start: "day-range-start bg-violet-600 text-white hover:bg-violet-600 hover:text-white focus:bg-violet-600 focus:text-white",
+                              day_range_end: "day-range-end bg-violet-600 text-white hover:bg-violet-600 hover:text-white focus:bg-violet-600 focus:text-white",
+                              day_selected: "bg-violet-600 text-white hover:bg-violet-600 hover:text-white focus:bg-violet-600 focus:text-white",
+                              day_today: "bg-gray-100 text-gray-900",
+                              day_outside: "text-gray-300 opacity-50",
+                              day_disabled: "text-gray-300 opacity-50",
+                              day_range_middle: "aria-selected:bg-violet-50 aria-selected:text-violet-900 rounded-none",
+                              day_hidden: "invisible",
+                            }}
+                          />
+                        </div>
+
+                        {/* Footer: Action Buttons */}
+                        <div className="p-4 border-t bg-gray-50/30 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                             <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className="h-10 w-10 text-gray-400 hover:text-violet-600"
+                            >
+                              <Keyboard className="h-5 w-5" />
+                            </Button>
+                          </div>
+                          
+                          <div className="flex items-center gap-3">
+                            <Button 
+                              variant="ghost" 
+                              className="text-sm font-bold text-gray-900 hover:bg-gray-100 underline decoration-2 underline-offset-4"
+                              onClick={() => {
+                                setDateRange(undefined);
+                                setSearchTerm("");
+                              }}
+                            >
+                              Clear dates
+                            </Button>
+                            <Button 
+                              className="bg-violet-600 hover:bg-violet-700 text-white px-6 py-2 rounded-xl font-bold transition-all shadow-md active:scale-95"
+                              onClick={() => setShowDatePicker(false)}
+                            >
+                              Close
+                            </Button>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="p-4 space-y-4 bg-white rounded-xl">
+                        <div className="space-y-2">
+                          <Label className="text-xs font-bold uppercase tracking-wider text-gray-400">View Mode</Label>
+                          <div className="grid grid-cols-2 gap-2">
+                            {(["day", "week", "month", "custom", "all"] as const).map((mode) => (
+                              <Button
+                                key={mode}
+                                variant={viewMode === mode ? "brand" : "outline"}
+                                size="sm"
+                                className="h-9 capitalize font-medium"
+                                onClick={() => {
+                                  setSearchTerm("");
+                                  setViewMode(mode);
+                                  if (mode !== "custom") setShowDatePicker(false);
+                                }}
+                              >
+                                {mode}
+                              </Button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="border-t pt-4">
+                          <Label className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3 block">
+                            Select Date
+                          </Label>
+                          <Calendar
+                            mode="single"
+                            selected={selectedDate}
+                            onSelect={(date: Date | undefined) => {
+                              if (date) {
+                                setSearchTerm("");
+                                setSelectedDate(date);
+                                setViewMode(viewMode);
+                                setShowDatePicker(false);
+                              }
+                            }}
+                            className="rounded-md border shadow-sm"
+                            classNames={{
+                              today: "bg-violet-600 text-white rounded-full",
+                            }}
+                            components={{
+                              MonthCaption: ({ calendarMonth, displayIndex, ...props }: any) => (
+                                <div {...props}>
+                                  <span 
+                                    className="hover:text-violet-600 transition-colors cursor-pointer text-sm font-medium"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSearchTerm("");
+                                      setSelectedDate(calendarMonth.date);
+                                      setViewMode("month");
+                                      setShowDatePicker(false);
+                                    }}
+                                  >
+                                    {calendarMonth.date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                                  </span>
+                                </div>
+                              )
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </PopoverContent>
               </Popover>
@@ -980,7 +1087,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                     {viewMode === "custom" && renderCustomView()}
                     {viewMode === "all" && (
                       <div className="p-4">
-                        <AllAppointmentsView appointments={appointments} isLoading={isLoadingView} />
+                        <AllAppointmentsView appointments={filteredAppointments} isLoading={isLoadingView} />
                       </div>
                     )}
                   </>
@@ -1026,16 +1133,6 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
-  );
-}
-
-// Dummy component to replace the missing one from snippet
-function NewAppointmentForm({ onClose }: { onClose: () => void }) {
-  return (
-    <div className="p-4 text-center">
-      <p>Please use the &quot;New Appointment&quot; button in the header.</p>
-      <Button onClick={onClose} className="mt-4">Close</Button>
     </div>
   );
 }

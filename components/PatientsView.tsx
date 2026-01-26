@@ -52,6 +52,8 @@ interface Patient {
   name?: string;
   email: string;
   phone: string;
+  alternateEmail?: string;
+  alternatePhone?: string;
   dateOfBirth: string;
   lastVisit?: string;
   nextAppointment?: string | null;
@@ -323,8 +325,8 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           patientId: messagePatient.id,
-          patientEmail: messagePatient.email,
-          patientPhone: messagePatient.phone,
+          patientEmail: messagePatient.alternateEmail || messagePatient.email,
+          patientPhone: messagePatient.alternatePhone || messagePatient.phone,
           patientName: messagePatient.name || `${messagePatient.firstName} ${messagePatient.lastName}`,
           message: messageContent
         })
@@ -643,10 +645,25 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
           </DialogHeader>
           <div className="space-y-4 py-4">
             {messagePatient && (
-              <div className="text-sm text-muted-foreground">
+              <div className="text-sm space-y-2">
                 <p><strong>Patient:</strong> {messagePatient.name || `${messagePatient.firstName} ${messagePatient.lastName}`}</p>
-                <p><strong>Email:</strong> {messagePatient.email}</p>
-                <p><strong>Phone:</strong> {messagePatient.phone}</p>
+                <div className="p-2 bg-gray-50 rounded border text-xs space-y-1">
+                  <p className="font-semibold text-gray-500 mb-1 uppercase tracking-wider">Target Contact Info:</p>
+                  <div className="flex justify-between">
+                    <span>Email:</span>
+                    <span className={messagePatient.alternateEmail ? "text-green-600 font-medium" : ""}>
+                      {messagePatient.alternateEmail || messagePatient.email}
+                      {messagePatient.alternateEmail && " (Personal)"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Phone:</span>
+                    <span className={messagePatient.alternatePhone ? "text-green-600 font-medium" : ""}>
+                      {messagePatient.alternatePhone || messagePatient.phone}
+                      {messagePatient.alternatePhone && " (Personal)"}
+                    </span>
+                  </div>
+                </div>
               </div>
             )}
             <div className="space-y-2">
@@ -704,6 +721,8 @@ const PatientDetails = React.forwardRef<{
     lastName: patient.lastName || patient.name?.split(' ').slice(1).join(' ') || '',
     email: patient.email || '',
     phone: patient.phone || '',
+    alternateEmail: patient.alternateEmail || '',
+    alternatePhone: patient.alternatePhone || '',
     dateOfBirth: patient.dateOfBirth || '',
     insurance: patient.insurance || '',
     balance: patient.balance ?? 0,
@@ -886,6 +905,8 @@ const PatientDetails = React.forwardRef<{
           lastName: patient.lastName || patient.name?.split(' ').slice(1).join(' ') || '',
           email: patient.email || '',
           phone: patient.phone || '',
+          alternateEmail: patient.alternateEmail || '',
+          alternatePhone: patient.alternatePhone || '',
           dateOfBirth: patient.dateOfBirth || '',
           insurance: patient.insurance || '',
           balance: patient.balance ?? 0,
@@ -916,6 +937,8 @@ const PatientDetails = React.forwardRef<{
             lastName: p.lastName || p.name?.split(' ').slice(1).join(' ') || '',
             email: p.email || '',
             phone: p.phone || '',
+            alternateEmail: p.alternateEmail || '',
+            alternatePhone: p.alternatePhone || '',
             dateOfBirth: p.dateOfBirth || '',
             insurance: p.insurance || '',
             balance: p.balance ?? 0,
@@ -1244,12 +1267,21 @@ const PatientDetails = React.forwardRef<{
                 </div>
 
                 <div>
-                  <Label>Email</Label>
+                  <Label>Primary Email</Label>
                   <Input type="email" value={formData.email} onChange={(e) => { setFormData(prev => ({ ...prev, email: e.target.value })); setIsModified(true); }} disabled={isSaving} />
                 </div>
                 <div>
-                  <Label>Phone</Label>
+                  <Label>Primary Phone</Label>
                   <Input value={formData.phone} onChange={(e) => { setFormData(prev => ({ ...prev, phone: e.target.value })); setIsModified(true); }} disabled={isSaving} />
+                </div>
+                
+                <div>
+                  <Label>Alternate Email (Personal)</Label>
+                  <Input type="email" value={formData.alternateEmail} onChange={(e) => { setFormData(prev => ({ ...prev, alternateEmail: e.target.value })); setIsModified(true); }} disabled={isSaving} placeholder="Personal email for notifications..." />
+                </div>
+                <div>
+                  <Label>Alternate Phone (Personal)</Label>
+                  <Input value={formData.alternatePhone} onChange={(e) => { setFormData(prev => ({ ...prev, alternatePhone: e.target.value })); setIsModified(true); }} disabled={isSaving} placeholder="Personal phone for notifications..." />
                 </div>
 
                 <div>
@@ -1410,6 +1442,29 @@ const PatientDetails = React.forwardRef<{
                       </div>
                     </div>
                   </div>
+
+                  {(formData.alternateEmail || formData.alternatePhone) && (
+                    <div className="p-3 bg-green-50/50 border border-green-100 rounded-lg">
+                      <p className="text-xs text-green-700 font-medium mb-1">Personal Contact Details (Overridden)</p>
+                      <div className="grid grid-cols-2 gap-4 text-sm mt-2">
+                        {formData.alternateEmail && (
+                          <div>
+                            <span className="text-gray-500 block">Personal Email</span>
+                            <span className="font-medium text-green-700">{formData.alternateEmail}</span>
+                          </div>
+                        )}
+                        {formData.alternatePhone && (
+                          <div>
+                            <span className="text-gray-500 block">Personal Phone</span>
+                            <span className="font-medium text-green-700">{formData.alternatePhone}</span>
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-green-600 mt-2 italic">
+                        * These personal details will be used for notifications instead of the primary account details.
+                      </p>
+                    </div>
+                  )}
                   
                   <div className="p-3 bg-blue-50/50 border border-blue-100 rounded-lg">
                     <p className="text-xs text-blue-700 font-medium mb-1">Inherited Address</p>

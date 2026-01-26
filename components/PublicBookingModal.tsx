@@ -26,7 +26,6 @@ import {
 import { APPOINTMENT_TYPES } from "@/lib/appointment-types";
 import { TIME_SLOTS, formatTimeTo12h, getServiceType } from "@/lib/time-slots";
 import { useDoctors } from "@/hooks/useDoctors";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 interface PublicBookingModalProps {
@@ -36,7 +35,6 @@ interface PublicBookingModalProps {
 
 export function PublicBookingModal({ isOpen, onClose }: PublicBookingModalProps) {
   const { doctors, isLoadingDoctors } = useDoctors();
-  const router = useRouter();
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [dateError, setDateError] = useState("");
@@ -57,7 +55,6 @@ export function PublicBookingModal({ isOpen, onClose }: PublicBookingModalProps)
   });
 
   const [dateAppointments, setDateAppointments] = useState<any[]>([]);
-  const [isLoadingAppointments, setIsLoadingAppointments] = useState(false);
 
   useEffect(() => {
     const fetchDateAppointments = async () => {
@@ -65,7 +62,6 @@ export function PublicBookingModal({ isOpen, onClose }: PublicBookingModalProps)
         setDateAppointments([]);
         return;
       }
-      setIsLoadingAppointments(true);
       try {
         const response = await fetch(`http://localhost:3001/api/appointments?startDate=${formData.date}&endDate=${formData.date}&anonymize=true`);
         const result = await response.json();
@@ -74,8 +70,6 @@ export function PublicBookingModal({ isOpen, onClose }: PublicBookingModalProps)
         }
       } catch (error) {
         console.error("Error fetching appointments for date:", error);
-      } finally {
-        setIsLoadingAppointments(false);
       }
     };
 
@@ -100,7 +94,7 @@ export function PublicBookingModal({ isOpen, onClose }: PublicBookingModalProps)
     const newEnd = newStart + 30; // Default public booking duration is 30 mins
 
     return dateAppointments.some(apt => {
-      if (apt.status === 'cancelled') return false;
+      if (apt.status === 'cancelled' || apt.paymentStatus === 'unpaid') return false;
       
       const [aptHours, aptMinutes] = apt.time.split(':').map(Number);
       const aptStart = aptHours * 60 + aptMinutes;
@@ -122,6 +116,7 @@ export function PublicBookingModal({ isOpen, onClose }: PublicBookingModalProps)
         phone: "",
         date: "",
         time: "",
+        duration: 30,
         type: -1,
         customType: "",
         doctor: "",

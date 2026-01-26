@@ -81,7 +81,7 @@ const OrdersContent = () => {
                              doctorName.includes(searchQuery.toLowerCase());
 
         // Status filter
-        const matchesStatus = statusFilter === "all" || apt.status === statusFilter;
+        const matchesStatus = statusFilter === "all" ? apt.status !== "pending" : apt.status === statusFilter;
 
         // Payment status filter
         const matchesPaymentStatus = paymentStatusFilter === "all" || apt.paymentStatus === paymentStatusFilter;

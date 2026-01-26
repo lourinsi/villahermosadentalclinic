@@ -151,7 +151,8 @@ export function PatientBookingModal() {
       const doctorConflict = dateAppointments.find(apt => 
         apt.doctor === doctor.name && 
         apt.time === formData.time && 
-        apt.status !== 'cancelled'
+        apt.status !== 'cancelled' &&
+        apt.paymentStatus !== 'unpaid'
       );
       return !doctorConflict;
     });
@@ -205,7 +206,8 @@ export function PatientBookingModal() {
         apt.patientId === formData.patientId && 
         apt.date === formData.date && 
         apt.time === formData.time &&
-        apt.status !== 'cancelled'
+        apt.status !== 'cancelled' &&
+        apt.paymentStatus !== 'unpaid'
       );
 
       if (patientConflict) {
@@ -222,7 +224,8 @@ export function PatientBookingModal() {
       if (conflictResult.success && conflictResult.data) {
         const doctorConflict = conflictResult.data.find((apt: Appointment) => 
           apt.time === formData.time && 
-          apt.status !== 'cancelled'
+          apt.status !== 'cancelled' &&
+          apt.paymentStatus !== 'unpaid'
         );
         
         if (doctorConflict) {

@@ -1,14 +1,14 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useAuth } from "@/hooks/useAuth";
-import { Patient, ApiResponse } from "@/lib/patient-types";
+import { Patient } from "@/lib/patient-types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
-import { Loader2, Plus, User as UserIcon, Search, Calendar, Pencil, Phone as PhoneIcon, Mail as MailIcon, Clock } from "lucide-react";
+import { Loader2, Plus, User as UserIcon, Search, Calendar, Pencil, Clock } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -37,7 +37,8 @@ const FamilyPage = () => {
     lastName: "",
     relationship: "Family Member",
     dateOfBirth: "",
-    phone: "",
+    alternatePhone: "",
+    alternateEmail: "",
   });
 
   const [editFormData, setEditFormData] = useState({
@@ -45,10 +46,11 @@ const FamilyPage = () => {
     lastName: "",
     relationship: "",
     dateOfBirth: "",
-    phone: "",
+    alternatePhone: "",
+    alternateEmail: "",
   });
 
-  const fetchFamilyMembers = async () => {
+  const fetchFamilyMembers = useCallback(async () => {
     if (user?.patientId) {
       try {
         setIsLoading(true);
@@ -65,13 +67,15 @@ const FamilyPage = () => {
         setIsLoading(false);
       }
     }
-  };
+  }, [user?.patientId]);
 
   const filteredMembers = useMemo(() => {
     return familyMembers.filter(member => 
       member.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       member.relationship?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      member.phone?.toLowerCase().includes(searchTerm.toLowerCase())
+      member.phone?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      member.alternatePhone?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      member.alternateEmail?.toLowerCase().includes(searchTerm.toLowerCase())
     );
   }, [familyMembers, searchTerm]);
 
@@ -79,7 +83,7 @@ const FamilyPage = () => {
     if (!authLoading && user) {
       fetchFamilyMembers();
     }
-  }, [user, authLoading]);
+  }, [user, authLoading, fetchFamilyMembers]);
 
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -104,7 +108,8 @@ const FamilyPage = () => {
           lastName: "",
           relationship: "Family Member",
           dateOfBirth: "",
-          phone: "",
+          alternatePhone: "",
+          alternateEmail: "",
         });
         fetchFamilyMembers();
       } else {
@@ -124,7 +129,8 @@ const FamilyPage = () => {
       lastName: member.lastName || "",
       relationship: member.relationship || "",
       dateOfBirth: member.dateOfBirth || "",
-      phone: member.phone || "",
+      alternatePhone: member.alternatePhone || "",
+      alternateEmail: member.alternateEmail || "",
     });
     setIsEditing(true);
   };
@@ -242,14 +248,26 @@ const FamilyPage = () => {
                   onChange={(e) => setNewMember({ ...newMember, dateOfBirth: e.target.value })}
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="phone">Personal Phone (Optional)</Label>
-                <Input
-                  id="phone"
-                  placeholder="Personal contact number"
-                  value={newMember.phone}
-                  onChange={(e) => setNewMember({ ...newMember, phone: e.target.value })}
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="phone">Personal Phone</Label>
+                  <Input
+                    id="phone"
+                    placeholder="Optional contact number"
+                    value={newMember.alternatePhone}
+                    onChange={(e) => setNewMember({ ...newMember, alternatePhone: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="email">Personal Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="Optional email"
+                    value={newMember.alternateEmail}
+                    onChange={(e) => setNewMember({ ...newMember, alternateEmail: e.target.value })}
+                  />
+                </div>
               </div>
               <p className="text-sm text-gray-500">
                 Email and main account number are inherited from your profile. Family members cannot use their personal number to login.
@@ -315,6 +333,18 @@ const FamilyPage = () => {
                     <span className="text-gray-500">Phone</span>
                     <span className="font-medium text-gray-900">{member.phone}</span>
                   </div>
+                  {member.alternateEmail && (
+                    <div className="flex items-center justify-between border-t border-gray-100 pt-2 mt-2">
+                      <span className="text-gray-400 text-[11px] uppercase font-semibold">Personal Email</span>
+                      <span className="font-medium text-gray-900 truncate max-w-[150px]">{member.alternateEmail}</span>
+                    </div>
+                  )}
+                  {member.alternatePhone && (
+                    <div className="flex items-center justify-between border-t border-gray-100 pt-2">
+                      <span className="text-gray-400 text-[11px] uppercase font-semibold">Personal Phone</span>
+                      <span className="font-medium text-gray-900">{member.alternatePhone}</span>
+                    </div>
+                  )}
                 </div>
                 
                 <div className="grid grid-cols-1 gap-2">
@@ -377,13 +407,23 @@ const FamilyPage = () => {
                 onChange={(e) => setEditFormData({ ...editFormData, dateOfBirth: e.target.value })}
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="editPhone">Personal Phone</Label>
-              <Input
-                id="editPhone"
-                value={editFormData.phone}
-                onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="editPhone">Personal Phone</Label>
+                <Input
+                  id="editPhone"
+                  value={editFormData.alternatePhone}
+                  onChange={(e) => setEditFormData({ ...editFormData, alternatePhone: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="editEmail">Personal Email</Label>
+                <Input
+                  id="editEmail"
+                  value={editFormData.alternateEmail}
+                  onChange={(e) => setEditFormData({ ...editFormData, alternateEmail: e.target.value })}
+                />
+              </div>
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setIsEditing(false)}>Cancel</Button>

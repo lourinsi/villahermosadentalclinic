@@ -21,6 +21,8 @@ export function AddPatientModal() {
     lastName: "",
     email: "",
     phone: "",
+    alternateEmail: "",
+    alternatePhone: "",
     dateOfBirth: "",
     address: "",
     city: "",
@@ -69,6 +71,8 @@ export function AddPatientModal() {
           lastName: "",
           email: "",
           phone: "",
+          alternateEmail: "",
+          alternatePhone: "",
           dateOfBirth: "",
           address: "",
           city: "",
@@ -121,7 +125,7 @@ export function AddPatientModal() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Email *</Label>
+                <Label>Primary Email *</Label>
                 <Input
                   type="email"
                   value={formData.email}
@@ -130,12 +134,28 @@ export function AddPatientModal() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Phone *</Label>
+                <Label>Primary Phone *</Label>
                 <Input
                   type="tel"
                   value={formData.phone}
                   onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
                   required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Alternate Email (Personal)</Label>
+                <Input
+                  type="email"
+                  value={formData.alternateEmail}
+                  onChange={(e) => setFormData(prev => ({ ...prev, alternateEmail: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Alternate Phone (Personal)</Label>
+                <Input
+                  type="tel"
+                  value={formData.alternatePhone}
+                  onChange={(e) => setFormData(prev => ({ ...prev, alternatePhone: e.target.value }))}
                 />
               </div>
               <div className="space-y-2">

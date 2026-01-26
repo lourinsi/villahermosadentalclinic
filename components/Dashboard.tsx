@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
-import { Users, Calendar, DollarSign, TrendingUp, Clock, CheckCircle } from "lucide-react";
+import { Users, Calendar, DollarSign, TrendingUp, Clock, CheckCircle, AlertCircle } from "lucide-react";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from "recharts";
 import { Badge } from "./ui/badge";
@@ -63,7 +63,7 @@ const recentAppointments = [
 ];
 
 export function Dashboard() {
-  const { openCreateModal, openAddPatientModal, appointments, refreshTrigger } = useAppointmentModal();
+  const { openCreateModal, openAddPatientModal, appointments, refreshTrigger, openEditModal } = useAppointmentModal();
   const [viewMode, setViewMode] = useState<"day" | "week" | "month">("day");
   const [totalPatients, setTotalPatients] = useState(0);
   const [isLoadingView, setIsLoadingView] = useState(false);
@@ -99,7 +99,9 @@ export function Dashboard() {
 
     if (viewMode === "day") {
       const dayStr = today.toISOString().split("T")[0];
-      return appointments.filter((apt: Appointment) => parseBackendDateToLocal(apt.date).toISOString().split("T")[0] === dayStr);
+      return appointments
+        .filter((apt: Appointment) => parseBackendDateToLocal(apt.date).toISOString().split("T")[0] === dayStr)
+        .filter((apt: Appointment) => apt.status !== "pending");
     } else if (viewMode === "week") {
       const weekStart = new Date(today);
       weekStart.setDate(today.getDate() - today.getDay());
@@ -109,10 +111,12 @@ export function Dashboard() {
       weekEnd.setDate(weekStart.getDate() + 6);
       weekEnd.setHours(23, 59, 59, 999);
 
-      return appointments.filter((apt: Appointment) => {
-        const aptDate = parseBackendDateToLocal(apt.date);
-        return aptDate >= weekStart && aptDate <= weekEnd;
-      });
+      return appointments
+        .filter((apt: Appointment) => {
+          const aptDate = parseBackendDateToLocal(apt.date);
+          return aptDate >= weekStart && aptDate <= weekEnd;
+        })
+        .filter((apt: Appointment) => apt.status !== "pending");
     } else {
       // month - today's month
       const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -121,12 +125,18 @@ export function Dashboard() {
       const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
       monthEnd.setHours(23, 59, 59, 999);
 
-      return appointments.filter((apt: Appointment) => {
-        const aptDate = parseBackendDateToLocal(apt.date);
-        return aptDate >= monthStart && aptDate <= monthEnd;
-      });
+      return appointments
+        .filter((apt: Appointment) => {
+          const aptDate = parseBackendDateToLocal(apt.date);
+          return aptDate >= monthStart && aptDate <= monthEnd;
+        })
+        .filter((apt: Appointment) => apt.status !== "pending");
     }
   }, [appointments, viewMode]);
+
+  const pendingAppointmentsCount = useMemo(() => {
+    return appointments.filter(apt => apt.status === "pending").length;
+  }, [appointments]);
 
   // Build dynamic stats based on backend data
   const dynamicStats = [
@@ -135,28 +145,32 @@ export function Dashboard() {
       value: totalPatients.toString(),
       change: "+12%",
       icon: Users,
-      color: "text-blue-600"
+      color: "text-blue-600",
+      bgColor: "bg-blue-50"
     },
     {
       title: viewMode === "day" ? "Today's Appointments" : viewMode === "week" ? "This Week's Appointments" : "This Month's Appointments",
       value: filteredAppointments.length.toString(),
       change: "+2",
       icon: Calendar,
-      color: "text-green-600"
+      color: "text-green-600",
+      bgColor: "bg-green-50"
+    },
+    {
+      title: "Pending",
+      value: pendingAppointmentsCount.toString(),
+      change: "Action required",
+      icon: AlertCircle,
+      color: "text-amber-600",
+      bgColor: "bg-amber-50"
     },
     {
       title: "Monthly Revenue",
       value: "$48,250",
       change: "+8.2%",
       icon: DollarSign,
-      color: "text-purple-600"
-    },
-    {
-      title: "Patient Satisfaction",
-      value: "4.9/5",
-      change: "+0.1",
-      icon: TrendingUp,
-      color: "text-orange-600"
+      color: "text-purple-600",
+      bgColor: "bg-purple-50"
     }
   ];
 
@@ -199,17 +213,19 @@ export function Dashboard() {
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {dynamicStats.map((stat, index) => (
-          <Card key={index}>
+          <Card key={index} className="hover:shadow-md transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 {stat.title}
               </CardTitle>
-              <stat.icon className={`h-4 w-4 ${stat.color}`} />
+              <div className={`p-2 rounded-lg ${stat.bgColor || 'bg-gray-50'}`}>
+                <stat.icon className={`h-4 w-4 ${stat.color}`} />
+              </div>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{stat.value}</div>
               <p className="text-xs text-muted-foreground">
-                <span className="text-green-600">{stat.change}</span> from last month
+                <span className={stat.title === "Pending" ? "text-amber-600 font-medium" : "text-green-600"}>{stat.change}</span> {stat.title !== "Pending" && "from last month"}
               </p>
             </CardContent>
           </Card>
@@ -318,7 +334,11 @@ export function Dashboard() {
                 </div>
               ) : filteredAppointments.length > 0 ? (
                 filteredAppointments.map((appointment: Appointment) => (
-                  <div key={appointment.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                  <div 
+                    key={appointment.id} 
+                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
+                    onClick={() => openEditModal(appointment)}
+                  >
                     <div className="flex items-center space-x-3">
                       <div className="text-sm font-medium text-violet-600 min-w-[60px]">
                         <div>{appointment.time}</div>

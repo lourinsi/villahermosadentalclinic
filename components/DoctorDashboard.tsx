@@ -12,7 +12,7 @@ import { parseBackendDateToLocal } from "../lib/utils";
 import { useAuth } from "@/hooks/useAuth.tsx";
 
 export function DoctorDashboard() {
-  const { openCreateModal, appointments, refreshTrigger } = useAppointmentModal();
+  const { openCreateModal, appointments, refreshTrigger, openEditModal } = useAppointmentModal();
   const { user } = useAuth();
   const [viewMode, setViewMode] = useState<"day" | "week" | "month">("day");
   const [isLoadingView, setIsLoadingView] = useState(false);
@@ -33,7 +33,7 @@ export function DoctorDashboard() {
     return () => clearTimeout(t);
   }, [viewMode]);
 
-  const filteredAppointments = useMemo(() => {
+  const appointmentsByDate = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -68,6 +68,10 @@ export function DoctorDashboard() {
     }
   }, [myAppointments, viewMode]);
 
+  const filteredAppointments = useMemo(() => {
+    return appointmentsByDate.filter(apt => apt.status !== "pending");
+  }, [appointmentsByDate]);
+
   // Get unique patients this doctor has seen
   const uniquePatients = useMemo(() => {
     const patientNames = new Set(myAppointments.map(apt => apt.patientName));
@@ -75,14 +79,14 @@ export function DoctorDashboard() {
   }, [myAppointments]);
 
   // Count pending appointments
-  const pendingAppointments = useMemo(() => {
-    return filteredAppointments.filter(apt => apt.status === "pending" || apt.status === "scheduled").length;
-  }, [filteredAppointments]);
+  const pendingAppointmentsCount = useMemo(() => {
+    return appointmentsByDate.filter(apt => apt.status === "pending").length;
+  }, [appointmentsByDate]);
 
   // Count completed appointments
   const completedAppointments = useMemo(() => {
-    return filteredAppointments.filter(apt => apt.status === "completed").length;
-  }, [filteredAppointments]);
+    return appointmentsByDate.filter(apt => apt.status === "completed").length;
+  }, [appointmentsByDate]);
 
   const dynamicStats = [
     {
@@ -103,7 +107,7 @@ export function DoctorDashboard() {
     },
     {
       title: "Pending",
-      value: pendingAppointments.toString(),
+      value: pendingAppointmentsCount.toString(),
       description: "Awaiting confirmation",
       icon: AlertCircle,
       color: "text-amber-600",
@@ -204,7 +208,11 @@ export function DoctorDashboard() {
                 </div>
               ) : filteredAppointments.length > 0 ? (
                 filteredAppointments.map((appointment: Appointment) => (
-                  <div key={appointment.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                  <div 
+                    key={appointment.id} 
+                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
+                    onClick={() => openEditModal(appointment)}
+                  >
                     <div className="flex items-center space-x-3">
                       <div className="text-sm font-medium text-violet-600 min-w-[60px]">
                         <div>{appointment.time}</div>

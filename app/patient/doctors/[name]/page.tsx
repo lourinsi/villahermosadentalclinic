@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useDoctors } from "@/hooks/useDoctors";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { DoctorCalendar } from "@/components/DoctorCalendar";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -20,7 +20,6 @@ import {
 import { TIME_SLOTS, formatTimeTo12h } from "@/lib/time-slots";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type ViewMode = "day" | "week" | "month";
 
@@ -82,7 +81,11 @@ export default function DoctorAvailabilityPage() {
 
   const getDaySlots = useCallback((date: Date) => {
     const dateStr = formatDateToYYYYMMDD(date);
-    const dayAppointments = appointments.filter(apt => apt.date === dateStr && apt.status !== 'cancelled');
+    const dayAppointments = appointments.filter(apt => 
+      apt.date === dateStr && 
+      apt.status !== 'cancelled' && 
+      apt.paymentStatus !== 'unpaid'
+    );
     const bookedTimes = dayAppointments.map(apt => apt.time);
     
     const now = new Date();
@@ -506,16 +509,16 @@ export default function DoctorAvailabilityPage() {
              {/* Legend */}
              <div className="flex items-center gap-6 mt-8 px-6 py-4 bg-white rounded-3xl shadow-sm border border-gray-100 w-fit">
                 <div className="flex items-center gap-2">
-                   <div className="h-3 w-3 rounded-full bg-[#4b7a14]" />
-                   <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Available (Online)</span>
+                   <div className="h-3 w-3 rounded-full bg-green-600" />
+                   <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Open Slot</span>
                 </div>
                 <div className="flex items-center gap-2">
-                   <div className="h-3 w-3 rounded-full bg-[#c88d3d]" />
-                   <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Available (Face-to-Face)</span>
-                </div>
-                <div className="flex items-center gap-2">
-                   <div className="h-3 w-3 rounded-full bg-gray-200" />
+                   <div className="h-3 w-3 rounded-full bg-orange-500" />
                    <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Booked Slot</span>
+                </div>
+                <div className="flex items-center gap-2">
+                   <div className="h-3 w-3 rounded-full bg-gray-400" />
+                   <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Passed Slot</span>
                 </div>
              </div>
           </div>
