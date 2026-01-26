@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -16,6 +16,8 @@ import { getAppointmentTypeName } from "@/lib/appointment-types";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import { parseBackendDateToLocal } from "@/lib/utils";
 import { toast } from "sonner";
+import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { Appointment } from "@/hooks/useAppointments";
 
 export function PatientPaymentModal() {
   const {
@@ -25,16 +27,51 @@ export function PatientPaymentModal() {
     appointments,
   } = usePaymentModal();
 
+  const { refreshAppointments } = useAppointmentModal();
+
   const [paymentMethod, setPaymentMethod] = useState<string>("GCash");
+  const [isLoading, setIsLoading] = useState(false);
 
   const selectedAppointment = appointments.find(
-    (a: any) => a.id === appointmentId
+    (a: Appointment) => a.id === appointmentId
   );
 
-  const handleConfirmPayment = () => {
-    // Payment logic implementation placeholder
-    toast.success("Payment successful! (Simulated)");
-    closePaymentModal();
+  const handleConfirmPayment = async () => {
+    if (!selectedAppointment) return;
+
+    try {
+      setIsLoading(true);
+      const body = {
+        appointmentId: selectedAppointment.id,
+        patientId: selectedAppointment.patientId,
+        amount: selectedAppointment.price || 0,
+        method: paymentMethod,
+        date: new Date().toISOString().split("T")[0],
+        transactionId: `T-${Math.random().toString(36).slice(2, 9).toUpperCase()}`,
+        notes: "Online payment via Patient Portal",
+      };
+
+      const res = await fetch(`http://localhost:3001/api/payments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json?.message || "Failed to complete payment");
+        return;
+      }
+
+      toast.success("Payment successful!");
+      refreshAppointments();
+      closePaymentModal();
+    } catch (err) {
+      console.error("Error completing payment", err);
+      toast.error("Error completing payment");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   if (!selectedAppointment) return null;
@@ -135,8 +172,9 @@ export function PatientPaymentModal() {
           <Button
             className="w-full sm:flex-1 bg-blue-600 hover:bg-blue-700"
             onClick={handleConfirmPayment}
+            disabled={isLoading}
           >
-            Confirm Payment
+            {isLoading ? "Processing..." : "Confirm Payment"}
           </Button>
         </DialogFooter>
       </DialogContent>

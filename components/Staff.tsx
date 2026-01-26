@@ -875,7 +875,7 @@ export function StaffView() {
                     {staffData.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
-                          No staff members found. Click 'Add Staff Member' to get started!
+                          No staff members found. Click &apos;Add Staff Member&apos; to get started!
                         </TableCell>
                       </TableRow>
                     ) : (
@@ -1092,7 +1092,7 @@ export function StaffView() {
                     {financialRecords.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
-                          No financial records found. Click 'Add Transaction' to add one!
+                          No financial records found. Click &apos;Add Transaction&apos; to add one!
                         </TableCell>
                       </TableRow>
                     ) : (
@@ -1615,7 +1615,7 @@ export function StaffView() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <CalendarDays className="h-5 w-5 text-violet-600" />
-              {scheduleStaff?.name}'s Schedule
+              {scheduleStaff?.name}&apos;s Schedule
             </DialogTitle>
           </DialogHeader>
 

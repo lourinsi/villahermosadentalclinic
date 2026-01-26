@@ -7,12 +7,13 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/componen
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Loader2, Search, Calendar, MapPin, Phone, Mail, Award } from "lucide-react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { DoctorAvailabilityDialog } from "@/components/DoctorAvailabilityDialog";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 
 const FindDoctorsPage = () => {
+  const router = useRouter();
   const { doctors, isLoadingDoctors } = useDoctors();
   const { openPatientBookingModal } = useAppointmentModal();
   const [searchTerm, setSearchTerm] = useState("");
@@ -92,13 +93,12 @@ const FindDoctorsPage = () => {
                 </div>
               </CardContent>
               <CardFooter className="pt-2 border-t bg-muted/5 flex flex-col gap-2">
-                <DoctorAvailabilityDialog doctorName={doctor.name} />
                 <Button 
-                  onClick={() => openPatientBookingModal(undefined, undefined, doctor.name)}
-                  className="w-full gap-2"
+                  onClick={() => router.push(`/patient/doctors/${encodeURIComponent(doctor.name)}`)}
+                  className="w-full gap-2 bg-blue-600 hover:bg-blue-700"
                 >
                   <Calendar className="h-4 w-4" />
-                  Book Appointment
+                  View Availability
                 </Button>
               </CardFooter>
             </Card>

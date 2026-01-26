@@ -11,3 +11,10 @@ export function formatTimeTo12h(time24: string): string {
   const hours12 = hours % 12 || 12;
   return `${hours12}:${minutes.toString().padStart(2, "0")} ${period}`;
 }
+
+export function getServiceType(time24: string): "ONLINE" | "FACE-TO-FACE" {
+  if (!time24) return "FACE-TO-FACE";
+  const [hours] = time24.split(":").map(Number);
+  // Example logic: Morning is Face-to-Face, Afternoon is Online
+  return hours < 13 ? "FACE-TO-FACE" : "ONLINE";
+}

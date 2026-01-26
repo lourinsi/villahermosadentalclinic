@@ -5,6 +5,7 @@ import { DateRange } from "react-day-picker";
 import { Card, CardContent } from "./ui/card";
 import { Button } from "./ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { useRouter } from "next/navigation";
 import {
   ChevronLeft,
   ChevronRight,
@@ -48,6 +49,7 @@ const appointmentColors: Record<string, { bg: string; text: string; border: stri
 
 export function PatientCalendarView() {
   const { user } = useAuth();
+  const router = useRouter();
   const parentId = user?.patientId;
 
   const [viewMode, setViewMode] = useState<ViewMode>("month");
@@ -61,6 +63,13 @@ export function PatientCalendarView() {
 
   const { openPatientBookingModal, appointments, isLoading, refreshAppointments, deleteAppointment, updateAppointment } = useAppointmentModal();
   const { openPatientPaymentModal } = usePaymentModal();
+
+  const filteredAppointments = useMemo(() => {
+    if (statusFilter === "all") {
+      return appointments.filter(apt => apt.status !== "pending");
+    }
+    return appointments;
+  }, [appointments, statusFilter]);
 
   const handleDelete = async (id: string) => {
     if (!confirm("Are you sure you want to delete this pending appointment?")) return;
@@ -321,7 +330,7 @@ export function PatientCalendarView() {
 
   const getAppointmentsForDate = (date: Date) => {
     const dateStr = formatDateToYYYYMMDD(date);
-    return appointments.filter(apt => apt.date === dateStr);
+    return filteredAppointments.filter(apt => apt.date === dateStr);
   };
 
   const getColorForType = (type: string) => {
@@ -545,7 +554,7 @@ export function PatientCalendarView() {
   };
 
   const renderCustomView = () => {
-    const sortedAppointments = [...appointments].sort((a, b) => parseBackendDateToLocal(a.date).getTime() - parseBackendDateToLocal(b.date).getTime());
+    const sortedAppointments = [...filteredAppointments].sort((a, b) => parseBackendDateToLocal(a.date).getTime() - parseBackendDateToLocal(b.date).getTime());
     
     return (
       <div className="space-y-4 p-4">
@@ -675,7 +684,7 @@ export function PatientCalendarView() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">My Appointments</h1>
         <Button 
-          onClick={() => openPatientBookingModal()} 
+          onClick={() => router.push('/patient/doctors')} 
           className="bg-blue-600 hover:bg-blue-700 text-white gap-2"
         >
           <Plus className="h-4 w-4" />
@@ -771,7 +780,6 @@ export function PatientCalendarView() {
                     <SelectContent>
                       <SelectItem value="all">All Statuses</SelectItem>
                       <SelectItem value="scheduled">Scheduled</SelectItem>
-                      <SelectItem value="pending">Pending</SelectItem>
                       <SelectItem value="confirmed">Confirmed</SelectItem>
                       <SelectItem value="completed">Completed</SelectItem>
                       <SelectItem value="cancelled">Cancelled</SelectItem>

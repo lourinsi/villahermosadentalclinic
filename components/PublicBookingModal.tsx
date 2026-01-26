@@ -24,7 +24,7 @@ import {
   LogIn,
 } from "lucide-react";
 import { APPOINTMENT_TYPES } from "@/lib/appointment-types";
-import { TIME_SLOTS, formatTimeTo12h } from "@/lib/time-slots";
+import { TIME_SLOTS, formatTimeTo12h, getServiceType } from "@/lib/time-slots";
 import { useDoctors } from "@/hooks/useDoctors";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -53,6 +53,7 @@ export function PublicBookingModal({ isOpen, onClose }: PublicBookingModalProps)
     customType: "",
     doctor: "",
     notes: "",
+    serviceType: "",
   });
 
   const [dateAppointments, setDateAppointments] = useState<any[]>([]);
@@ -80,6 +81,16 @@ export function PublicBookingModal({ isOpen, onClose }: PublicBookingModalProps)
 
     fetchDateAppointments();
   }, [formData.date]);
+
+  // Recompute serviceType when time changes
+  useEffect(() => {
+    if (formData.time) {
+      const serviceType = getServiceType(formData.time);
+      if (formData.serviceType !== serviceType) {
+        setFormData(prev => ({ ...prev, serviceType }));
+      }
+    }
+  }, [formData.time, formData.serviceType]);
 
   const isSlotBusy = useCallback((time: string) => {
     if (!formData.date || !dateAppointments) return false;
@@ -115,6 +126,7 @@ export function PublicBookingModal({ isOpen, onClose }: PublicBookingModalProps)
         customType: "",
         doctor: "",
         notes: "",
+        serviceType: "",
       });
       setDateError("");
     }

@@ -1034,7 +1034,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
 function NewAppointmentForm({ onClose }: { onClose: () => void }) {
   return (
     <div className="p-4 text-center">
-      <p>Please use the "New Appointment" button in the header.</p>
+      <p>Please use the &quot;New Appointment&quot; button in the header.</p>
       <Button onClick={onClose} className="mt-4">Close</Button>
     </div>
   );

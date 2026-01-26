@@ -16,11 +16,12 @@ interface AppointmentModalContextType {
   newAppointmentPatientName?: string;
   newAppointmentPatientId?: string;
   newAppointmentDoctorName?: string;
+  newAppointmentServiceType?: string;
   openCreateModal: (date?: Date, time?: string) => void;
   closeCreateModal: () => void;
   openScheduleModal: (patientName?: string, patientId?: string) => void;
   closeScheduleModal: () => void;
-  openPatientBookingModal: (date?: Date, time?: string, doctorName?: string) => void;
+  openPatientBookingModal: (date?: Date, time?: string, doctorName?: string, serviceType?: string) => void;
   closePatientBookingModal: () => void;
   openAddPatientModal: () => void;
   closeAddPatientModal: () => void;
@@ -54,6 +55,7 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
   const [newAppointmentPatientName, setNewAppointmentPatientName] = useState<string>();
   const [newAppointmentPatientId, setNewAppointmentPatientId] = useState<string>();
   const [newAppointmentDoctorName, setNewAppointmentDoctorName] = useState<string>();
+  const [newAppointmentServiceType, setNewAppointmentServiceType] = useState<string>();
 
   const [filters, setFilters] = useState<AppointmentFilters | undefined>(undefined);
 
@@ -83,10 +85,11 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
 
   const closeScheduleModal = useCallback(() => setScheduleModalOpen(false), []);
 
-  const openPatientBookingModal = useCallback((date?: Date, time?: string, doctorName?: string) => {
+  const openPatientBookingModal = useCallback((date?: Date, time?: string, doctorName?: string, serviceType?: string) => {
     setNewAppointmentDate(date);
     setNewAppointmentTime(time);
     setNewAppointmentDoctorName(doctorName);
+    setNewAppointmentServiceType(serviceType);
     setPatientBookingModalOpen(true);
   }, []);
 
@@ -120,6 +123,7 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
     newAppointmentPatientName,
     newAppointmentPatientId,
     newAppointmentDoctorName,
+    newAppointmentServiceType,
     openCreateModal,
     closeCreateModal,
     openScheduleModal,
@@ -152,6 +156,7 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
     newAppointmentPatientName,
     newAppointmentPatientId,
     newAppointmentDoctorName,
+    newAppointmentServiceType,
     openCreateModal,
     closeCreateModal,
     openScheduleModal,

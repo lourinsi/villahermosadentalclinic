@@ -130,7 +130,7 @@ export function RecordPaymentModal() {
                 <SelectContent>
                   {appointments.map((apt: any) => (
                     <SelectItem key={apt.id} value={apt.id}>
-                      {apt.type} - {apt.date} (Balance: $
+                      {apt.type} - {apt.date} (Balance: ₱
                       {(
                         (apt.price || 0) - (apt.totalPaid || 0)
                       ).toFixed(2)})
@@ -155,11 +155,11 @@ export function RecordPaymentModal() {
                 </div>
                 <div>
                   <div className="text-xs text-blue-700 font-medium mb-1">Total Price</div>
-                  <div className="text-sm font-semibold text-gray-900">${(selectedApt?.price || 0).toFixed(2)}</div>
+                  <div className="text-sm font-semibold text-gray-900">₱{(selectedApt?.price || 0).toFixed(2)}</div>
                 </div>
                 <div>
                   <div className="text-xs text-blue-700 font-medium mb-1">Outstanding Balance</div>
-                  <div className="text-sm font-bold text-red-600">${outstandingBalance.toFixed(2)}</div>
+                  <div className="text-sm font-bold text-red-600">₱{outstandingBalance.toFixed(2)}</div>
                 </div>
               </div>
             </div>
@@ -189,7 +189,7 @@ export function RecordPaymentModal() {
             <div>
               <Label className="text-sm font-semibold">Payment Amount</Label>
               <div className="relative">
-                <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-sm text-muted-foreground">₱</span>
                 <Input
                   type="number"
                   step="0.01"
@@ -198,7 +198,7 @@ export function RecordPaymentModal() {
                   placeholder="0.00"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
-                  className="pl-9"
+                  className="pl-7"
                 />
               </div>
               {outstandingBalance > 0 && parseFloat(amount) > outstandingBalance && (
@@ -208,7 +208,7 @@ export function RecordPaymentModal() {
               )}
               {outstandingBalance > 0 && (
                 <div className="flex items-center justify-between text-xs text-muted-foreground mt-2">
-                  <span>Outstanding: ${outstandingBalance.toFixed(2)}</span>
+                  <span>Outstanding: ₱{outstandingBalance.toFixed(2)}</span>
                   <button
                     type="button"
                     onClick={() => setAmount(String(outstandingBalance.toFixed(2)))}

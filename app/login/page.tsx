@@ -182,13 +182,13 @@ export default function PatientLoginPage() {
                 onClick={openRegistrationModal}
                 className="w-full"
               >
-                Don't have an account? Register
+                Don&apos;t have an account? Register
               </Button>
 
               {/* Default Password Note */}
               <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
                 <p className="text-xs text-blue-800">
-                  For first-time account creation (through booking or otherwise), your default password is '<strong>villahermosa123</strong>'. Your username is your email or phone number.
+                  For first-time account creation (through booking or otherwise), your default password is &apos;<strong>villahermosa123</strong>&apos;. Your username is your email or phone number.
                 </p>
               </div>
 

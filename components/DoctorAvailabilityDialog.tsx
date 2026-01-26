@@ -44,8 +44,18 @@ export function DoctorAvailabilityDialog({ doctorName }: DoctorAvailabilityDialo
 
   const availableSlots = useMemo(() => {
     const bookedTimes = appointments.map(apt => apt.time);
-    return TIME_SLOTS.filter(slot => !bookedTimes.includes(slot.value));
-  }, [appointments]);
+    const now = new Date();
+    const isToday = selectedDate && formatDateToYYYYMMDD(selectedDate) === formatDateToYYYYMMDD(now);
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+
+    return TIME_SLOTS.filter(slot => {
+      const isBooked = bookedTimes.includes(slot);
+      const [hour, minute] = slot.split(':').map(Number);
+      const isPastTime = isToday && (hour < currentHour || (hour === currentHour && minute <= currentMinute));
+      return !isBooked && !isPastTime;
+    });
+  }, [appointments, selectedDate]);
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
@@ -55,54 +65,58 @@ export function DoctorAvailabilityDialog({ doctorName }: DoctorAvailabilityDialo
           View Availability
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>Availability for {doctorName}</DialogTitle>
+      <DialogContent className="max-w-4xl p-6">
+        <DialogHeader className="mb-4">
+          <DialogTitle className="text-2xl font-bold">Availability for {doctorName}</DialogTitle>
         </DialogHeader>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
-          <div>
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
+          <div className="md:col-span-5">
             <Calendar
               mode="single"
               selected={selectedDate}
               onSelect={setSelectedDate}
-              className="rounded-md border shadow"
+              className="rounded-xl border shadow-md w-full"
               disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
             />
           </div>
-          <div className="space-y-4">
-            <h3 className="font-semibold flex items-center gap-2">
-              <CalendarIcon className="h-4 w-4 text-primary" />
+          <div className="md:col-span-7 flex flex-col">
+            <h3 className="font-bold text-xl flex items-center gap-2 mb-6 text-gray-800">
+              <CalendarIcon className="h-5 w-5 text-blue-600" />
               {selectedDate ? selectedDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'Select a date'}
             </h3>
             
-            {isLoading ? (
-              <div className="flex justify-center py-8">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              </div>
-            ) : availableSlots.length > 0 ? (
-              <div className="grid grid-cols-3 gap-2">
-                {availableSlots.map(slot => (
-                  <Button
-                    key={slot.value}
-                    variant="ghost"
-                    size="sm"
-                    className="border hover:bg-primary hover:text-white"
-                    onClick={() => {
-                      setIsOpen(false);
-                      openPatientBookingModal(selectedDate, slot.value, doctorName);
-                    }}
-                  >
-                    {formatTimeTo12h(slot.value)}
-                  </Button>
-                ))}
-              </div>
-            ) : (
-              <p className="text-muted-foreground py-8 text-center">No available slots for this date.</p>
-            )}
+            <div className="flex-1">
+              {isLoading ? (
+                <div className="flex justify-center items-center h-48">
+                  <Loader2 className="h-10 w-10 animate-spin text-blue-600" />
+                </div>
+              ) : availableSlots.length > 0 ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {availableSlots.map(slot => (
+                    <Button
+                      key={slot}
+                      variant="outline"
+                      className="h-11 border-gray-200 hover:border-blue-600 hover:bg-blue-50 hover:text-blue-700 transition-all font-medium rounded-lg shadow-sm"
+                      onClick={() => {
+                        setIsOpen(false);
+                        openPatientBookingModal(selectedDate, slot, doctorName);
+                      }}
+                    >
+                      {formatTimeTo12h(slot)}
+                    </Button>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-48 text-gray-500 bg-gray-50 rounded-xl border-2 border-dashed">
+                  <Clock className="h-10 w-10 mb-2 opacity-20" />
+                  <p className="font-medium">No available slots for this date.</p>
+                </div>
+              )}
+            </div>
 
-            <div className="pt-4">
+            <div className="mt-8 pt-6 border-t">
               <Button 
-                className="w-full"
+                className="w-full h-12 text-lg font-semibold bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-100 transition-all rounded-xl"
                 onClick={() => {
                   setIsOpen(false);
                   openPatientBookingModal(selectedDate, undefined, doctorName);
