@@ -20,6 +20,8 @@ import {
   Mail,
   Save
 } from "lucide-react";
+import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 
 export function SettingsView() {
   const [clinicName, setClinicName] = useState("Villahermosa Dental Clinic");
@@ -124,9 +126,27 @@ export function SettingsView() {
                   <div key={day} className="flex items-center justify-between">
                     <span className="w-24">{day}</span>
                     <div className="flex items-center space-x-2">
-                      <Input type="time" defaultValue="09:00" className="w-32" />
+                      <Select defaultValue={TIME_SLOTS.indexOf("09:00").toString()}>
+                        <SelectTrigger className="w-32">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {TIME_SLOTS.map((slot, index) => (
+                            <SelectItem key={slot} value={index.toString()}>{formatTimeTo12h(slot)}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <span>to</span>
-                      <Input type="time" defaultValue="17:00" className="w-32" />
+                      <Select defaultValue={TIME_SLOTS.indexOf("17:00").toString()}>
+                        <SelectTrigger className="w-32">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {TIME_SLOTS.map((slot, index) => (
+                            <SelectItem key={slot} value={index.toString()}>{formatTimeTo12h(slot)}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <Switch defaultChecked={day !== 'Sunday'} />
                     </div>
                   </div>

@@ -6,7 +6,7 @@ import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { toast } from "sonner";
-import { useAppointmentModal } from "./AdminLayout";
+import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 
 interface AddTransactionModalProps {
   open: boolean;
@@ -50,7 +50,7 @@ export function AddTransactionModal({
         createdAt: new Date().toISOString()
       };
       console.log("Submitting transaction data:", transactionData);
-      const response = await fetch("http://localhost:3001/api/finance/transactions", {
+      const response = await fetch("http://localhost:3001/api/finance", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -136,7 +136,7 @@ export function AddTransactionModal({
 
           <div className="grid grid-cols-2 gap-6">
             <div className="space-y-2">
-              <Label>Amount ($) *</Label>
+              <Label>Amount (₱) *</Label>
               <Input
                 type="number"
                 step="0.01"

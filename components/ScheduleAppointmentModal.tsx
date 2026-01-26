@@ -1,53 +1,64 @@
-import { useState, useEffect } from "react";
+"use client";
+
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { useAppointmentModal } from "./AdminLayout";
+import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { useDoctors } from "../hooks/useDoctors";
+import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
+import { formatDateToYYYYMMDD } from "../lib/utils";
+import { APPOINTMENT_TYPES } from "../lib/appointment-types";
 
-interface ScheduleAppointmentModalProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  patientName?: string;
-  patientId?: string | number;
-}
+export function ScheduleAppointmentModal() {
+  const {
+    isScheduleModalOpen,
+    closeScheduleModal,
+    newAppointmentPatientName,
+    newAppointmentPatientId,
+    addAppointment,
+    refreshAppointments,
+    refreshTrigger,
+    appointments
+  } = useAppointmentModal();
+  const { user } = useAuth();
 
-export function ScheduleAppointmentModal({ 
-  open, 
-  onOpenChange, 
-  patientName,
-  patientId 
-}: ScheduleAppointmentModalProps) {
-  const [formData, setFormData] = useState({
-    date: "",
-    time: "",
-    type: "",
-    doctor: "",
-    notes: "",
-    patientName: "",
-    patientId: ""
-  });
+  const [dateAppointments, setDateAppointments] = useState<any[]>([]);
+  const [isLoadingDateAppointments, setIsLoadingDateAppointments] = useState(false);
 
-  const { addAppointment, refreshAppointments, refreshTrigger } = useAppointmentModal();
   const [patients, setPatients] = useState<Array<{ id: string; name: string }>>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [dateError, setDateError] = useState("");
   const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors();
 
+  const [formData, setFormData] = useState({
+    date: "",
+    time: "",
+    duration: "30",
+    type: -1,
+    customType: "",
+    doctor: user?.role === "doctor" ? user.username : "",
+    notes: "",
+    patientName: newAppointmentPatientName || "",
+    patientId: String(newAppointmentPatientId || "")
+  });
+
   // Update formData when patientName or patientId props change
   useEffect(() => {
-    if (patientName || patientId) {
+    if (newAppointmentPatientName || newAppointmentPatientId) {
       setFormData(prev => ({
         ...prev,
-        patientName: patientName || prev.patientName,
-        patientId: String(patientId || "")
+        patientName: newAppointmentPatientName || prev.patientName,
+        patientId: String(newAppointmentPatientId || ""),
+        type: -1 // Reset type when patient changes
       }));
     }
-  }, [patientName, patientId, open]);
+  }, [newAppointmentPatientName, newAppointmentPatientId, isScheduleModalOpen]);
 
   useEffect(() => {
     const fetchPatients = async () => {
@@ -67,19 +78,68 @@ export function ScheduleAppointmentModal({
   }, [refreshTrigger]);
 
   useEffect(() => {
-    if (open) {
+    if (isScheduleModalOpen) {
       reloadDoctors();
+      
+      // Update doctor if logged in as doctor and not already set
+      if (user?.role === "doctor" && !formData.doctor) {
+        setFormData(prev => ({ ...prev, doctor: user.username }));
+      }
     }
-  }, [open, reloadDoctors]);
+  }, [isScheduleModalOpen, reloadDoctors, user, formData.doctor]);
+
+  // Fetch all appointments for the selected date to check for clinic-wide conflicts
+  // This bypasses view filters to ensure global conflict detection
+  useEffect(() => {
+    const fetchDateAppointments = async () => {
+      if (!formData.date || !isScheduleModalOpen) {
+        setDateAppointments([]);
+        return;
+      }
+      setIsLoadingDateAppointments(true);
+      try {
+        const response = await fetch(`http://localhost:3001/api/appointments?startDate=${formData.date}&endDate=${formData.date}`);
+        const result = await response.json();
+        if (result.success) {
+          setDateAppointments(result.data || []);
+        }
+      } catch (error) {
+        console.error("Error fetching appointments for date:", error);
+      } finally {
+        setIsLoadingDateAppointments(false);
+      }
+    };
+
+    fetchDateAppointments();
+  }, [formData.date, isScheduleModalOpen]);
+
+  const isSlotBusy = useCallback((time: string, duration: number) => {
+    if (!formData.date || !dateAppointments) return false;
+    
+    const [hours, minutes] = time.split(':').map(Number);
+    const newStart = hours * 60 + minutes;
+    const newEnd = newStart + duration;
+
+    return dateAppointments.some(apt => {
+      if (apt.status === 'cancelled') return false;
+      
+      const [aptHours, aptMinutes] = apt.time.split(':').map(Number);
+      const aptStart = aptHours * 60 + aptMinutes;
+      const aptDuration = apt.duration || 30;
+      const aptEnd = aptStart + aptDuration;
+
+      return (newStart < aptEnd) && (newEnd > aptStart);
+    });
+  }, [formData.date, dateAppointments]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     console.log("=== SCHEDULE APPOINTMENT SUBMIT ===");
     console.log("Current formData:", formData);
-    console.log("PatientName prop:", patientName);
-    console.log("PatientId prop:", patientId);
+    console.log("PatientName prop:", newAppointmentPatientName);
+    console.log("PatientId prop:", newAppointmentPatientId);
 
-    if (!formData.patientName || !formData.date || !formData.time || !formData.type || !formData.doctor) {
+    if (!formData.patientName || !formData.date || !formData.time || formData.type === -1 || !formData.doctor) {
       console.error("Validation failed - missing required fields:", {
         patientName: formData.patientName,
         date: formData.date,
@@ -97,18 +157,14 @@ export function ScheduleAppointmentModal({
       return;
     }
 
-    // Strict validation: Check if appointment date/time is in the past
-    const appointmentDateTime = new Date(`${formData.date}T${formData.time}`);
-    const now = new Date();
+    // Relaxed validation: Check if appointment date is in the past
+    const selectedDate = new Date(`${formData.date}T00:00:00`);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     
-    console.log("Appointment DateTime:", appointmentDateTime);
-    console.log("Current DateTime:", now);
-    console.log("Is past?", appointmentDateTime <= now);
-    
-    if (appointmentDateTime <= now) {
-      console.error("Validation failed - appointment is in the past or current time");
-      const futureTime = new Date(now.getTime() + 60000);
-      toast.error(`Cannot schedule appointment for past date/time. Earliest available time is ${futureTime.toLocaleString()}`);
+    if (selectedDate < today) {
+      console.error("Validation failed - appointment is in a past date");
+      toast.error(`Cannot schedule appointment for a past date.`);
       return;
     }
 
@@ -121,7 +177,9 @@ export function ScheduleAppointmentModal({
         patientId: String(formData.patientId),
         date: formData.date,
         time: formData.time,
+        duration: parseInt(formData.duration),
         type: formData.type,
+        customType: formData.customType,
         doctor: formData.doctor,
         notes: formData.notes,
         status: "scheduled" as const
@@ -136,15 +194,17 @@ export function ScheduleAppointmentModal({
       refreshAppointments();
       
       console.log("Closing modal and resetting form...");
-      onOpenChange(false);
+      closeScheduleModal();
       setFormData({
         date: "",
         time: "",
-        type: "",
+        duration: "30",
+        type: -1,
+        customType: "",
         doctor: "",
         notes: "",
-        patientName: patientName || "",
-        patientId: String(patientId || "")
+        patientName: newAppointmentPatientName || "",
+        patientId: String(newAppointmentPatientId || "")
       });
     } catch (err) {
       console.error("Error scheduling appointment:", err);
@@ -152,24 +212,25 @@ export function ScheduleAppointmentModal({
         message: err instanceof Error ? err.message : 'Unknown error',
         stack: err instanceof Error ? err.stack : 'No stack trace'
       });
-      toast.error("Failed to schedule appointment. Check console for details.");
+      const errorMessage = err instanceof Error ? err.message : "Failed to schedule appointment";
+      toast.error(errorMessage);
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={isScheduleModalOpen} onOpenChange={closeScheduleModal}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {patientName ? `Schedule Appointment - ${patientName}` : "Schedule New Appointment"}
+            {newAppointmentPatientName ? `Schedule Appointment - ${newAppointmentPatientName}` : "Schedule New Appointment"}
           </DialogTitle>
         </DialogHeader>
         
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Patient Selection (only show if no patient is pre-selected) */}
-          {!patientName && (
+          {!newAppointmentPatientName && (
             <div className="space-y-2">
               <Label>Patient</Label>
               <Select
@@ -216,55 +277,89 @@ export function ScheduleAppointmentModal({
                   
                   setFormData(prev => ({ ...prev, date: e.target.value }));
                 }}
-                min={new Date().toISOString().split('T')[0]}
+                min={formatDateToYYYYMMDD(new Date())}
                 required
               />
               {dateError && <p className="text-red-500 text-sm">{dateError}</p>}
             </div>
             <div className="space-y-2">
-              <Label>Time</Label>
+              <Label htmlFor="time">Time</Label>
               <Select
-                value={formData.time}
-                onValueChange={(value) => setFormData(prev => ({ ...prev, time: value }))}
+                value={formData.time ? TIME_SLOTS.indexOf(formData.time).toString() : ""}
+                onValueChange={(value) => {
+                  const index = parseInt(value);
+                  if (index >= 0) {
+                    setFormData(prev => ({ ...prev, time: TIME_SLOTS[index] }));
+                  }
+                }}
               >
-                <SelectTrigger>
+                <SelectTrigger id="time">
                   <SelectValue placeholder="Select time" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="09:00">9:00 AM</SelectItem>
-                  <SelectItem value="10:00">10:00 AM</SelectItem>
-                  <SelectItem value="11:00">11:00 AM</SelectItem>
-                  <SelectItem value="14:00">2:00 PM</SelectItem>
-                  <SelectItem value="15:00">3:00 PM</SelectItem>
-                  <SelectItem value="16:00">4:00 PM</SelectItem>
+                  {TIME_SLOTS.map((slot, index) => {
+                    const busy = isSlotBusy(slot, parseInt(formData.duration));
+                    return (
+                      <SelectItem key={slot} value={index.toString()} disabled={busy}>
+                        {formatTimeTo12h(slot)} {busy && "(Occupied)"}
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Duration</Label>
+            <Select
+              value={formData.duration}
+              onValueChange={(value) => setFormData(prev => ({ ...prev, duration: value }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select duration" />
+              </SelectTrigger>
+              <SelectContent>
+                {[15, 30, 45, 60, 90, 120].map((mins) => {
+                  const busy = formData.time ? isSlotBusy(formData.time, mins) : false;
+                  return (
+                    <SelectItem key={mins} value={String(mins)} disabled={busy}>
+                      {mins >= 60 ? `${mins / 60} hour${mins / 60 > 1 ? 's' : ''}` : `${mins} minutes`} {busy && "(Conflict)"}
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
           </div>
           
           <div className="space-y-2">
             <Label>Appointment Type</Label>
             <Select
-              value={formData.type}
-              onValueChange={(value) => setFormData(prev => ({ ...prev, type: value }))}
+              value={formData.type === -1 ? "" : formData.type.toString()}
+              onValueChange={(value) => setFormData(prev => ({ ...prev, type: parseInt(value), customType: "" }))}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Select type" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="cleaning">Routine Cleaning</SelectItem>
-                <SelectItem value="checkup">Checkup</SelectItem>
-                <SelectItem value="filling">Filling</SelectItem>
-                <SelectItem value="crown">Crown</SelectItem>
-                <SelectItem value="root-canal">Root Canal</SelectItem>
-                <SelectItem value="extraction">Extraction</SelectItem>
-                <SelectItem value="consultation">Consultation</SelectItem>
-                <SelectItem value="emergency">Emergency</SelectItem>
-                <SelectItem value="whitening">Teeth Whitening</SelectItem>
-                <SelectItem value="implant">Implant</SelectItem>
+                {APPOINTMENT_TYPES.map((type, index) => (
+                  <SelectItem key={index} value={index.toString()}>{type}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
+
+          {formData.type === APPOINTMENT_TYPES.length - 1 && (
+            <div className="space-y-2">
+              <Label>Please Specify Type</Label>
+              <Input
+                placeholder="Enter custom appointment type"
+                value={formData.customType}
+                onChange={(e) => setFormData(prev => ({ ...prev, customType: e.target.value }))}
+                required
+              />
+            </div>
+          )}
           
           <div className="space-y-2">
             <Label>Doctor</Label>
@@ -302,7 +397,7 @@ export function ScheduleAppointmentModal({
           </div>
           
           <div className="flex justify-end space-x-2 pt-4">
-            <Button variant="cancel" type="button" onClick={() => onOpenChange(false)} disabled={isLoading}>
+            <Button variant="cancel" type="button" onClick={() => closeScheduleModal()} disabled={isLoading}>
               Cancel
             </Button>
             <Button variant="brand" type="submit" disabled={isLoading}>

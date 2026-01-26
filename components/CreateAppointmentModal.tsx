@@ -1,115 +1,262 @@
-import { useState, useEffect } from "react";
+"use client";
+
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { Calendar, Clock, User, Stethoscope } from "lucide-react";
-import { useAppointmentModal } from "./AdminLayout";
+
+
+
+import { Calendar, Clock, User, Stethoscope, ChevronsUpDown } from "lucide-react";
+import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { useDoctors } from "../hooks/useDoctors";
+import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
+import { APPOINTMENT_TYPES } from "../lib/appointment-types";
+import { formatDateToYYYYMMDD } from "../lib/utils";
 
-interface CreateAppointmentModalProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  selectedDate?: Date;
-}
+
 
 interface AppointmentFormData {
   patientName: string;
   patientId: string;
   date: string;
   time: string;
-  type: string;
+  duration: number;
+  type: number;
+  customType?: string;
+  price?: number;
   doctor: string;
   notes: string;
   status: string;
+  paymentStatus: "paid" | "unpaid" | "overdue" | "half-paid";
+  balance: number;
 }
 
-export function CreateAppointmentModal({ 
-  open, 
-  onOpenChange,
-  selectedDate
-}: CreateAppointmentModalProps) {
-  const { addAppointment, refreshPatients, refreshAppointments } = useAppointmentModal();
+interface ApiPatient {
+  id: string;
+  firstName: string;
+  lastName: string;
+}
+
+interface PatientSelectItem {
+  id: string;
+  name: string;
+}
+
+export function CreateAppointmentModal() {
+  const { 
+    isCreateModalOpen,
+    closeCreateModal,
+    newAppointmentDate,
+    newAppointmentTime,
+    addAppointment, 
+    refreshPatients, 
+    refreshAppointments,
+    appointments
+  } = useAppointmentModal();
+  const { user } = useAuth();
+
+  const [dateAppointments, setDateAppointments] = useState<any[]>([]);
+  const [isLoadingDateAppointments, setIsLoadingDateAppointments] = useState(false);
+
   const [formData, setFormData] = useState<AppointmentFormData>({
     patientName: "",
     patientId: "",
-    date: selectedDate ? selectedDate.toISOString().split('T')[0] : "",
+    date: "",
     time: "",
-    type: "",
-    doctor: "",
+    duration: 30,
+    type: -1,
+    customType: "",
+    price: 0,
+    doctor: user?.role === "doctor" ? user.username : "",
     notes: "",
-    status: "scheduled"
+    status: "scheduled",
+    paymentStatus: "unpaid",
+    balance: 0
   });
 
   const [showNewPatient, setShowNewPatient] = useState(false);
-  const [patients, setPatients] = useState<Array<{ id: string; name: string }>>([]);
+  const [patients, setPatients] = useState<PatientSelectItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingPatients, setIsLoadingPatients] = useState(false);
+  const [showCustomTypeInput, setShowCustomTypeInput] = useState(false);
+  const [patientSearch, setPatientSearch] = useState("");
+  const [patientInputValue, setPatientInputValue] = useState("");
 
-  const { refreshTrigger } = useAppointmentModal();
+  // New state for pagination
+  const [patientPage, setPatientPage] = useState(1);
+  const [hasMorePatients, setHasMorePatients] = useState(true);
+  const [open, setOpen] = useState(false);
+
   const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors();
 
-  useEffect(() => {
-    const fetchPatients = async () => {
-      try {
-        const res = await fetch("http://localhost:3001/api/patients");
-        const json = await res.json();
-        if (json?.success && Array.isArray(json.data)) {
-          const list = json.data.map((p: any) => ({ id: String(p.id), name: `${p.firstName} ${p.lastName}` }));
-          setPatients(list);
+  const fetchPatients = useCallback(async (page: number) => {
+    setIsLoadingPatients(true);
+    try {
+      const res = await fetch(`http://localhost:3001/api/patients?page=${page}&limit=20`);
+      const json = await res.json();
+      if (json?.success && Array.isArray(json.data)) {
+        const list: PatientSelectItem[] = json.data.map((p: ApiPatient) => ({ id: String(p.id), name: `${p.firstName} ${p.lastName}` }));
+        
+        setPatients(prev => {
+          const newList = page === 1 ? list : [...prev, ...list];
+          // Ensure selected patient is always in the list
+          if (formData.patientId) {
+            const isSelectedPatientInList = newList.some(p => p.id === formData.patientId);
+            if (!isSelectedPatientInList) {
+              const selectedPatient = prev.find(p => p.id === formData.patientId);
+              if (selectedPatient) {
+                // Prepend selected patient to the new list
+                return [selectedPatient, ...list];
+              }
+            }
+          }
+          // Remove duplicates
+          return newList.filter((patient: PatientSelectItem, index: number, self: PatientSelectItem[]) => 
+            index === self.findIndex((p: PatientSelectItem) => p.id === patient.id)
+          );
+        });
+        
+        if (json.meta) {
+          setHasMorePatients(json.meta.page < json.meta.totalPages);
+        } else {
+          setHasMorePatients(false);
         }
-      } catch (err) {
-        console.error("Failed to load patients:", err);
+      }
+    } catch (err) {
+      console.error("Failed to load patients:", err);
+      toast.error("Failed to load patients.");
+    } finally {
+      setIsLoadingPatients(false);
+    }
+  }, [formData.patientId]);
+
+  useEffect(() => {
+    if (isCreateModalOpen) {
+      let dateStr = "";
+      if (newAppointmentDate) {
+        const year = newAppointmentDate.getFullYear();
+        const month = (newAppointmentDate.getMonth() + 1).toString().padStart(2, '0');
+        const day = newAppointmentDate.getDate().toString().padStart(2, '0');
+        dateStr = `${year}-${month}-${day}`;
+      }
+
+      const newFormData: AppointmentFormData = {
+        patientName: "",
+        patientId: "",
+        date: dateStr,
+        time: newAppointmentTime || "",
+        duration: 30,
+        type: -1,
+        customType: "",
+        price: 0,
+        doctor: user?.role === "doctor" ? user.username : "",
+        notes: "",
+        status: "scheduled",
+        paymentStatus: "unpaid",
+        balance: 0
+      };
+
+      console.log("CreateAppointmentModal Details:", {
+        selectedDate: newAppointmentDate,
+        selectedTime: newAppointmentTime,
+        formData: newFormData
+      });
+      
+      setFormData(newFormData);
+      setShowNewPatient(false);
+      setShowCustomTypeInput(false);
+      reloadDoctors();
+    }
+  }, [isCreateModalOpen, newAppointmentDate, newAppointmentTime, reloadDoctors]);
+
+  // Fetch all appointments for the selected date to check for clinic-wide conflicts
+  // This bypasses view filters to ensure global conflict detection
+  useEffect(() => {
+    const fetchDateAppointments = async () => {
+      if (!formData.date || !isCreateModalOpen) {
+        setDateAppointments([]);
+        return;
+      }
+      setIsLoadingDateAppointments(true);
+      try {
+        const response = await fetch(`http://localhost:3001/api/appointments?startDate=${formData.date}&endDate=${formData.date}`);
+        const result = await response.json();
+        if (result.success) {
+          setDateAppointments(result.data || []);
+        }
+      } catch (error) {
+        console.error("Error fetching appointments for date:", error);
+      } finally {
+        setIsLoadingDateAppointments(false);
       }
     };
 
-    fetchPatients();
-  }, [refreshTrigger]);
+    fetchDateAppointments();
+  }, [formData.date, isCreateModalOpen]);
+
+  // Infinite scroll observer
+  const observer = useRef<IntersectionObserver | null>(null);
+  const lastPatientElementRef = useCallback((node: HTMLDivElement) => {
+    if (isLoadingPatients) return;
+    if (observer.current) observer.current.disconnect();
+    observer.current = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && hasMorePatients) {
+        setPatientPage(prevPage => prevPage + 1);
+      }
+    });
+    if (node) observer.current.observe(node);
+  }, [isLoadingPatients, hasMorePatients]);
 
   useEffect(() => {
-    if (open) {
-      reloadDoctors();
+    if (patientPage > 1) {
+      fetchPatients(patientPage);
     }
-  }, [open, reloadDoctors]);
+  }, [patientPage, fetchPatients]);
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("=== SUBMIT CALLED ===");
-    console.log("showNewPatient:", showNewPatient);
-    console.log("formData:", formData);
     
-    if (!formData.patientName || !formData.date || !formData.time || !formData.type || !formData.doctor) {
-      toast.error("Please fill in all required fields");
+    if (!formData.patientName || !formData.date || !formData.time || formData.type < 0 || !formData.doctor || formData.price === undefined || formData.price < 0) {
+      toast.error("Please fill in all required fields and ensure price is valid.");
+      return;
+    }
+    
+    if (formData.type === APPOINTMENT_TYPES.length - 1 && !formData.customType) {
+      toast.error("Please specify the appointment type for 'Other'.");
       return;
     }
 
-    // Prevent scheduling appointments in the past
     try {
-      const appointmentDateTime = new Date(`${formData.date}T${formData.time}`);
-      if (isNaN(appointmentDateTime.getTime()) || appointmentDateTime.getTime() <= Date.now()) {
-        toast.error("Cannot schedule an appointment in the past. Choose a future date/time.");
+      const selectedDate = new Date(`${formData.date}T00:00:00`);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      if (selectedDate < today) {
+        toast.error("Cannot schedule an appointment for a past date.");
         return;
       }
     } catch (err) {
-      // fallback - block if parsing fails
       toast.error("Invalid date/time selected");
       return;
     }
 
     setIsLoading(true);
 
-    // If admin created a new patient inline, create the patient first
+    let patientId = formData.patientId;
+    let patientName = formData.patientName;
+
     if (showNewPatient && formData.patientName) {
-      console.log("=== CREATING NEW PATIENT ===");
       try {
         const names = formData.patientName.trim().split(" ");
         const firstName = names.shift() || formData.patientName;
         const lastName = names.join(" ") || "";
-        
-        console.log("firstName:", firstName);
-        console.log("lastName:", lastName);
         
         const res = await fetch("http://localhost:3001/api/patients", {
           method: "POST",
@@ -117,64 +264,20 @@ export function CreateAppointmentModal({
           body: JSON.stringify({ firstName, lastName, email: "", phone: "" })
         });
         
-        console.log("Patient creation response status:", res.status);
-        
-        if (!res.ok) {
-          console.error("Patient creation failed with status:", res.status);
-          toast.error("Failed to create patient");
-          setIsLoading(false);
-          return;
-        }
-        
         const json = await res.json();
-        console.log("Patient creation response:", json);
         
-        if (json?.success && json.data) {
-          const newId = String(json.data.id);
-          const fullName = `${firstName} ${lastName}`.trim();
-          console.log("New patient created with ID:", newId, "Name:", fullName);
-          
-          // add to local patients list
-          setPatients(prev => [{ id: newId, name: fullName }, ...prev]);
-          
-          // Create appointment with new patient
-          console.log("=== CREATING APPOINTMENT FOR NEW PATIENT ===");
-          await addAppointment({
-            patientName: fullName,
-            patientId: newId,
-            date: formData.date,
-            time: formData.time,
-            type: formData.type,
-            doctor: formData.doctor,
-            notes: formData.notes,
-            status: formData.status as "scheduled" | "confirmed" | "pending" | "tentative" | "completed" | "cancelled"
-          });
-          
-          toast.success("Patient and appointment created!");
-          refreshPatients();
-          refreshAppointments();
-          onOpenChange(false);
-          
-          // Reset form
-          setFormData({
-            patientName: "",
-            patientId: "",
-            date: selectedDate ? selectedDate.toISOString().split('T')[0] : "",
-            time: "",
-            type: "",
-            doctor: "",
-            notes: "",
-            status: "scheduled"
-          });
-          setShowNewPatient(false);
-          setIsLoading(false);
-          return;
-        } else {
-          console.error("Patient creation failed:", json);
-          toast.error("Failed to create patient");
+        if (!res.ok || !json?.success || !json.data) {
+          toast.error(json?.message || "Failed to create patient");
           setIsLoading(false);
           return;
         }
+        
+        patientId = String(json.data.id);
+        patientName = `${firstName} ${lastName}`.trim();
+        setPatients(prev => [{ id: patientId, name: patientName }, ...prev]);
+        toast.info("New patient created successfully!");
+        refreshPatients();
+
       } catch (err) {
         console.error("Error creating patient:", err);
         toast.error("Could not create patient");
@@ -183,62 +286,69 @@ export function CreateAppointmentModal({
       }
     }
 
-    // Otherwise just create appointment
-    console.log("=== CREATING APPOINTMENT FOR EXISTING PATIENT ===");
     try {
       await addAppointment({
-        patientName: formData.patientName,
-        patientId: formData.patientId || formData.patientName,
+        patientName: patientName,
+        patientId: patientId || patientName, // Fallback for safety
         date: formData.date,
         time: formData.time,
+        duration: formData.duration,
         type: formData.type,
+        customType: formData.customType,
+        price: formData.price,
         doctor: formData.doctor,
         notes: formData.notes,
-        status: formData.status as "scheduled" | "confirmed" | "pending" | "tentative" | "completed" | "cancelled"
+        status: formData.status as "scheduled" | "confirmed" | "pending" | "tentative" | "completed" | "cancelled",
+        paymentStatus: formData.paymentStatus,
+        balance: formData.balance
       });
 
-      console.log("Appointment created successfully");
       toast.success("Appointment created successfully!");
-      refreshPatients();
       refreshAppointments();
-      onOpenChange(false);
-
-      // Reset form
-      setFormData({
-        patientName: "",
-        patientId: "",
-        date: selectedDate ? selectedDate.toISOString().split('T')[0] : "",
-        time: "",
-        type: "",
-        doctor: "",
-        notes: "",
-        status: "scheduled"
-      });
-      setShowNewPatient(false);
+      closeCreateModal();
     } catch (error) {
       console.error("Error creating appointment:", error);
-      toast.error("Failed to create appointment");
+      const errorMessage = error instanceof Error ? error.message : "Failed to create appointment";
+      toast.error(errorMessage);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handlePatientSelect = (value: string) => {
-    if (value === "new") {
-      setShowNewPatient(true);
-      setFormData(prev => ({ ...prev, patientId: "", patientName: "" }));
-      return;
-    }
+  const sortedPatients = useMemo(() => {
+    const selectedPatientId = formData.patientId;
+    if (!selectedPatientId) return patients;
 
-    const found = patients.find(p => p.id === value);
-    if (found) {
-      setShowNewPatient(false);
-      setFormData(prev => ({ ...prev, patientId: found.id, patientName: found.name }));
-    }
-  };
+    const selectedPatient = patients.find(p => p.id === selectedPatientId);
+    if (!selectedPatient) return patients;
+
+    const filteredPatients = patients.filter(p => p.id !== selectedPatientId);
+    return [selectedPatient, ...filteredPatients];
+  }, [patients, formData.patientId]);
+
+  const isSlotBusy = useCallback((time: string, duration: number) => {
+    if (!formData.date || !dateAppointments) return false;
+    
+    const [hours, minutes] = time.split(':').map(Number);
+    const newStart = hours * 60 + minutes;
+    const newEnd = newStart + duration;
+
+    return dateAppointments.some(apt => {
+      // Basic check: not cancelled
+      if (apt.status === 'cancelled') return false;
+      
+      const [aptHours, aptMinutes] = apt.time.split(':').map(Number);
+      const aptStart = aptHours * 60 + aptMinutes;
+      const aptDuration = apt.duration || 30;
+      const aptEnd = aptStart + aptDuration;
+
+      // Overlap logic: (StartA < EndB) && (EndA > StartB)
+      return (newStart < aptEnd) && (newEnd > aptStart);
+    });
+  }, [formData.date, dateAppointments]);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={isCreateModalOpen} onOpenChange={closeCreateModal}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center space-x-2">
@@ -258,24 +368,101 @@ export function CreateAppointmentModal({
             {!showNewPatient ? (
               <div className="space-y-2">
                 <Label>Select Patient</Label>
-                <Select
-                  value={formData.patientId || ""}
-                  onValueChange={handlePatientSelect}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select patient or create new" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {patients.length > 0 ? (
-                      patients.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                      ))
-                    ) : (
-                      <div className="p-2 text-sm text-gray-500">No patients found</div>
-                    )}
-                    <SelectItem value="new">+ Create New Patient</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="relative">
+                  <Input
+                    placeholder="Search patients..."
+                    value={patientInputValue}
+                    onChange={(e) => {
+                      setPatientInputValue(e.target.value);
+                      setPatientSearch(e.target.value);
+                      setOpen(true);
+                      if (!open) {
+                        setPatientPage(1);
+                        fetchPatients(1);
+                      }
+                    }}
+                    onFocus={() => {
+                      setOpen(true);
+                      setPatientPage(1);
+                      fetchPatients(1);
+                    }}
+                    onBlur={() => {
+                      // Delay closing to allow click on options
+                      setTimeout(() => setOpen(false), 200);
+                    }}
+                    className="w-full"
+                  />
+                  <div className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
+                    <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                  </div>
+                  {open && (
+                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-auto">
+                      <div className="p-2">
+                        {(() => {
+                          const filteredPatients = sortedPatients.filter((p) =>
+                            p.name.toLowerCase().includes(patientSearch.toLowerCase())
+                          );
+                          const isSearching = patientSearch !== "";
+                          const hasNoResults = isSearching && filteredPatients.length === 0;
+
+                          return (
+                            <>
+                              {patientSearch === "" && (
+                                <div
+                                  className="px-2 py-1 text-sm cursor-pointer hover:bg-gray-100 rounded"
+                                  onClick={() => {
+                                    setShowNewPatient(true);
+                                    setFormData(prev => ({ ...prev, patientId: "", patientName: "" }));
+                                    setPatientInputValue("");
+                                    setOpen(false);
+                                  }}
+                                >
+                                  + Create New Patient
+                                </div>
+                              )}
+                              {hasNoResults && (
+                                <div className="px-2 py-1 text-sm text-gray-500">
+                                  No patients found
+                                </div>
+                              )}
+                              {hasNoResults && (
+                                <div
+                                  className="px-2 py-1 text-sm cursor-pointer hover:bg-gray-100 rounded"
+                                  onClick={() => {
+                                    setShowNewPatient(true);
+                                    setFormData(prev => ({ ...prev, patientId: "", patientName: "" }));
+                                    setPatientInputValue("");
+                                    setOpen(false);
+                                  }}
+                                >
+                                  + Create New Patient
+                                </div>
+                              )}
+                              {filteredPatients.map((p, index) => (
+                                <div
+                                  key={p.id}
+                                  className="px-2 py-1 text-sm cursor-pointer hover:bg-gray-100 rounded"
+                                  onClick={() => {
+                                    setShowNewPatient(false);
+                                    setFormData(prev => ({ ...prev, patientId: p.id, patientName: p.name }));
+                                    setPatientInputValue(p.name);
+                                    setOpen(false);
+                                  }}
+                                  ref={index === filteredPatients.length - 1 ? lastPatientElementRef : undefined}
+                                >
+                                  {p.name}
+                                </div>
+                              ))}
+                              {isLoadingPatients && (
+                                <div className="px-2 py-1 text-sm text-gray-500">Loading more...</div>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="space-y-3">
@@ -328,7 +515,7 @@ export function CreateAppointmentModal({
                   id="date"
                   type="date"
                   value={formData.date}
-                  min={new Date().toISOString().split('T')[0]}
+                  min={formatDateToYYYYMMDD(new Date())}
                   onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
                   required
                 />
@@ -336,26 +523,27 @@ export function CreateAppointmentModal({
               <div className="space-y-2">
                 <Label htmlFor="time">Time</Label>
                 <Select
-                  value={formData.time}
-                  onValueChange={(value) => setFormData(prev => ({ ...prev, time: value }))}
+                  value={formData.time ? TIME_SLOTS.indexOf(formData.time).toString() : "-1"}
+                  onValueChange={(value) => {
+                    const index = parseInt(value);
+                    if (index >= 0) {
+                      setFormData(prev => ({ ...prev, time: TIME_SLOTS[index] }));
+                    }
+                  }}
+                  required
                 >
                   <SelectTrigger id="time">
                     <SelectValue placeholder="Select time" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="08:00">8:00 AM</SelectItem>
-                    <SelectItem value="08:30">8:30 AM</SelectItem>
-                    <SelectItem value="09:00">9:00 AM</SelectItem>
-                    <SelectItem value="09:30">9:30 AM</SelectItem>
-                    <SelectItem value="10:00">10:00 AM</SelectItem>
-                    <SelectItem value="10:30">10:30 AM</SelectItem>
-                    <SelectItem value="11:00">11:00 AM</SelectItem>
-                    <SelectItem value="14:00">2:00 PM</SelectItem>
-                    <SelectItem value="14:30">2:30 PM</SelectItem>
-                    <SelectItem value="15:00">3:00 PM</SelectItem>
-                    <SelectItem value="15:30">3:30 PM</SelectItem>
-                    <SelectItem value="16:00">4:00 PM</SelectItem>
-                    <SelectItem value="16:30">4:30 PM</SelectItem>
+                    {TIME_SLOTS.map((slot, index) => {
+                      const busy = isSlotBusy(slot, formData.duration);
+                      return (
+                        <SelectItem key={slot} value={index.toString()} disabled={busy}>
+                          {formatTimeTo12h(slot)} {busy && "(Occupied)"}
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
               </div>
@@ -370,30 +558,75 @@ export function CreateAppointmentModal({
             </h3>
             
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
+              <div className="space-y-2 col-span-2">
                 <Label htmlFor="type">Appointment Type</Label>
                 <Select
-                  value={formData.type}
-                  onValueChange={(value) => setFormData(prev => ({ ...prev, type: value }))}
+                  value={formData.type.toString()}
+                  onValueChange={(value) => {
+                    const typeIndex = parseInt(value);
+                    setFormData(prev => ({ ...prev, type: typeIndex, customType: "" }));
+                    setShowCustomTypeInput(typeIndex === APPOINTMENT_TYPES.length - 1);
+                  }}
                 >
                   <SelectTrigger id="type">
                     <SelectValue placeholder="Select type" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="cleaning">Routine Cleaning</SelectItem>
-                    <SelectItem value="checkup">Checkup</SelectItem>
-                    <SelectItem value="filling">Filling</SelectItem>
-                    <SelectItem value="crown">Crown</SelectItem>
-                    <SelectItem value="root-canal">Root Canal</SelectItem>
-                    <SelectItem value="extraction">Extraction</SelectItem>
-                    <SelectItem value="consultation">Consultation</SelectItem>
-                    <SelectItem value="emergency">Emergency</SelectItem>
-                    <SelectItem value="whitening">Teeth Whitening</SelectItem>
-                    <SelectItem value="implant">Implant</SelectItem>
+                    {APPOINTMENT_TYPES.map((type, index) => (
+                      <SelectItem key={index} value={index.toString()}>{type}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
-              
+
+              {showCustomTypeInput && (
+                <div className="space-y-2 col-span-2">
+                  <Label htmlFor="customType">Please Specify</Label>
+                  <Input
+                      id="customType"
+                      placeholder="e.g., 'Denture Fitting', 'Braces Adjustment'"
+                      value={formData.customType}
+                      onChange={(e) => setFormData(prev => ({...prev, customType: e.target.value}))}
+                      required
+                  />
+                </div>
+              )}
+            
+              <div className="space-y-2">
+                <Label htmlFor="price">Price ($)</Label>
+                <Input
+                  id="price"
+                  type="number"
+                  value={formData.price !== undefined ? formData.price : ""}
+                  onChange={(e) => setFormData(prev => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
+                  min="0"
+                  step="0.01"
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="duration">Duration (minutes)</Label>
+                <Select
+                  value={String(formData.duration)}
+                  onValueChange={(value) => setFormData(prev => ({ ...prev, duration: parseInt(value) }))}
+                >
+                  <SelectTrigger id="duration">
+                    <SelectValue placeholder="Select duration" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[30, 60, 90, 120].map((mins) => {
+                      const busy = formData.time ? isSlotBusy(formData.time, mins) : false;
+                      return (
+                        <SelectItem key={mins} value={String(mins)} disabled={busy}>
+                          {mins >= 60 ? `${mins / 60} hour${mins / 60 > 1 ? 's' : ''}` : `${mins} mins`} {busy && "(Conflict)"}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="doctor">Doctor/Provider</Label>
                 <Select
@@ -419,24 +652,54 @@ export function CreateAppointmentModal({
                   </SelectContent>
                 </Select>
               </div>
-            </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="status">Status</Label>
-              <Select
-                value={formData.status}
-                onValueChange={(value) => setFormData(prev => ({ ...prev, status: value }))}
-              >
-                <SelectTrigger id="status">
-                  <SelectValue placeholder="Select status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="scheduled">Scheduled</SelectItem>
-                  <SelectItem value="confirmed">Confirmed</SelectItem>
-                  <SelectItem value="pending">Pending</SelectItem>
-                  <SelectItem value="tentative">Tentative</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="space-y-2">
+                <Label htmlFor="status">Status</Label>
+                <Select
+                  value={formData.status}
+                  onValueChange={(value) => setFormData(prev => ({ ...prev, status: value }))}
+                >
+                  <SelectTrigger id="status">
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="scheduled">Scheduled</SelectItem>
+                    <SelectItem value="confirmed">Confirmed</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="tentative">Tentative</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="paymentStatus">Payment Status</Label>
+                <Select
+                  value={formData.paymentStatus}
+                  onValueChange={(value: any) => setFormData(prev => ({ ...prev, paymentStatus: value }))}
+                >
+                  <SelectTrigger id="paymentStatus">
+                    <SelectValue placeholder="Select payment status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="paid">Paid</SelectItem>
+                    <SelectItem value="unpaid">Unpaid</SelectItem>
+                    <SelectItem value="half-paid">Half Paid</SelectItem>
+                    <SelectItem value="overdue">Overdue</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="balance">Balance Left ($)</Label>
+                <Input
+                  id="balance"
+                  type="number"
+                  value={formData.balance}
+                  onChange={(e) => setFormData(prev => ({ ...prev, balance: parseFloat(e.target.value) || 0 }))}
+                  min="0"
+                  step="0.01"
+                />
+              </div>
             </div>
           </div>
 
@@ -457,7 +720,7 @@ export function CreateAppointmentModal({
             <Button 
               variant="outline" 
               type="button" 
-              onClick={() => onOpenChange(false)}
+              onClick={() => closeCreateModal()}
               disabled={isLoading}
             >
               Cancel
@@ -465,7 +728,7 @@ export function CreateAppointmentModal({
             <Button 
               variant="brand" 
               type="submit"
-              disabled={!formData.patientName || !formData.date || !formData.time || !formData.type || !formData.doctor || isLoading}
+              disabled={!formData.patientName || !formData.date || !formData.time || formData.type < 0 || !formData.doctor || isLoading}
             >
               {isLoading ? "Creating..." : "Create Appointment"}
             </Button>
@@ -473,5 +736,4 @@ export function CreateAppointmentModal({
         </form>
       </DialogContent>
     </Dialog>
-  );
-}
+  );}

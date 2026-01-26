@@ -1,7 +1,13 @@
+"use client";
+
 import { Button } from "./ui/button";
 import { Phone, MapPin } from "lucide-react";
 
-export function Header() {
+interface HeaderProps {
+  onBookAppointment?: () => void;
+}
+
+export function Header({ onBookAppointment }: HeaderProps) {
   return (
     <header className="bg-white shadow-sm border-b">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -35,7 +41,10 @@ export function Header() {
               <Phone className="h-4 w-4" />
               <span>(555) 123-4567</span>
             </div>
-            <Button className="bg-primary hover:bg-primary/90">
+            <Button 
+              onClick={onBookAppointment}
+              className="bg-primary hover:bg-primary/90"
+            >
               Book Appointment
             </Button>
           </div>

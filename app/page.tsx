@@ -1,39 +1,33 @@
 "use client";
-
-import { useState } from "react";
-import { Dashboard } from "../components/Dashboard";
-import { AdminLayout } from "../components/AdminLayout";
-import { PatientsView } from "../components/PatientsView";
-import { FinanceView } from "../components/FinanceView";
-import { CalendarView } from "../components/CalendarView";
-import { SettingsView } from "../components/SettingsView";
-import { StaffView } from "../components/Staff";
+import { useAuth } from "@/hooks/useAuth";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
+import LandingPage from "@/components/LandingPage";
+import { Loader2 } from "lucide-react";
 
 export default function Home() {
-  const [currentView, setCurrentView] = useState("dashboard");
+  const { user, isLoading } = useAuth();
+  const router = useRouter();
 
-  const renderContent = () => {
-    switch (currentView) {
-      case "dashboard":
-        return <Dashboard />;
-      case "patients":
-        return <PatientsView />
-      case "calendar":
-        return <CalendarView />
-      case "finance":
-        return <FinanceView />
-      case "staff":
-        return <StaffView />
-      case "settings":
-        return <SettingsView />;
-      default:
-        return <Dashboard />;
+  useEffect(() => {
+    if (!isLoading && user) {
+      if (user.role === 'patient') {
+        router.push('/patient/account');
+      } else if (user.role === 'doctor') {
+        router.push('/doctor/dashboard');
+      } else if (user.role === 'admin') {
+        router.push('/admin/dashboard');
+      }
     }
-  };
+  }, [user, isLoading, router]);
 
-  return (
-    <AdminLayout currentView={currentView} onViewChange={setCurrentView}>
-      {renderContent()}
-    </AdminLayout>
-  );
+  if (isLoading || user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <Loader2 className="w-12 h-12 animate-spin text-blue-600" />
+      </div>
+    );
+  }
+
+  return <LandingPage />;
 }

@@ -4,12 +4,21 @@ export interface Appointment {
   id: string;
   patientName: string;
   patientId: string;
+  email?: string;
+  phone?: string;
   date: string;
   time: string;
-  type: string;
+  type: number;
+  customType?: string;
+  price?: number;
   doctor: string;
+  duration?: number;
   notes: string;
+  serviceType?: string;
   status: "scheduled" | "confirmed" | "pending" | "tentative" | "completed" | "cancelled";
+  paymentStatus?: "paid" | "unpaid" | "overdue" | "half-paid";
+  balance?: number;
+  totalPaid?: number;
   createdAt?: string;
 }
 
@@ -19,6 +28,12 @@ export interface AppointmentFilters {
   startDate?: string;
   endDate?: string;
   search?: string;
+  doctor?: string;
+  patientId?: string;
+  parentId?: string;
+  type?: string;
+  status?: string;
+  anonymize?: boolean;
 }
 
 export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFilters) => {
@@ -34,6 +49,12 @@ export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFi
         if (filters?.startDate) queryParams.append("startDate", filters.startDate);
         if (filters?.endDate) queryParams.append("endDate", filters.endDate);
         if (filters?.search) queryParams.append("search", filters.search);
+        if (filters?.doctor) queryParams.append("doctor", filters.doctor);
+        if (filters?.patientId) queryParams.append("patientId", filters.patientId);
+        if (filters?.parentId) queryParams.append("parentId", filters.parentId);
+        if (filters?.type) queryParams.append("type", filters.type);
+        if (filters?.status) queryParams.append("status", filters.status);
+        if (filters?.anonymize) queryParams.append("anonymize", "true");
 
         const url = queryParams.toString() ? `${API_URL}?${queryParams.toString()}` : API_URL;
         const response = await fetch(url);
@@ -51,7 +72,7 @@ export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFi
     };
 
     loadAppointments();
-  }, [refreshTrigger, filters?.startDate, filters?.endDate, filters?.search]);
+  }, [refreshTrigger, filters?.startDate, filters?.endDate, filters?.search, filters?.doctor, filters?.type, filters?.status, filters?.patientId, filters?.parentId, filters?.anonymize]);
 
   const addAppointment = async (appointment: Omit<Appointment, "id" | "createdAt">) => {
     try {
