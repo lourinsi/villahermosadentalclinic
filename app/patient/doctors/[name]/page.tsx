@@ -20,6 +20,7 @@ import {
 import { TIME_SLOTS, formatTimeTo12h } from "@/lib/time-slots";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { Appointment } from "@/hooks/useAppointments";
 
 type ViewMode = "day" | "week" | "month";
 
@@ -33,7 +34,7 @@ export default function DoctorAvailabilityPage() {
   
   const [viewMode, setViewMode] = useState<ViewMode>("day");
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  const [appointments, setAppointments] = useState<any[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isLoadingAvailability, setIsLoadingAvailability] = useState(false);
 
   const doctor = useMemo(() => {
@@ -476,7 +477,7 @@ export default function DoctorAvailabilityPage() {
 
                   <div className="pt-6 border-t border-gray-100">
                     <p className="text-xs text-gray-400 leading-relaxed font-medium italic">
-                       &quot;{(doctor as any)?.bio || "Providing personalized dental care with excellence and compassion."}&quot;
+                       &quot;{doctor?.bio || "Providing personalized dental care with excellence and compassion."}&quot;
                     </p>
                   </div>
                 </CardContent>

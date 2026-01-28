@@ -14,6 +14,7 @@ import { useDoctors } from "../hooks/useDoctors";
 import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
 import { formatDateToYYYYMMDD } from "../lib/utils";
 import { APPOINTMENT_TYPES } from "../lib/appointment-types";
+import { Appointment } from "@/hooks/useAppointments";
 
 export function ScheduleAppointmentModal() {
   const {
@@ -28,7 +29,7 @@ export function ScheduleAppointmentModal() {
   } = useAppointmentModal();
   const { user } = useAuth();
 
-  const [dateAppointments, setDateAppointments] = useState<any[]>([]);
+  const [dateAppointments, setDateAppointments] = useState<Appointment[]>([]);
   const [isLoadingDateAppointments, setIsLoadingDateAppointments] = useState(false);
 
   const [patients, setPatients] = useState<Array<{ id: string; name: string }>>([]);
@@ -66,7 +67,7 @@ export function ScheduleAppointmentModal() {
         const res = await fetch("http://localhost:3001/api/patients");
         const json = await res.json();
         if (json?.success && Array.isArray(json.data)) {
-          const list = json.data.map((p: any) => ({ id: String(p.id), name: `${p.firstName} ${p.lastName}` }));
+          const list = json.data.map((p: { id: string | number; firstName: string; lastName: string }) => ({ id: String(p.id), name: `${p.firstName} ${p.lastName}` }));
           setPatients(list);
         }
       } catch (err) {

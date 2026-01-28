@@ -12,9 +12,8 @@ import { Label } from "./ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "./ui/dialog";
 import { Textarea } from "./ui/textarea";
-import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
-import { Calendar as CalendarComponent } from "./ui/calendar";
+import { Appointment } from "../hooks/useAppointments";
 import {
   Users,
   UserPlus,
@@ -29,10 +28,7 @@ import {
   Phone,
   Mail,
   Calendar,
-  Briefcase,
   CreditCard,
-  CalendarRange,
-  X,
   Eye,
   CalendarDays,
   ChevronLeft,
@@ -108,7 +104,6 @@ export function StaffView() {
   const [financialRecords, setFinancialRecords] = useState<StaffFinancialRecord[]>([]);
   const [attendanceData, setAttendanceData] = useState<Attendance[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [isEditStaffDialogOpen, setIsEditStaffDialogOpen] = useState(false);
   const [isStaffDetailsDialogOpen, setIsStaffDetailsDialogOpen] = useState(false);
   const [isDeleteStaffDialogOpen, setIsDeleteStaffDialogOpen] = useState(false);
@@ -156,20 +151,19 @@ export function StaffView() {
   const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
   const [scheduleStaff, setScheduleStaff] = useState<Staff | null>(null);
   const [scheduleDate, setScheduleDate] = useState<Date>(new Date());
-  const [staffAppointments, setStaffAppointments] = useState<any[]>([]);
+  const [staffAppointments, setStaffAppointments] = useState<Appointment[]>([]);
   const [isLoadingSchedule, setIsLoadingSchedule] = useState(false);
-  const [viewAppointment, setViewAppointment] = useState<any | null>(null);
+  const [viewAppointment, setViewAppointment] = useState<Appointment | null>(null);
   const [isViewAppointmentOpen, setIsViewAppointmentOpen] = useState(false);
-  const [editAppointment, setEditAppointment] = useState<any | null>(null);
+  const [editAppointment, setEditAppointment] = useState<Appointment | null>(null);
   const [isEditAppointmentOpen, setIsEditAppointmentOpen] = useState(false);
-  const [deleteAppointment, setDeleteAppointment] = useState<any | null>(null);
+  const [deleteAppointment, setDeleteAppointment] = useState<Appointment | null>(null);
   const [isDeleteAppointmentOpen, setIsDeleteAppointmentOpen] = useState(false);
   const [isSavingAppointment, setIsSavingAppointment] = useState(false);
   const [isDeletingAppointment, setIsDeletingAppointment] = useState(false);
 
   const fetchAllStaffData = async () => {
     setIsLoading(true);
-    setError(null); // Clear previous errors
     try {
       const [
         staffResponse,
@@ -193,9 +187,8 @@ export function StaffView() {
       const attendanceData = (await attendanceResponse.json()).data || [];
       setAttendanceData(attendanceData);
 
-    } catch (err: any) {
+    } catch (err) {
       console.error("Error fetching staff data:", err);
-      setError("Failed to fetch staff data. Please ensure the backend server is running on port 3001.");
       toast.error("Failed to fetch staff data. Please ensure the backend server is running on port 3001.");
       // Ensure all data arrays are empty on error
       setStaffData([]);
@@ -521,17 +514,17 @@ export function StaffView() {
     return `${hour12}:${minutes} ${ampm}`;
   };
 
-  const handleViewAppointment = (apt: any) => {
+  const handleViewAppointment = (apt: Appointment) => {
     setViewAppointment(apt);
     setIsViewAppointmentOpen(true);
   };
 
-  const handleEditAppointment = (apt: any) => {
+  const handleEditAppointment = (apt: Appointment) => {
     setEditAppointment({ ...apt });
     setIsEditAppointmentOpen(true);
   };
 
-  const handleDeleteAppointmentClick = (apt: any) => {
+  const handleDeleteAppointmentClick = (apt: Appointment) => {
     setDeleteAppointment(apt);
     setIsDeleteAppointmentOpen(true);
   };

@@ -31,10 +31,11 @@ import { Label } from "./ui/label";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
 import { useAuth } from "@/hooks/useAuth.tsx";
+import { AllAppointmentsView } from "./AllAppointmentsView";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
 
-type ViewMode = "month" | "week" | "day" | "custom";
+type ViewMode = "month" | "week" | "day" | "custom" | "all" | "cart";
 
 const appointmentColors: Record<string, { bg: string; text: string; border: string }> = {
   "Routine Cleaning": { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" },
@@ -59,17 +60,22 @@ export function PatientCalendarView() {
   const [activeRangeType, setActiveRangeType] = useState<"from" | "to">("from");
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<string>("scheduled");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
 
   const { openPatientBookingModal, appointments, isLoading, refreshAppointments, deleteAppointment, updateAppointment } = useAppointmentModal();
   const { openPatientPaymentModal } = usePaymentModal();
 
   const filteredAppointments = useMemo(() => {
-    if (statusFilter === "all") {
-      return appointments.filter(apt => apt.status !== "pending");
+    if (viewMode === "cart") {
+      return appointments.filter(apt => apt.status === "pending" || apt.status === "tentative");
     }
-    return appointments;
-  }, [appointments, statusFilter]);
+    
+    // In normal calendar views, hide pending appointments (they are in the "Cart")
+    // but show confirmed/scheduled/completed/To Pay/tentative even if unpaid
+    const filtered = appointments.filter(apt => apt.status !== "pending");
+
+    return filtered;
+  }, [appointments, viewMode]);
 
   const handleDelete = async (id: string) => {
     if (!confirm("Are you sure you want to delete this pending appointment?")) return;
@@ -80,7 +86,7 @@ export function PatientCalendarView() {
       toast.success("Appointment deleted successfully");
       setSelectedAppointment(null);
       refreshAppointments(filters);
-    } catch (error) {
+    } catch {
       toast.error("Failed to delete appointment");
     } finally {
       setIsProcessing(false);
@@ -101,7 +107,7 @@ export function PatientCalendarView() {
       toast.success("Cancellation request sent to the doctor.");
       setSelectedAppointment(null);
       refreshAppointments(filters);
-    } catch (error) {
+    } catch {
       toast.error("Failed to send cancellation request");
     } finally {
       setIsProcessing(false);
@@ -161,7 +167,7 @@ export function PatientCalendarView() {
     if (viewMode === 'custom' && dateRange?.from && dateRange?.to) {
       fetchStartStr = formatDateToYYYYMMDD(dateRange.from);
       fetchEndStr = formatDateToYYYYMMDD(dateRange.to);
-    } else {
+    } else if (viewMode !== 'all' && viewMode !== 'cart') {
       // For day, week, month, use the range calculated by getViewRange
       // Actually, Admin portal uses a monthly range for day/week/month to avoid too many fetches
       const monthStart = new Date(start.getFullYear(), start.getMonth(), 1);
@@ -173,9 +179,10 @@ export function PatientCalendarView() {
 
     return { 
       parentId,
-      status: statusFilter === "all" ? undefined : statusFilter,
+      status: viewMode === "cart" ? undefined : (statusFilter === "all" ? undefined : statusFilter),
       startDate: fetchStartStr,
-      endDate: fetchEndStr
+      endDate: fetchEndStr,
+      includeUnpaid: true // Always include unpaid for patients so the Cart badge is accurate
     };
   }, [parentId, statusFilter, viewMode, selectedDate, dateRange, getViewRange]);
 
@@ -183,7 +190,7 @@ export function PatientCalendarView() {
     if (parentId) {
       refreshAppointments(filters);
     }
-  }, [filters, refreshAppointments]);
+  }, [filters, refreshAppointments, parentId]);
 
   useEffect(() => {
     setIsLoadingView(true);
@@ -205,6 +212,10 @@ export function PatientCalendarView() {
       return `${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
     } else if (viewMode === "month") {
       return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    } else if (viewMode === "all") {
+      return "All Appointments";
+    } else if (viewMode === "cart") {
+      return "My Appointment Cart";
     } else if (viewMode === "custom") {
       if (dateRange?.from && dateRange?.to) {
         return `${dateRange.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${dateRange.to.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
@@ -712,11 +723,11 @@ export function PatientCalendarView() {
         <CardContent className="p-4">
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div className="flex items-center space-x-4">
-              <div className="flex items-center bg-gray-50 rounded-lg p-1 border">
-                <Button variant="ghost" size="sm" onClick={() => navigateDate('prev')} className="h-8 w-8 p-0">
+              <div className={`flex items-center bg-gray-50 rounded-lg p-1 border ${viewMode === 'all' ? 'opacity-50 pointer-events-none' : ''}`}>
+                <Button variant="ghost" size="sm" onClick={() => navigateDate('prev')} className="h-8 w-8 p-0" disabled={viewMode === 'all'}>
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => navigateDate('next')} className="h-8 w-8 p-0">
+                <Button variant="ghost" size="sm" onClick={() => navigateDate('next')} className="h-8 w-8 p-0" disabled={viewMode === 'all'}>
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
@@ -782,7 +793,7 @@ export function PatientCalendarView() {
                         <div className="px-6 py-3 bg-gray-50/50 border-b flex items-center gap-3">
                           <span className="text-xs font-bold text-gray-400 uppercase tracking-widest mr-2">View:</span>
                           <div className="flex items-center bg-white rounded-lg p-1 border shadow-sm">
-                            {(["day", "week", "month", "custom"] as const).map((mode) => (
+                            {(["day", "week", "month", "custom", "all", "cart"] as const).map((mode) => (
                               <Button
                                 key={mode}
                                 variant={viewMode === mode ? "brand" : "ghost"}
@@ -793,6 +804,11 @@ export function PatientCalendarView() {
                                 }}
                               >
                                 {mode}
+                                {mode === "cart" && appointments.filter(a => a.status === "pending" || a.paymentStatus === "unpaid").length > 0 && (
+                                  <span className="ml-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-orange-500 text-[10px] text-white font-black">
+                                    {appointments.filter(a => a.status === "pending" || a.paymentStatus === "unpaid").length}
+                                  </span>
+                                )}
                               </Button>
                             ))}
                           </div>
@@ -887,18 +903,23 @@ export function PatientCalendarView() {
                         <div className="space-y-2">
                           <Label className="text-xs font-bold uppercase tracking-wider text-gray-400">View Mode</Label>
                           <div className="grid grid-cols-2 gap-2">
-                            {(["day", "week", "month", "custom"] as const).map((mode) => (
+                            {(["day", "week", "month", "custom", "all", "cart"] as const).map((mode) => (
                               <Button
                                 key={mode}
                                 variant={viewMode === mode ? "brand" : "outline"}
                                 size="sm"
-                                className="h-9 capitalize font-medium"
+                                className="h-9 capitalize font-medium flex items-center justify-center gap-2"
                                 onClick={() => {
                                   setViewMode(mode);
                                   if (mode !== "custom") setShowDatePicker(false);
                                 }}
                               >
                                 {mode}
+                                {mode === "cart" && appointments.filter(a => a.status === "pending" || a.paymentStatus === "unpaid").length > 0 && (
+                                  <Badge className="bg-orange-500 text-white border-none h-4 px-1 min-w-[16px] flex items-center justify-center text-[10px] font-black">
+                                    {appointments.filter(a => a.status === "pending" || a.paymentStatus === "unpaid").length}
+                                  </Badge>
+                                )}
                               </Button>
                             ))}
                           </div>
@@ -922,7 +943,7 @@ export function PatientCalendarView() {
                               today: "bg-violet-600 text-white rounded-full",
                             }}
                             components={{
-                              MonthCaption: ({ calendarMonth, displayIndex, ...props }: any) => (
+                              MonthCaption: ({ calendarMonth, ...props }: { calendarMonth: { date: Date } }) => (
                                 <div {...props}>
                                   <span 
                                     className="hover:text-violet-600 transition-colors cursor-pointer text-sm font-medium"
@@ -979,6 +1000,17 @@ export function PatientCalendarView() {
               viewMode === "day" ? renderDayView() : 
               viewMode === "week" ? renderWeekView() : 
               viewMode === "month" ? renderMonthView() : 
+              viewMode === "all" || viewMode === "cart" ? (
+                <div className="p-4 bg-white">
+                  <AllAppointmentsView 
+                    appointments={filteredAppointments} 
+                    isLoading={isLoading || isLoadingView}
+                    onPay={handlePay}
+                    onDelete={handleDelete}
+                    isCart={viewMode === "cart"}
+                  />
+                </div>
+              ) :
               renderCustomView()
             )}
         </CardContent>

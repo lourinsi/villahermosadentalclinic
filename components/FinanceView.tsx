@@ -12,26 +12,19 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
-import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
-import { Calendar as CalendarComponent } from "./ui/calendar";
-import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from "recharts";
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 import { 
   DollarSign, 
   TrendingUp, 
   TrendingDown, 
-  Users, 
   Package, 
-  CreditCard,
   Download,
   FileText,
-  Calendar,
   ArrowUpRight,
   ArrowDownRight,
   Plus,
   Receipt,
-  Filter,
-  X,
-  CalendarRange
+  Filter
 } from "lucide-react";
 
 
@@ -129,7 +122,6 @@ export function FinanceView() {
   const [recentTransactions, setRecentTransactions] = useState<RecentTransaction[]>([]);
 
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   const fetchData = async () => {
     setIsLoading(true);
@@ -176,9 +168,8 @@ export function FinanceView() {
       const transactionsData = (await transactionsRes.json()).data || [];
       setRecentTransactions(transactionsData);
 
-    } catch (err: any) {
+    } catch (err) {
       console.error("Error fetching finance data:", err);
-      setError("Failed to fetch financial data. Please ensure the backend server is running on port 3001.");
       toast.error("Failed to fetch financial data. Please ensure the backend server is running on port 3001.");
       // Ensure all data arrays are empty on error
       setRevenueData([]);
@@ -196,10 +187,6 @@ export function FinanceView() {
   useEffect(() => {
     fetchData();
   }, []); // Empty dependency array means this effect runs once on mount
-
-  // NOTE: Calculate total expenses from detailed expense records
-  const totalExpenses = detailedExpenses.reduce((sum, expense) => sum + expense.amount, 0);
-  const pendingExpenses = detailedExpenses.filter(e => e.status === "pending").length;
 
   // Handle case where revenueData might be empty after fetching
   const currentMonth = revenueData.length > 0 ? revenueData[revenueData.length - 1] : { month: "N/A", revenue: 0, expenses: 0, profit: 0 };
@@ -550,7 +537,7 @@ export function FinanceView() {
                       {detailedExpenses.length === 0 ? (
                         <TableRow>
                           <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
-                            No detailed expenses found. Click 'Add Expense' to add one!
+                            No detailed expenses found. Click &apos;Add Expense&apos; to add one!
                           </TableCell>
                         </TableRow>
                       ) : (
@@ -674,7 +661,7 @@ export function FinanceView() {
                     {inventoryData.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                          No inventory items found. Click 'Add Item' to add one!
+                          No inventory items found. Click &apos;Add Item&apos; to add one!
                         </TableCell>
                       </TableRow>
                     ) : (

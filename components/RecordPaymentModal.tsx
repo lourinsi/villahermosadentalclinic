@@ -54,8 +54,8 @@ export function RecordPaymentModal() {
   }, [isPaymentModalOpen, appointmentId]);
 
   const selectedApt = appointments.find(
-    (a: any) => a.id === selectedAppointment
-  ) || (appointmentId ? appointments.find((a: any) => a.id === appointmentId) : undefined);
+    (a: Appointment) => a.id === selectedAppointment
+  ) || (appointmentId ? appointments.find((a: Appointment) => a.id === appointmentId) : undefined);
   
   const outstandingBalance = selectedApt
     ? (selectedApt.price || 0) - (selectedApt.totalPaid || 0)
@@ -128,7 +128,7 @@ export function RecordPaymentModal() {
                   <SelectValue placeholder="Select appointment" />
                 </SelectTrigger>
                 <SelectContent>
-                  {appointments.map((apt: any) => (
+                  {appointments.map((apt: Appointment) => (
                     <SelectItem key={apt.id} value={apt.id}>
                       {apt.type} - {apt.date} (Balance: ₱
                       {(

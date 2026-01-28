@@ -18,6 +18,7 @@ import { useDoctors } from "../hooks/useDoctors";
 import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
 import { APPOINTMENT_TYPES } from "../lib/appointment-types";
 import { formatDateToYYYYMMDD } from "../lib/utils";
+import { Appointment } from "@/hooks/useAppointments";
 
 
 
@@ -56,13 +57,11 @@ export function CreateAppointmentModal() {
     newAppointmentTime,
     addAppointment, 
     refreshPatients, 
-    refreshAppointments,
-    appointments
+    refreshAppointments
   } = useAppointmentModal();
   const { user } = useAuth();
 
-  const [dateAppointments, setDateAppointments] = useState<any[]>([]);
-  const [isLoadingDateAppointments, setIsLoadingDateAppointments] = useState(false);
+  const [dateAppointments, setDateAppointments] = useState<Appointment[]>([]);
 
   const [formData, setFormData] = useState<AppointmentFormData>({
     patientName: "",
@@ -173,7 +172,7 @@ export function CreateAppointmentModal() {
       setShowCustomTypeInput(false);
       reloadDoctors();
     }
-  }, [isCreateModalOpen, newAppointmentDate, newAppointmentTime, reloadDoctors]);
+  }, [isCreateModalOpen, newAppointmentDate, newAppointmentTime, reloadDoctors, user?.role, user?.username]);
 
   // Fetch all appointments for the selected date to check for clinic-wide conflicts
   // This bypasses view filters to ensure global conflict detection
@@ -183,7 +182,6 @@ export function CreateAppointmentModal() {
         setDateAppointments([]);
         return;
       }
-      setIsLoadingDateAppointments(true);
       try {
         const response = await fetch(`http://localhost:3001/api/appointments?startDate=${formData.date}&endDate=${formData.date}`);
         const result = await response.json();
@@ -192,8 +190,6 @@ export function CreateAppointmentModal() {
         }
       } catch (error) {
         console.error("Error fetching appointments for date:", error);
-      } finally {
-        setIsLoadingDateAppointments(false);
       }
     };
 
@@ -242,7 +238,7 @@ export function CreateAppointmentModal() {
         toast.error("Cannot schedule an appointment for a past date.");
         return;
       }
-    } catch (err) {
+    } catch {
       toast.error("Invalid date/time selected");
       return;
     }
@@ -675,7 +671,7 @@ export function CreateAppointmentModal() {
                 <Label htmlFor="paymentStatus">Payment Status</Label>
                 <Select
                   value={formData.paymentStatus}
-                  onValueChange={(value: any) => setFormData(prev => ({ ...prev, paymentStatus: value }))}
+                  onValueChange={(value: AppointmentFormData["paymentStatus"]) => setFormData(prev => ({ ...prev, paymentStatus: value }))}
                 >
                   <SelectTrigger id="paymentStatus">
                     <SelectValue placeholder="Select payment status" />

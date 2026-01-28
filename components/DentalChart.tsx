@@ -1,9 +1,9 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./ui/dropdown-menu";
-import { Eraser, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Plus, Undo2, Trash2, MoreVertical } from "lucide-react";
+import { Eraser, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Plus, Trash2, MoreVertical } from "lucide-react";
 import { toast } from "sonner";
 import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
 
@@ -34,6 +34,18 @@ interface DentalChartProps {
 }
 
 export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
+  const isChartEmpty = useCallback((state: Record<number, ToothState>): boolean => {
+    for (const tooth in state) {
+      const toothState = state[tooth];
+      for (const section of Object.keys(toothState) as ToothSection[]) {
+        if (toothState[section] !== "none") {
+          return false;
+        }
+      }
+    }
+    return true;
+  }, []);
+
   const [localRecords, setLocalRecords] = useState<ChartRecord[]>([]);
 
   useEffect(() => {
@@ -50,7 +62,7 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
         isEmpty: record.isEmpty ?? isChartEmpty(JSON.parse(record.data || '{}'))
       })));
     }
-  }, [records]);
+  }, [records, isChartEmpty]);
   
   const [currentIndex, setCurrentIndex] = useState(0);
   
@@ -75,7 +87,7 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
         setTeethState(parsedData);
         setOriginalTeethState(parsedData);
         setCurrentDate(currentRecord.date);
-      } catch (e) {
+      } catch {
         setTeethState({});
         setOriginalTeethState({});
         setCurrentDate(formatDateToYYYYMMDD(new Date())); // Fallback if record data is bad
@@ -114,7 +126,7 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
 
     // Call the callback to update the parent's state
     onSaveRecords(updatedRecords);
-  }, [teethState]);
+  }, [teethState, currentIndex, localRecords, onSaveRecords, originalTeethState, isChartEmpty]);
 
   const getToothState = (toothNumber: number): ToothState => {
     return teethState[toothNumber] || {
@@ -124,18 +136,6 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
       right: "none",
       center: "none"
     };
-  };
-
-  const isChartEmpty = (state: Record<number, ToothState>): boolean => {
-    for (const tooth in state) {
-      const toothState = state[tooth];
-      for (const section of Object.keys(toothState) as ToothSection[]) {
-        if (toothState[section] !== "none") {
-          return false;
-        }
-      }
-    }
-    return true;
   };
 
   const handleSectionClick = (toothNumber: number, section: ToothSection) => {

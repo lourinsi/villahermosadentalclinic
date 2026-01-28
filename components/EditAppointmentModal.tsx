@@ -12,7 +12,7 @@ import { toast } from "sonner";
 import { Appointment } from "../hooks/useAppointments";
 import { useDoctors } from "../hooks/useDoctors";
 import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
-import { APPOINTMENT_TYPES, getAppointmentTypeName } from "../lib/appointment-types";
+import { APPOINTMENT_TYPES } from "../lib/appointment-types";
 
 interface PatientOption {
   id: string;
@@ -29,11 +29,9 @@ export function EditAppointmentModal() {
     updateAppointment, 
     deleteAppointment, 
     refreshAppointments,
-    appointments,
     isPatientFieldReadOnly
   } = useAppointmentModal();
-  const [dateAppointments, setDateAppointments] = useState<any[]>([]);
-  const [isLoadingDateAppointments, setIsLoadingDateAppointments] = useState(false);
+  const [dateAppointments, setDateAppointments] = useState<Appointment[]>([]);
 
   const [form, setForm] = useState<Partial<Appointment>>({});
   const [isLoading, setIsLoading] = useState(false);
@@ -62,7 +60,7 @@ export function EditAppointmentModal() {
       const res = await fetch(`http://localhost:3001/api/patients?page=${page}&limit=20`);
       const json = await res.json();
       if (json?.success && Array.isArray(json.data)) {
-        const list: PatientOption[] = json.data.map((p: any) => ({ id: String(p.id), name: `${p.firstName} ${p.lastName}`, email: p.email, phone: p.phone }));
+        const list: PatientOption[] = json.data.map((p: { id: string | number; firstName: string; lastName: string; email?: string; phone?: string }) => ({ id: String(p.id), name: `${p.firstName} ${p.lastName}`, email: p.email, phone: p.phone }));
         
         setAllPatients(prev => {
           const existingIds = new Set(prev.map(p => p.id));
@@ -150,7 +148,6 @@ export function EditAppointmentModal() {
         setDateAppointments([]);
         return;
       }
-      setIsLoadingDateAppointments(true);
       try {
         const response = await fetch(`http://localhost:3001/api/appointments?startDate=${form.date}&endDate=${form.date}`);
         const result = await response.json();
@@ -159,8 +156,6 @@ export function EditAppointmentModal() {
         }
       } catch (error) {
         console.error("Error fetching appointments for date:", error);
-      } finally {
-        setIsLoadingDateAppointments(false);
       }
     };
 
@@ -199,6 +194,11 @@ export function EditAppointmentModal() {
   }, [form.date, dateAppointments, appointment?.id]);
 
   const handleSave = async () => {
+    if (!appointment?.id) {
+      toast.error("No appointment selected.");
+      return;
+    }
+
     if (form.type == null || form.type < 0) {
       toast.error("Please select an appointment type.");
       return;
@@ -254,7 +254,7 @@ export function EditAppointmentModal() {
             email: finalEmail,
             phone: finalPhone,
           };
-          await updateAppointment(appointment?.id!, updatedForm as Partial<Appointment>);
+          await updateAppointment(appointment.id, updatedForm as Partial<Appointment>);
           toast.success("Appointment updated");
           refreshAppointments();
           closeEditModal();
@@ -278,20 +278,20 @@ export function EditAppointmentModal() {
       }
     }
 
-    if (!form.date || !form.time || !form.doctor || !appointment?.id || form.price === undefined || form.price < 0) {
+    if (!form.date || !form.time || !form.doctor || form.price === undefined || form.price < 0) {
       toast.error("Please fill all required fields and ensure price is valid.");
       return;
     }
 
     setIsLoading(true);
     try {
-      console.log("=== UPDATING APPOINTMENT ===", appointment?.id);
+      console.log("=== UPDATING APPOINTMENT ===", appointment.id);
       const updatedForm = {
         ...form,
         patientId: finalPatientId,
         patientName: finalPatientName,
       };
-      await updateAppointment(appointment?.id, updatedForm as Partial<Appointment>);
+      await updateAppointment(appointment.id, updatedForm as Partial<Appointment>);
       toast.success("Appointment updated");
       refreshAppointments();
       closeEditModal();
@@ -566,7 +566,7 @@ export function EditAppointmentModal() {
             </div>
             <div className="space-y-2">
               <Label>Status</Label>
-              <Select value={String(form.status || 'scheduled')} onValueChange={(v) => setForm(prev => ({ ...prev, status: v as any }))}>
+              <Select value={String(form.status || 'scheduled')} onValueChange={(v) => setForm(prev => ({ ...prev, status: v as Appointment["status"] }))}>
                 <SelectTrigger>
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
@@ -575,6 +575,7 @@ export function EditAppointmentModal() {
                   <SelectItem value="confirmed">Confirmed</SelectItem>
                   <SelectItem value="pending">Pending</SelectItem>
                   <SelectItem value="tentative">Tentative</SelectItem>
+                  <SelectItem value="To Pay">To Pay</SelectItem>
                   <SelectItem value="completed">Completed</SelectItem>
                   <SelectItem value="cancelled">Cancelled</SelectItem>
                 </SelectContent>

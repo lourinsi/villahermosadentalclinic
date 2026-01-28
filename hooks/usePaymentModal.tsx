@@ -1,6 +1,19 @@
 "use client";
 
 import { createContext, useContext, useState, ReactNode, useCallback, useMemo } from "react";
+import { Appointment } from "./useAppointments";
+
+export interface Payment {
+  id?: string;
+  patientId?: string;
+  appointmentId?: string;
+  amount: number;
+  date: string;
+  method: string;
+  transactionId?: string;
+  notes?: string;
+  [key: string]: string | number | boolean | null | undefined; // Allow for other properties
+}
 
 interface PaymentModalContextType {
   isPaymentModalOpen: boolean;
@@ -8,12 +21,12 @@ interface PaymentModalContextType {
   appointmentId: string | null;
   patientId: string | null;
   patientName: string | null;
-  appointments: any[];
+  appointments: Appointment[];
   paymentId: string | null;
-  paymentData: any | null;
-  openPaymentModal: (patientId: string, patientName: string, appointments: any[], appointmentId?: string | null) => void;
-  openPatientPaymentModal: (appointments: any[], appointmentId: string) => void;
-  openEditPaymentModal: (paymentId: string, paymentData: any, patientId?: string | null, appointments?: any[]) => void;
+  paymentData: Payment | null;
+  openPaymentModal: (patientId: string, patientName: string, appointments: Appointment[], appointmentId?: string | null) => void;
+  openPatientPaymentModal: (appointments: Appointment[], appointmentId: string) => void;
+  openEditPaymentModal: (paymentId: string, paymentData: Payment, patientId?: string | null, appointments?: Appointment[]) => void;
   closePaymentModal: () => void;
 }
 
@@ -25,11 +38,11 @@ export const PaymentModalProvider = ({ children }: { children: ReactNode }) => {
   const [appointmentId, setAppointmentId] = useState<string | null>(null);
   const [patientId, setPatientId] = useState<string | null>(null);
   const [patientName, setPatientName] = useState<string | null>(null);
-  const [appointments, setAppointments] = useState<any[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [paymentId, setPaymentId] = useState<string | null>(null);
-  const [paymentData, setPaymentData] = useState<any | null>(null);
+  const [paymentData, setPaymentData] = useState<Payment | null>(null);
 
-  const openPaymentModal = useCallback((pId: string, pName: string, apts: any[], aptId: string | null = null) => {
+  const openPaymentModal = useCallback((pId: string, pName: string, apts: Appointment[], aptId: string | null = null) => {
     setPatientId(pId);
     setPatientName(pName);
     setAppointments(apts);
@@ -39,13 +52,13 @@ export const PaymentModalProvider = ({ children }: { children: ReactNode }) => {
     setPaymentModalOpen(true);
   }, []);
 
-  const openPatientPaymentModal = useCallback((apts: any[], aptId: string) => {
+  const openPatientPaymentModal = useCallback((apts: Appointment[], aptId: string) => {
     setAppointments(apts);
     setAppointmentId(aptId);
     setPatientPaymentModalOpen(true);
   }, []);
 
-  const openEditPaymentModal = useCallback((pId: string, pData: any, pIdParam?: string | null, apts?: any[]) => {
+  const openEditPaymentModal = useCallback((pId: string, pData: Payment, pIdParam?: string | null, apts?: Appointment[]) => {
     setPaymentId(pId);
     setPaymentData(pData);
     setAppointmentId(pData.appointmentId || null);

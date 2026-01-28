@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { CheckCircle2, Calendar as CalendarIcon, Clock, Stethoscope, ChevronRight, ChevronLeft, Video, UserCheck } from "lucide-react";
@@ -20,6 +21,7 @@ import { Patient } from "@/lib/patient-types";
 import { Appointment } from "@/hooks/useAppointments";
 
 export function PatientBookingModal() {
+  const router = useRouter();
   const {
     isPatientBookingModalOpen,
     closePatientBookingModal,
@@ -39,7 +41,6 @@ export function PatientBookingModal() {
   const [familyMembers, setFamilyMembers] = useState<Patient[]>([]);
   const [isLoadingFamily, setIsLoadingFamily] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [dateError, setDateError] = useState("");
   const [showSuccessPrompt, setShowSuccessPrompt] = useState(false);
   const [bookedAppointmentId, setBookedAppointmentId] = useState<string | null>(null);
   const [dateAppointments, setDateAppointments] = useState<Appointment[]>([]);
@@ -185,11 +186,6 @@ export function PatientBookingModal() {
       return;
     }
 
-    if (dateError) {
-      toast.error(dateError);
-      return;
-    }
-
     // Past date/time validation
     const appointmentDateTime = new Date(`${formData.date}T${formData.time}`);
     const now = new Date();
@@ -273,7 +269,7 @@ export function PatientBookingModal() {
   const handlePayLater = () => {
     setShowSuccessPrompt(false);
     closePatientBookingModal();
-    toast.info("You can pay for your appointment later in the Orders page.");
+    toast.info("Your appointment has been added to your Cart. You can pay for it later to confirm.");
   };
 
   return (
@@ -543,7 +539,7 @@ export function PatientBookingModal() {
           <div className="space-y-2">
             <DialogTitle className="text-xl">Appointment Booked!</DialogTitle>
             <DialogDescription>
-              Your appointment has been successfully scheduled and is currently pending. 
+              Your appointment has been added to your <strong>Cart</strong> and is currently pending. 
               Would you like to pay for it now to secure your slot?
             </DialogDescription>
           </div>

@@ -7,8 +7,8 @@ import { Calendar } from "@/components/ui/calendar";
 import { Loader2, Calendar as CalendarIcon, Clock } from "lucide-react";
 import { TIME_SLOTS, formatTimeTo12h } from "@/lib/time-slots";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { Appointment } from "@/hooks/useAppointments";
 
 interface DoctorAvailabilityDialogProps {
   doctorName: string;
@@ -17,7 +17,7 @@ interface DoctorAvailabilityDialogProps {
 export function DoctorAvailabilityDialog({ doctorName }: DoctorAvailabilityDialogProps) {
   const { openPatientBookingModal } = useAppointmentModal();
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
-  const [appointments, setAppointments] = useState<any[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
 

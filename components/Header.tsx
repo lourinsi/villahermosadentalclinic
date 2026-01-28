@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "./ui/button";
-import { Phone, MapPin } from "lucide-react";
+import { Phone } from "lucide-react";
 
 interface HeaderProps {
   onBookAppointment?: () => void;

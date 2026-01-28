@@ -37,6 +37,7 @@ import {
 import { EditAppointmentModal } from "./EditAppointmentModal";
 import { EditPaymentModal } from "./EditPaymentModal";
 import { Appointment } from "../hooks/useAppointments";
+import { RecentTransaction } from "../lib/finance-types";
 import { DentalChart } from "./DentalChart";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
@@ -132,17 +133,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
     fetchDoctorAppointments();
   }, [doctorFilter, refreshTrigger]);
 
-  // Reset page when search or status changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm, statusFilter]);
-
-  // Fetch patients when page, search, status filter, or refresh trigger changes
-  useEffect(() => {
-    fetchPatients(currentPage);
-  }, [currentPage, searchTerm, statusFilter, refreshTrigger, appointments]);
-
-  const fetchPatients = async (page = 1) => {
+  const fetchPatients = React.useCallback(async (page = 1) => {
     // Add a timeout so the fetch can't hang indefinitely in the client
     const controller = new AbortController();
     const timeoutMs = 5000; // 5 seconds
@@ -219,10 +210,10 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
         setTotalPages(1);
         setTotalFiltered(0);
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error("Error fetching patients:", err);
       // If the request was aborted due to timeout, fall back to local mock data so the UI remains usable
-      if (err && err.name === 'AbortError') {
+      if (err instanceof Error && err.name === 'AbortError') {
         console.warn(`Patient fetch aborted after ${timeoutMs}ms; returning empty list.`);
         toast.error('Patient fetch timed out.');
         setPaginatedPatients([]);
@@ -240,7 +231,17 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
       clearTimeout(timeoutId);
       setIsLoading(false);
     }
-  };
+  }, [searchTerm, statusFilter, doctorFilter, doctorAppointments, appointments, itemsPerPage]);
+
+  // Reset page when search or status changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter]);
+
+  // Fetch patients when page, search, status filter, or refresh trigger changes
+  useEffect(() => {
+    fetchPatients(currentPage);
+  }, [currentPage, fetchPatients]);
 
   const getStatusBadge = (status: string | undefined) => {
     switch (status) {
@@ -748,8 +749,8 @@ const PatientDetails = React.forwardRef<{
   const [isLoadingFamily, setIsLoadingFamily] = useState(false);
 
   // Payment state and helpers (local to PatientDetails)
-  const [allTransactions, setAllTransactions] = useState<any[]>([]);
-  const [mockAppointmentHistoryLocal, setMockAppointmentHistoryLocal] = useState<any[]>([]);
+  const [allTransactions, setAllTransactions] = useState<RecentTransaction[]>([]);
+  const [mockAppointmentHistoryLocal, setMockAppointmentHistoryLocal] = useState<Appointment[]>([]);
   const [expandedTransactions, setExpandedTransactions] = useState<Set<string>>(new Set());
 
   // New state for filters
@@ -1006,13 +1007,13 @@ const PatientDetails = React.forwardRef<{
 
     // Map patientAppointments into local appointment history shape used for payments
     useEffect(() => {
-      const mapped = patientAppointments.map((apt: Appointment, i: number) => {
+      const mapped: Appointment[] = patientAppointments.map((apt: Appointment, i: number) => {
         const id = apt.id || `apt-${i}`;
         const cost = (apt.price != null ? apt.price : 0);
-        const totalPaid = (apt as any).totalPaid != null ? (apt as any).totalPaid : 0;
-        const transactions = (apt as any).transactions ? (apt as any).transactions : [];
+        const totalPaid = apt.totalPaid != null ? apt.totalPaid : 0;
+        const transactions = apt.transactions ? apt.transactions : [];
         
-        let paymentStatus;
+        let paymentStatus: Appointment["paymentStatus"] | "over-paid";
         const oneWeekAgo = new Date();
         oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
         const aptDateStr = (apt.date || '').split(' ')[0];
@@ -1031,15 +1032,16 @@ const PatientDetails = React.forwardRef<{
         }
 
         return {
+          ...apt,
           id,
           date: apt.date + (apt.time ? ` ${apt.time}` : ''),
-          type: getAppointmentTypeName(apt.type, (apt as any).customType) || apt.type || 'Appointment',
+          type: getAppointmentTypeName(apt.type, apt.customType) || apt.type || 'Appointment',
           doctor: apt.doctor || '',
           notes: apt.notes || '',
-          cost,
+          price: cost,
           totalPaid,
-          paymentStatus,
-          transactions: transactions as any[],
+          paymentStatus: paymentStatus as Appointment["paymentStatus"],
+          transactions: transactions,
         };
       });
 
@@ -1053,14 +1055,14 @@ const PatientDetails = React.forwardRef<{
             if (json?.success && Array.isArray(json.data)) {
               const payments = json.data;
               // group payments by appointmentId and update appointment history
-              setMockAppointmentHistoryLocal((prev: any[]) => {
-                return prev.map((apt: any) => {
-                  const aptPayments = payments.filter((p: any) => p.appointmentId === apt.id);
+              setMockAppointmentHistoryLocal((prev: Appointment[]) => {
+                return prev.map((apt: Appointment) => {
+                  const aptPayments = payments.filter((p: RecentTransaction) => p.appointmentId === apt.id);
                   if (aptPayments.length > 0) {
-                    const totalPaid = aptPayments.reduce((s: number, p: any) => s + (p.amount || 0), 0);
+                    const totalPaid = aptPayments.reduce((s: number, p: RecentTransaction) => s + (p.amount || 0), 0);
                     const price = apt.price || 0;
                     
-                    let paymentStatus;
+                    let paymentStatus: Appointment["paymentStatus"] | "over-paid";
                     const oneWeekAgo = new Date();
                     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
                     const aptDateStr = (apt.date || '').split(' ')[0];
@@ -1082,7 +1084,7 @@ const PatientDetails = React.forwardRef<{
                       ...apt,
                       totalPaid,
                       transactions: aptPayments,
-                      paymentStatus,
+                      paymentStatus: paymentStatus as Appointment["paymentStatus"],
                     };
                   }
                   return apt;
@@ -1098,18 +1100,18 @@ const PatientDetails = React.forwardRef<{
     // transactions show immediately in the Payments tab without needing to add a new payment
     useEffect(() => {
       try {
-        const txns = (mockAppointmentHistoryLocal || []).flatMap((a: any) => (a.transactions || []).map((t: any) => ({
+        const txns = (mockAppointmentHistoryLocal || []).flatMap((a: Appointment) => (a.transactions || []).map((t: RecentTransaction) => ({
           ...t,
           appointmentId: a.id,
-          appointmentType: a.type,
+          appointmentType: String(a.type),
           appointmentDate: a.date,
           doctor: a.doctor,
         })));
 
         // dedupe by id
-        const deduped = Array.from(new Map(txns.map((t: any) => [t.id, t])).values());
+        const deduped = Array.from(new Map(txns.map((t: RecentTransaction) => [t.id, t])).values());
         // sort by date desc (newest first)
-        deduped.sort((x: any, y: any) => new Date(y.date).getTime() - new Date(x.date).getTime());
+        deduped.sort((x: RecentTransaction, y: RecentTransaction) => new Date(y.date).getTime() - new Date(x.date).getTime());
         setAllTransactions(deduped);
       } catch (e) {
         console.warn('[Payments] failed to populate transactions from history', e);
@@ -1577,9 +1579,9 @@ const PatientDetails = React.forwardRef<{
                     </div>
                 ) : (
                   <div className="space-y-4">
-                    {filteredHistory.map((appointment: any, index: number) => {
-                      const sortedTransactions = Array.from(new Map((appointment.transactions || []).map((t: any) => [t.id, t])).values())
-                        .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                    {filteredHistory.map((appointment: Appointment, index: number) => {
+                      const sortedTransactions = Array.from(new Map((appointment.transactions || []).map((t: RecentTransaction) => [t.id, t])).values())
+                        .sort((a: RecentTransaction, b: RecentTransaction) => new Date(b.date).getTime() - new Date(a.date).getTime());
                       
                       const isExpanded = expandedTransactions.has(appointment.id);
                       const visibleTransactions = isExpanded ? sortedTransactions : sortedTransactions.slice(0, 1);
@@ -1649,7 +1651,7 @@ const PatientDetails = React.forwardRef<{
                                 }
                               </div>
                               <div className="space-y-2">
-                                {visibleTransactions.map((txn: any) => (
+                                {visibleTransactions.map((txn: RecentTransaction) => (
                                   <div key={txn.id} className="flex items-center justify-between text-sm bg-gray-50 p-2 rounded">
                                     <div className="flex items-center space-x-2">
                                       {getPaymentMethodIcon(txn.method)}
@@ -1664,7 +1666,7 @@ const PatientDetails = React.forwardRef<{
                                         size="sm"
                                         className="h-8 w-8 p-0"
                                         onClick={() => {
-                                          openEditPaymentModal(txn.id, txn, patient.id, mockAppointmentHistoryLocal);
+                                          if (txn.id) openEditPaymentModal(txn.id, txn, patient.id, mockAppointmentHistoryLocal);
                                         }}
                                       >
                                         <Edit className="h-4 w-4" />
@@ -1767,7 +1769,7 @@ const PatientDetails = React.forwardRef<{
                         <div>
                           <p className="text-sm text-muted-foreground">Total Paid</p>
                           <p className="text-2xl font-semibold text-green-600">
-                            ${mockAppointmentHistoryLocal.reduce((sum: number, apt: any) => sum + (apt.totalPaid || 0), 0)}
+                            ${mockAppointmentHistoryLocal.reduce((sum: number, apt: Appointment) => sum + (apt.totalPaid || 0), 0)}
                           </p>
                         </div>
                         <CheckCircle className="h-8 w-8 text-green-600" />
@@ -1780,7 +1782,7 @@ const PatientDetails = React.forwardRef<{
                         <div>
                           <p className="text-sm text-muted-foreground">Outstanding</p>
                           <p className="text-2xl font-semibold text-red-600">
-                            ${mockAppointmentHistoryLocal.reduce((sum: number, apt: any) => sum + ((apt.price || 0) - (apt.totalPaid || 0)), 0)}
+                            ${mockAppointmentHistoryLocal.reduce((sum: number, apt: Appointment) => sum + ((apt.price || 0) - (apt.totalPaid || 0)), 0)}
                           </p>
                         </div>
                         <AlertTriangle className="h-8 w-8 text-red-600" />
@@ -1793,7 +1795,7 @@ const PatientDetails = React.forwardRef<{
                         <div>
                           <p className="text-sm text-muted-foreground">Total Billed</p>
                           <p className="text-2xl font-semibold">
-                            ${mockAppointmentHistoryLocal.reduce((sum: number, apt: any) => sum + (apt.price || 0), 0)}
+                            ${mockAppointmentHistoryLocal.reduce((sum: number, apt: Appointment) => sum + (apt.price || 0), 0)}
                           </p>
                         </div>
                         <DollarSign className="h-8 w-8 text-gray-600" />
@@ -1854,8 +1856,8 @@ const PatientDetails = React.forwardRef<{
                                     if (confirm("Are you sure you want to delete this payment?")) {
                                       const updatedHistory = mockAppointmentHistoryLocal.map(apt => {
                                         if (apt.id === txn.appointmentId) {
-                                          const newTransactions = apt.transactions?.filter((t: any) => t.id !== txn.id) || [];
-                                          const newTotalPaid = newTransactions.reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
+                                          const newTransactions = apt.transactions?.filter((t: RecentTransaction) => t.id !== txn.id) || [];
+                                          const newTotalPaid = newTransactions.reduce((sum: number, t: RecentTransaction) => sum + (t.amount || 0), 0);
                                           return {
                                             ...apt,
                                             transactions: newTransactions,
@@ -1909,5 +1911,6 @@ const PatientDetails = React.forwardRef<{
     </div>
   );
 });
+PatientDetails.displayName = "PatientDetails";
 
  

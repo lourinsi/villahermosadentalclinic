@@ -3,13 +3,34 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth.tsx";
 import { Button } from "@/components/ui/button";
-import { LogOut, User, LayoutDashboard, Calendar, Users, Settings } from "lucide-react";
+import { LogOut, User, LayoutDashboard, Calendar, Users, Settings, Bell, ClipboardList } from "lucide-react";
 import { toast } from "sonner";
+import { NotificationsOpened } from "./notificationsOpened";
+import { useNotifications } from "@/hooks/useNotifications";
+import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { Appointment } from "@/hooks/useAppointments";
 
 const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
   const pathname = usePathname();
   const router = useRouter();
   const { logout, user } = useAuth();
+  const { notifications, markAsRead, refreshNotifications } = useNotifications();
+  const { updateAppointment, refreshAppointments } = useAppointmentModal();
+
+  const unreadCount = notifications.filter(n => !n.isRead).length;
+
+  const handleUpdateAppointmentStatus = async (appointmentId: string, status: string, notificationId: string) => {
+    try {
+      await updateAppointment(appointmentId, { status: status as Appointment["status"] });
+      toast.success(`Appointment status updated to ${status}`);
+      await markAsRead(notificationId);
+      refreshAppointments();
+      refreshNotifications();
+    } catch (error) {
+      toast.error("Failed to update appointment status");
+      console.error(error);
+    }
+  };
 
   const handleLogout = async () => {
     try {
@@ -24,8 +45,10 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
 
   const navItems = [
     { href: "/doctor/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/doctor/requests", label: "Requests", icon: ClipboardList },
     { href: "/doctor/calendar", label: "My Schedule", icon: Calendar },
     { href: "/doctor/patients", label: "My Patients", icon: Users },
+    { href: "/doctor/notifications", label: "Notifications", icon: Bell },
     { href: "/doctor/settings", label: "Settings", icon: Settings },
   ];
 
@@ -76,7 +99,18 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
           </Button>
         </div>
       </aside>
-      <main className="flex-1 p-6 overflow-auto">{children}</main>
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-end px-6 flex-shrink-0">
+          <NotificationsOpened 
+            notifications={notifications} 
+            unreadCount={unreadCount} 
+            portal="doctor" 
+            onUpdateAppointmentStatus={handleUpdateAppointmentStatus}
+            onMarkAsRead={markAsRead}
+          />
+        </header>
+        <main className="flex-1 p-6 overflow-auto bg-gray-50">{children}</main>
+      </div>
     </div>
   );
 };

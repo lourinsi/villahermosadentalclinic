@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { RecentTransaction } from "../lib/finance-types";
 
 export interface Appointment {
   id: string;
@@ -15,10 +16,11 @@ export interface Appointment {
   duration?: number;
   notes: string;
   serviceType?: string;
-  status: "scheduled" | "confirmed" | "pending" | "tentative" | "completed" | "cancelled";
+  status: "scheduled" | "confirmed" | "pending" | "tentative" | "completed" | "cancelled" | "To Pay";
   paymentStatus?: "paid" | "unpaid" | "overdue" | "half-paid";
   balance?: number;
   totalPaid?: number;
+  transactions?: RecentTransaction[];
   createdAt?: string;
 }
 
@@ -34,6 +36,7 @@ export interface AppointmentFilters {
   type?: string;
   status?: string;
   anonymize?: boolean;
+  includeUnpaid?: boolean;
 }
 
 export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFilters) => {
@@ -55,6 +58,7 @@ export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFi
         if (filters?.type) queryParams.append("type", filters.type);
         if (filters?.status) queryParams.append("status", filters.status);
         if (filters?.anonymize) queryParams.append("anonymize", "true");
+        if (filters?.includeUnpaid) queryParams.append("includeUnpaid", "true");
 
         const url = queryParams.toString() ? `${API_URL}?${queryParams.toString()}` : API_URL;
         const response = await fetch(url);
@@ -72,7 +76,7 @@ export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFi
     };
 
     loadAppointments();
-  }, [refreshTrigger, filters?.startDate, filters?.endDate, filters?.search, filters?.doctor, filters?.type, filters?.status, filters?.patientId, filters?.parentId, filters?.anonymize]);
+  }, [refreshTrigger, filters?.startDate, filters?.endDate, filters?.search, filters?.doctor, filters?.type, filters?.status, filters?.patientId, filters?.parentId, filters?.anonymize, filters?.includeUnpaid]);
 
   const addAppointment = async (appointment: Omit<Appointment, "id" | "createdAt">) => {
     try {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { DateRange } from "react-day-picker";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
@@ -47,7 +47,7 @@ const appointmentColors: Record<string, { bg: string; text: string; border: stri
   "Other": { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200" },
 };
 
-const APPOINTMENT_STATUSES = ["all", "scheduled", "confirmed", "pending", "tentative", "completed", "cancelled"];
+const APPOINTMENT_STATUSES = ["all", "scheduled", "confirmed", "To Pay", "tentative", "pending", "completed", "cancelled"];
 
 
 export function CalendarView() {
@@ -83,7 +83,7 @@ export function CalendarView() {
     return appointments;
   }, [appointments, selectedStatus]);
 
-  const getViewRange = (date: Date) => {
+  const getViewRange = useCallback((date: Date) => {
     const start = new Date(date);
     const end = new Date(date);
     start.setHours(0, 0, 0, 0);
@@ -120,12 +120,12 @@ export function CalendarView() {
     }
 
     return { start, end };
-  };
+  }, [viewMode, dateRange]);
 
   useEffect(() => {
     const { start, end } = getViewRange(selectedDate);
     
-    let filters: AppointmentFilters = {};
+    const filters: AppointmentFilters = {};
 
     if (searchTerm) {
       filters.search = searchTerm;
@@ -160,7 +160,7 @@ export function CalendarView() {
     const timer = setTimeout(() => setIsLoadingView(false), 500);
     return () => clearTimeout(timer);
     
-  }, [viewMode, selectedDate, searchTerm, dateRange, selectedDoctor, selectedType, selectedStatus]);
+  }, [viewMode, selectedDate, searchTerm, dateRange, selectedDoctor, selectedType, selectedStatus, getViewRange, refreshAppointments]);
 
   const timeSlots = TIME_SLOTS;
 
@@ -182,6 +182,8 @@ export function CalendarView() {
       return `${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
     } else if (viewMode === "month") {
       return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    } else if (viewMode === "all") {
+      return "All Appointments";
     } else {
       if (dateRange?.from && dateRange?.to) {
         return `${dateRange.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${dateRange.to.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
@@ -389,7 +391,10 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                   return (
                     <div 
                       key={appointment.id}
-                      className={`absolute top-0 ${colors?.bg} ${colors?.text} ${colors?.border} border-l-4 rounded-lg p-3 shadow-sm hover:shadow-md transition-all cursor-pointer z-20 overflow-hidden`}
+                      className={`absolute top-0 ${colors?.bg} ${colors?.text} ${colors?.border} border-l-4 rounded-lg p-3 shadow-sm hover:shadow-md transition-all cursor-pointer z-20 overflow-hidden ${
+                        appointment.status === "tentative" ? "border-dashed opacity-90" : 
+                        appointment.status === "To Pay" ? "border-double border-orange-400" : ""
+                      }`}
                       style={{
                         ...calculateAppointmentStyle(appointment.duration),
                         width: `calc(${width} - 4px)`,
@@ -402,8 +407,14 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                     >
                       <div className="flex flex-col h-full">
                         <div className="flex items-start justify-between">
-                          <div className="font-semibold text-sm truncate pr-2">
+                          <div className="font-semibold text-sm truncate pr-2 flex items-center gap-1">
                             {appointment.patientName}
+                            {appointment.status === "tentative" && (
+                              <Badge variant="outline" className="text-[8px] h-3 px-1 bg-yellow-100 border-yellow-300 text-yellow-700">Reserved</Badge>
+                            )}
+                            {appointment.status === "To Pay" && (
+                              <Badge variant="outline" className="text-[8px] h-3 px-1 bg-orange-100 border-orange-300 text-orange-700">To Pay</Badge>
+                            )}
                           </div>
                           <div className="flex flex-shrink-0 space-x-1">
                             <Button 
@@ -545,7 +556,10 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                           return (
                             <div 
                               key={appointment.id}
-                              className={`absolute top-0 ${colors?.bg} ${colors?.text} ${colors?.border} border-l-4 rounded-lg p-2 shadow-sm hover:shadow-md transition-all cursor-pointer z-20 overflow-hidden text-xs`}
+                              className={`absolute top-0 ${colors?.bg} ${colors?.text} ${colors?.border} border-l-4 rounded-lg p-2 shadow-sm hover:shadow-md transition-all cursor-pointer z-20 overflow-hidden text-xs ${
+                                appointment.status === "tentative" ? "border-dashed opacity-90" : 
+                                appointment.status === "To Pay" ? "border-double border-orange-400" : ""
+                              }`}
                               style={{
                                 ...calculateAppointmentStyle(appointment.duration),
                                 width: `calc(${width} - 4px)`,
@@ -557,7 +571,15 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                               }}
                             >
                               <div className="flex justify-between items-start">
-                                <div className="font-semibold truncate pr-1">{appointment.patientName}</div>
+                                <div className="font-semibold truncate pr-1 flex flex-wrap items-center gap-1">
+                                  {appointment.patientName}
+                                  {appointment.status === "tentative" && (
+                                    <Badge variant="outline" className="text-[7px] h-2.5 px-0.5 bg-yellow-100 border-yellow-300 text-yellow-700 leading-none">R</Badge>
+                                  )}
+                                  {appointment.status === "To Pay" && (
+                                    <Badge variant="outline" className="text-[7px] h-2.5 px-0.5 bg-orange-100 border-orange-300 text-orange-700 leading-none">P</Badge>
+                                  )}
+                                </div>
                               </div>
                               <div className="truncate opacity-90">{typeName}</div>
                               <div className="truncate opacity-75 mt-0.5">{appointment.doctor}</div>
@@ -642,9 +664,14 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                   return (
                     <div
                       key={apt.id}
-                      className={`text-[10px] p-1 rounded truncate border-l-2 ${colors.bg} ${colors.text} ${colors.border}`}
+                      className={`text-[10px] p-1 rounded truncate border-l-2 ${colors.bg} ${colors.text} ${colors.border} ${
+                        apt.status === "tentative" ? "border-dashed opacity-80" : 
+                        apt.status === "To Pay" ? "border-orange-400" : ""
+                      }`}
                     >
-                      {apt.time} {apt.patientName} {apt.price != null && ` ($${apt.price.toFixed(2)})`}
+                      {apt.time} {apt.patientName} 
+                      {apt.status === "tentative" && " (R)"}
+                      {apt.status === "To Pay" && " (P)"}
                     </div>
                   )
                 })}
@@ -752,11 +779,11 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
         <CardContent className="p-4">
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div className="flex items-center space-x-4">
-              <div className="flex items-center bg-gray-50 rounded-lg p-1 border">
-                <Button variant="ghost" size="sm" onClick={() => navigateDate('prev')} className="h-8 w-8 p-0">
+              <div className={`flex items-center bg-gray-50 rounded-lg p-1 border ${viewMode === 'all' ? 'opacity-50 pointer-events-none' : ''}`}>
+                <Button variant="ghost" size="sm" onClick={() => navigateDate('prev')} className="h-8 w-8 p-0" disabled={viewMode === 'all'}>
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => navigateDate('next')} className="h-8 w-8 p-0">
+                <Button variant="ghost" size="sm" onClick={() => navigateDate('next')} className="h-8 w-8 p-0" disabled={viewMode === 'all'}>
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
@@ -972,7 +999,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                               today: "bg-violet-600 text-white rounded-full",
                             }}
                             components={{
-                              MonthCaption: ({ calendarMonth, displayIndex, ...props }: any) => (
+                              MonthCaption: ({ calendarMonth, ...props }: { calendarMonth: { date: Date } }) => (
                                 <div {...props}>
                                   <span 
                                     className="hover:text-violet-600 transition-colors cursor-pointer text-sm font-medium"

@@ -3,44 +3,13 @@
 import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
-import { Users, Calendar, DollarSign, TrendingUp, Clock, CheckCircle, AlertCircle } from "lucide-react";
+import { Users, Calendar, DollarSign, AlertCircle } from "lucide-react";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
-import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from "recharts";
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 import { Badge } from "./ui/badge";
 import { Appointment } from "../hooks/useAppointments";
-import { getAppointmentTypeName, APPOINTMENT_TYPES } from "../lib/appointment-types";
+import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal } from "../lib/utils";
-
-const statsData = [
-  {
-    title: "Total Patients",
-    value: "1,247",
-    change: "+12%",
-    icon: Users,
-    color: "text-blue-600"
-  },
-  {
-    title: "Today's Appointments",
-    value: "23",
-    change: "+2",
-    icon: Calendar,
-    color: "text-green-600"
-  },
-  {
-    title: "Monthly Revenue",
-    value: "$48,250",
-    change: "+8.2%",
-    icon: DollarSign,
-    color: "text-purple-600"
-  },
-  {
-    title: "Patient Satisfaction",
-    value: "4.9/5",
-    change: "+0.1",
-    icon: TrendingUp,
-    color: "text-orange-600"
-  }
-];
 
 const revenueData = [
   { month: "Jan", revenue: 42000, appointments: 180 },
@@ -51,16 +20,8 @@ const revenueData = [
   { month: "Jun", revenue: 48250, appointments: 220 }
 ];
 
-// derive appointment types/counts from real appointments
+// Derive appointment types/counts from real appointments
 const colorPalette = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4", "#f97316"];
-
-const recentAppointments = [
-  { time: "09:00 AM", patient: "John Smith", type: "Cleaning", status: "confirmed" },
-  { time: "10:30 AM", patient: "Sarah Davis", type: "Checkup", status: "in-progress" },
-  { time: "11:45 AM", patient: "Mike Johnson", type: "Filling", status: "waiting" },
-  { time: "02:00 PM", patient: "Emily Brown", type: "Consultation", status: "confirmed" },
-  { time: "03:30 PM", patient: "David Wilson", type: "Cleaning", status: "confirmed" }
-];
 
 export function Dashboard() {
   const { openCreateModal, openAddPatientModal, appointments, refreshTrigger, openEditModal } = useAppointmentModal();
@@ -135,7 +96,7 @@ export function Dashboard() {
   }, [appointments, viewMode]);
 
   const pendingAppointmentsCount = useMemo(() => {
-    return appointments.filter(apt => apt.status === "pending").length;
+    return appointments.filter(apt => apt.status === "pending" || apt.status === "tentative" || apt.status === "To Pay").length;
   }, [appointments]);
 
   // Build dynamic stats based on backend data
@@ -157,7 +118,7 @@ export function Dashboard() {
       bgColor: "bg-green-50"
     },
     {
-      title: "Pending",
+      title: "Tentative Patients",
       value: pendingAppointmentsCount.toString(),
       change: "Action required",
       icon: AlertCircle,
@@ -207,7 +168,7 @@ export function Dashboard() {
     <div className="p-6 space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-gray-900">Dashboard</h1>
-        <p className="text-muted-foreground">Welcome back! Here's what's happening at your clinic today.</p>
+        <p className="text-muted-foreground">Welcome back! Here&apos;s what&apos;s happening at your clinic today.</p>
       </div>
       
       {/* Stats Cards */}
@@ -225,7 +186,7 @@ export function Dashboard() {
             <CardContent>
               <div className="text-2xl font-bold">{stat.value}</div>
               <p className="text-xs text-muted-foreground">
-                <span className={stat.title === "Pending" ? "text-amber-600 font-medium" : "text-green-600"}>{stat.change}</span> {stat.title !== "Pending" && "from last month"}
+                <span className={stat.title === "Tentative Patients" ? "text-amber-600 font-medium" : "text-green-600"}>{stat.change}</span> {stat.title !== "Tentative Patients" && "from last month"}
               </p>
             </CardContent>
           </Card>
@@ -244,8 +205,8 @@ export function Dashboard() {
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="month" />
                 <YAxis />
-                <Tooltip formatter={(value: any, name: any) => [
-                  name === 'revenue' ? `$${value.toLocaleString()}` : value,
+                <Tooltip formatter={(value: number | string, name: string) => [
+                  name === 'revenue' ? `$${Number(value).toLocaleString()}` : value,
                   name === 'revenue' ? 'Revenue' : 'Appointments'
                 ]} />
                 <Area type="monotone" dataKey="revenue" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.1} />
@@ -275,7 +236,7 @@ export function Dashboard() {
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(value: any) => [`${value}%`, 'Percentage']} />
+                <Tooltip formatter={(value: number) => [`${value}%`, 'Percentage']} />
               </PieChart>
             </ResponsiveContainer>
             <div className="space-y-2 mt-4">

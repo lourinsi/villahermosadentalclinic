@@ -234,7 +234,7 @@ const OrdersContent = () => {
                                     <div className="flex flex-col items-end gap-2">
                                         <Badge variant={appointment.status === 'completed' ? 'default' : 'secondary'}>{appointment.status}</Badge>
                                         {appointment.paymentStatus &&
-                                            <Badge variant={appointment.paymentStatus === 'paid' ? 'success' : 'destructive'} className={appointment.paymentStatus === 'paid' ? 'bg-green-100 text-green-800' : ''}>
+                                            <Badge variant={appointment.paymentStatus === 'paid' ? 'outline' : 'destructive'} className={appointment.paymentStatus === 'paid' ? 'bg-green-100 text-green-800' : ''}>
                                                 {appointment.paymentStatus.toUpperCase()}
                                             </Badge>
                                         }

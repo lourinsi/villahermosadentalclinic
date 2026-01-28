@@ -6,16 +6,13 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Loader2, Search, Calendar, MapPin, Phone, Mail, Award } from "lucide-react";
+import { Loader2, Search, Calendar, Mail, Award } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
-import { DoctorAvailabilityDialog } from "@/components/DoctorAvailabilityDialog";
-import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 
 const FindDoctorsPage = () => {
   const router = useRouter();
   const { doctors, isLoadingDoctors } = useDoctors();
-  const { openPatientBookingModal } = useAppointmentModal();
   const [searchTerm, setSearchTerm] = useState("");
 
   const filteredDoctors = useMemo(() => {
@@ -89,7 +86,7 @@ const FindDoctorsPage = () => {
                 </div>
                 
                 <div className="text-sm line-clamp-3 italic text-muted-foreground">
-                  {(doctor as any).bio || "Dedicated to providing high-quality dental care with a gentle touch and personalized approach for every patient."}
+                  {doctor.bio || "Dedicated to providing high-quality dental care with a gentle touch and personalized approach for every patient."}
                 </div>
               </CardContent>
               <CardFooter className="pt-2 border-t bg-muted/5 flex flex-col gap-2">
