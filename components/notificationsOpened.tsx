@@ -38,23 +38,29 @@ export function NotificationsOpened({
 }: NotificationsOpenedProps) {
   const [filter, setFilter] = useState<'all' | 'unread' | 'appointment' | 'payment'>('all');
   
-  const filteredNotifications = notifications.filter(n => {
-    if (filter === 'unread') return !n.isRead;
-    if (filter === 'appointment') return n.type === 'appointment';
-    if (filter === 'payment') return n.type === 'payment';
-    return true;
-  });
+  const filteredNotifications = notifications
+    .filter(n => {
+      if (filter === 'unread') return !n.isRead;
+      if (filter === 'appointment') return n.type === 'appointment';
+      if (filter === 'payment') return n.type === 'payment';
+      return true;
+    })
+    .sort((a, b) => {
+      const dateA = new Date(a.updatedAt || a.createdAt).getTime();
+      const dateB = new Date(b.updatedAt || b.createdAt).getTime();
+      return dateB - dateA;
+    });
 
   const recentNotifications = filteredNotifications.slice(0, 10);
   const now = new Date();
   const twentyFourHoursAgo = subHours(now, 24);
 
   const newNotifications = recentNotifications.filter(n => 
-    isAfter(new Date(n.createdAt), twentyFourHoursAgo)
+    isAfter(new Date(n.updatedAt || n.createdAt), twentyFourHoursAgo)
   );
   
   const earlierNotifications = recentNotifications.filter(n => 
-    !isAfter(new Date(n.createdAt), twentyFourHoursAgo)
+    !isAfter(new Date(n.updatedAt || n.createdAt), twentyFourHoursAgo)
   );
 
   const getIcon = (type: NotificationType) => {
@@ -96,12 +102,12 @@ export function NotificationsOpened({
             {n.message}
           </p>
           <p className={`text-[10px] mt-1 ${!n.isRead ? 'text-violet-600 font-medium' : 'text-gray-400'}`}>
-            {format(new Date(n.createdAt), 'p')}
+            {format(new Date(n.updatedAt || n.createdAt), 'p')}
           </p>
 
           {n.type === 'appointment' && 
            n.metadata?.appointmentId && 
-           n.metadata?.isRequest && 
+           (n.metadata?.isRequest || isActionTaken) && 
            onUpdateAppointmentStatus && (
               <div className="mt-2 flex gap-1.5">
                 <Button 

@@ -20,6 +20,10 @@ export const useNotifications = () => {
       
       const data = await response.json();
       if (data.success) {
+        console.log(`[useNotifications] Successfully fetched ${data.data.length} notifications for userId: ${userId}`);
+        if (userId === 'admin') {
+          console.log("[useNotifications] Admin notifications detail:", data.data);
+        }
         setNotifications(data.data);
       }
     } catch (error) {

@@ -8,6 +8,7 @@ export interface Notification {
   type: NotificationType;
   createdAt: string;
   isRead: boolean;
+  updatedAt?: string;
   link?: string;
   metadata?: {
     appointmentId?: string;

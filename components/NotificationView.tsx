@@ -43,22 +43,28 @@ export function NotificationView({
 }: NotificationViewProps) {
   const [filter, setFilter] = useState<'all' | 'unread' | 'appointment' | 'payment'>('all');
 
-  const filteredNotifications = notifications.filter(n => {
-    if (filter === 'unread') return !n.isRead;
-    if (filter === 'appointment') return n.type === 'appointment';
-    if (filter === 'payment') return n.type === 'payment';
-    return true;
-  });
+  const filteredNotifications = notifications
+    .filter(n => {
+      if (filter === 'unread') return !n.isRead;
+      if (filter === 'appointment') return n.type === 'appointment';
+      if (filter === 'payment') return n.type === 'payment';
+      return true;
+    })
+    .sort((a, b) => {
+      const dateA = new Date(a.updatedAt || a.createdAt).getTime();
+      const dateB = new Date(b.updatedAt || b.createdAt).getTime();
+      return dateB - dateA;
+    });
 
   const now = new Date();
   const twentyFourHoursAgo = subHours(now, 24);
 
   const newNotifications = filteredNotifications.filter(n => 
-    isAfter(new Date(n.createdAt), twentyFourHoursAgo)
+    isAfter(new Date(n.updatedAt || n.createdAt), twentyFourHoursAgo)
   );
   
   const earlierNotifications = filteredNotifications.filter(n => 
-    !isAfter(new Date(n.createdAt), twentyFourHoursAgo)
+    !isAfter(new Date(n.updatedAt || n.createdAt), twentyFourHoursAgo)
   );
 
   const getIcon = (type: NotificationType) => {
@@ -105,13 +111,13 @@ export function NotificationView({
               {notification.message}
             </p>
             <span className={`text-xs mt-1 ${!notification.isRead ? 'text-violet-600 font-medium' : 'text-gray-500'}`}>
-              {format(new Date(notification.createdAt), 'p')}
+              {format(new Date(notification.updatedAt || notification.createdAt), 'p')}
             </span>
           </div>
 
           {notification.type === 'appointment' && 
            notification.metadata?.appointmentId && 
-           notification.metadata?.isRequest && 
+           (notification.metadata?.isRequest || isActionTaken) && 
            onUpdateAppointmentStatus && (
               <div className="mt-3 flex gap-2">
                 <Button 
