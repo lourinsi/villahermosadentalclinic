@@ -133,41 +133,98 @@ export function DoctorCalendarView() {
   useEffect(() => {
     const { start, end } = getViewRange(selectedDate);
 
-    const filters: AppointmentFilters = {};
+    const computeCurrentFilters = () : AppointmentFilters => {
+      const filters: AppointmentFilters = {};
 
-    if (searchTerm) {
-      filters.search = searchTerm;
-    } else {
-      let fetchStartStr: string;
-      let fetchEndStr: string;
-
-      if (viewMode === 'custom' && dateRange?.from && dateRange?.to) {
-        fetchStartStr = formatDateToYYYYMMDD(dateRange.from);
-        fetchEndStr = formatDateToYYYYMMDD(dateRange.to);
-      } else if (viewMode !== 'all') {
-        const monthStart = new Date(start.getFullYear(), start.getMonth(), 1);
-        const monthEnd = new Date(end.getFullYear(), end.getMonth() + 1, 0);
-        monthEnd.setHours(23, 59, 59, 999);
-        fetchStartStr = formatDateToYYYYMMDD(monthStart);
-        fetchEndStr = formatDateToYYYYMMDD(monthEnd);
+      if (searchTerm) {
+        filters.search = searchTerm;
       } else {
-        fetchStartStr = "";
-        fetchEndStr = "";
-      }
-      filters.startDate = fetchStartStr;
-      filters.endDate = fetchEndStr;
-    }
+        let fetchStartStr: string;
+        let fetchEndStr: string;
 
-    filters.type = selectedType;
-    filters.status = selectedStatus;
-    filters.doctor = doctorName;
+        if (viewMode === 'custom' && dateRange?.from && dateRange?.to) {
+          fetchStartStr = formatDateToYYYYMMDD(dateRange.from);
+          fetchEndStr = formatDateToYYYYMMDD(dateRange.to);
+        } else if (viewMode !== 'all') {
+          const monthStart = new Date(start.getFullYear(), start.getMonth(), 1);
+          const monthEnd = new Date(end.getFullYear(), end.getMonth() + 1, 0);
+          monthEnd.setHours(23, 59, 59, 999);
+          fetchStartStr = formatDateToYYYYMMDD(monthStart);
+          fetchEndStr = formatDateToYYYYMMDD(monthEnd);
+        } else {
+          fetchStartStr = "";
+          fetchEndStr = "";
+        }
+        filters.startDate = fetchStartStr;
+        filters.endDate = fetchEndStr;
+      }
+
+      filters.type = selectedType;
+      filters.status = selectedStatus;
+      filters.doctor = doctorName;
+
+      return filters;
+    };
 
     setIsLoadingView(true);
+    const filters = computeCurrentFilters();
     refreshAppointments(filters);
     const timer = setTimeout(() => setIsLoadingView(false), 500);
     return () => clearTimeout(timer);
 
   }, [viewMode, selectedDate, searchTerm, dateRange, selectedType, selectedStatus, doctorName, getViewRange, refreshAppointments]);
+
+  // Listen for global appointment updates (e.g. after a payment) and refresh view immediately
+  useEffect(() => {
+    const handler = (e: Event) => {
+      try {
+        const detail = (e as CustomEvent)?.detail;
+        // If there is an appointment update, refresh current view filters so doctor sees immediate changes
+        if (!detail) return;
+        const computeCurrentFilters = () : AppointmentFilters => {
+          const { start, end } = getViewRange(selectedDate);
+          const filters: AppointmentFilters = {};
+
+          if (searchTerm) {
+            filters.search = searchTerm;
+          } else {
+            let fetchStartStr: string;
+            let fetchEndStr: string;
+
+            if (viewMode === 'custom' && dateRange?.from && dateRange?.to) {
+              fetchStartStr = formatDateToYYYYMMDD(dateRange.from);
+              fetchEndStr = formatDateToYYYYMMDD(dateRange.to);
+            } else if (viewMode !== 'all') {
+              const monthStart = new Date(start.getFullYear(), start.getMonth(), 1);
+              const monthEnd = new Date(end.getFullYear(), end.getMonth() + 1, 0);
+              monthEnd.setHours(23, 59, 59, 999);
+              fetchStartStr = formatDateToYYYYMMDD(monthStart);
+              fetchEndStr = formatDateToYYYYMMDD(monthEnd);
+            } else {
+              fetchStartStr = "";
+              fetchEndStr = "";
+            }
+            filters.startDate = fetchStartStr;
+            filters.endDate = fetchEndStr;
+          }
+
+          filters.type = selectedType;
+          filters.status = selectedStatus;
+          filters.doctor = doctorName;
+
+          return filters;
+        };
+
+        // refresh appointments for this view
+        refreshAppointments(computeCurrentFilters());
+      } catch (err) {
+        // no-op
+      }
+    };
+
+    window.addEventListener('appointments:updated', handler as EventListener);
+    return () => window.removeEventListener('appointments:updated', handler as EventListener);
+  }, [refreshAppointments, selectedDate, searchTerm, dateRange, selectedType, selectedStatus, doctorName, viewMode, getViewRange]);
 
   const timeSlots = TIME_SLOTS;
   const formatTime = formatTimeTo12h;
@@ -658,7 +715,7 @@ export function DoctorCalendarView() {
                     >
                       <span className="truncate">
                         {apt.time} {apt.patientName}
-                        {apt.status === "tentative" && " (R)"}
+                        {apt.status === "tentative" && " (Reserved)"}
                         {apt.status === "To Pay" && " (P)"}
                       </span>
                       {apt.status !== "tentative" && apt.status !== "To Pay" && apt.paymentStatus === 'unpaid' && (

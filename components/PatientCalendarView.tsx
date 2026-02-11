@@ -34,6 +34,9 @@ import { useAuth } from "@/hooks/useAuth.tsx";
 import { AllAppointmentsView } from "./AllAppointmentsView";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
+import ConfirmDialog from "./ConfirmDialog";
+import { Avatar, AvatarImage, AvatarFallback } from "./ui/avatar";
+import { useDoctors } from "@/hooks/useDoctors";
 
 type ViewMode = "month" | "week" | "day" | "custom" | "all" | "cart";
 
@@ -60,10 +63,17 @@ export function PatientCalendarView() {
   const [activeRangeType, setActiveRangeType] = useState<"from" | "to">("from");
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  // confirmation modal state for destructive actions
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState<string | undefined>(undefined);
+  const [confirmMessage, setConfirmMessage] = useState<string | undefined>(undefined);
+  const [confirmAction, setConfirmAction] = useState<(() => Promise<void>) | null>(null);
+
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
   const { openPatientBookingModal, appointments, isLoading, refreshAppointments, deleteAppointment, updateAppointment } = useAppointmentModal();
-  const { openPatientPaymentModal } = usePaymentModal();
+  const { openPatientPaymentFor } = usePaymentModal();
+  const { doctors, isLoadingDoctors } = useDoctors();
 
   const filteredAppointments = useMemo(() => {
     if (viewMode === "cart") {
@@ -77,45 +87,79 @@ export function PatientCalendarView() {
     return filtered;
   }, [appointments, viewMode]);
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this pending appointment?")) return;
-    
-    setIsProcessing(true);
-    try {
-      await deleteAppointment(id);
-      toast.success("Appointment deleted successfully");
-      setSelectedAppointment(null);
-      refreshAppointments(filters);
-    } catch {
-      toast.error("Failed to delete appointment");
-    } finally {
-      setIsProcessing(false);
-    }
+  const handleDelete = (id: string) => {
+    setConfirmTitle("Delete appointment");
+    setConfirmMessage("Are you sure you want to delete this pending appointment?");
+    setConfirmAction(() => async () => {
+      setIsProcessing(true);
+      try {
+        await deleteAppointment(id);
+        toast.success("Appointment deleted successfully");
+        setSelectedAppointment(null);
+        refreshAppointments(filters);
+      } catch (err) {
+        console.error(err);
+        toast.error("Failed to delete appointment");
+      } finally {
+        setIsProcessing(false);
+      }
+    });
+    setIsConfirmOpen(true);
   };
 
-  const handleRequestCancellation = async (appointment: Appointment) => {
-    if (!confirm("Would you like to request a cancellation for this confirmed appointment? The doctor will be notified.")) return;
+  const handleCancelReservation = (id: string) => {
+    setConfirmTitle("Cancel reservation");
+    setConfirmMessage("Cancel this reservation? This will free the slot immediately.");
+    setConfirmAction(() => async () => {
+      setIsProcessing(true);
+      try {
+        await deleteAppointment(id);
+        // Notify other components that an appointment changed/was removed
+        try {
+          window.dispatchEvent(new CustomEvent('appointments:updated', { detail: { appointmentId: id, newStatus: 'cancelled' } }));
+        } catch (e) {
+          // ignore dispatch errors
+        }
+        toast.success("Reservation cancelled");
+        setSelectedAppointment(null);
+        refreshAppointments(filters);
+      } catch (err) {
+        console.error(err);
+        toast.error("Failed to cancel reservation");
+      } finally {
+        setIsProcessing(false);
+      }
+    });
+    setIsConfirmOpen(true);
+  };
 
-    setIsProcessing(true);
-    try {
-      // For now, we'll update the notes or status to indicate a cancellation request
-      // Ideally, there should be a 'cancellation_requested' status or a notification system
-      await updateAppointment(appointment.id, { 
-        notes: appointment.notes + "\n[CANCELLATION REQUESTED BY PATIENT]",
-        status: "tentative" // Using tentative to indicate it's being reviewed
-      });
-      toast.success("Cancellation request sent to the doctor.");
-      setSelectedAppointment(null);
-      refreshAppointments(filters);
-    } catch {
-      toast.error("Failed to send cancellation request");
-    } finally {
-      setIsProcessing(false);
-    }
+  const handleRequestCancellation = (appointment: Appointment) => {
+    setConfirmTitle("Request cancellation");
+    setConfirmMessage("Would you like to request a cancellation for this confirmed appointment? The doctor will be notified.");
+    setConfirmAction(() => async () => {
+      setIsProcessing(true);
+      try {
+        // For now, we'll update the notes or status to indicate a cancellation request
+        // Ideally, there should be a 'cancellation_requested' status or a notification system
+        await updateAppointment(appointment.id, {
+          notes: appointment.notes + "\n[CANCELLATION REQUESTED BY PATIENT]",
+          status: "tentative" // Using tentative to indicate it's being reviewed
+        });
+        toast.success("Cancellation request sent to the doctor.");
+        setSelectedAppointment(null);
+        refreshAppointments(filters);
+      } catch (err) {
+        console.error(err);
+        toast.error("Failed to send cancellation request");
+      } finally {
+        setIsProcessing(false);
+      }
+    });
+    setIsConfirmOpen(true);
   };
 
   const handlePay = (appointment: Appointment) => {
-    openPatientPaymentModal(appointments, appointment.id);
+  openPatientPaymentFor(appointment);
     setSelectedAppointment(null);
   };
   
@@ -191,6 +235,23 @@ export function PatientCalendarView() {
       refreshAppointments(filters);
     }
   }, [filters, refreshAppointments, parentId]);
+
+  useEffect(() => {
+    const onUpdated = (e: Event) => {
+      try {
+        const detail = (e as CustomEvent)?.detail || {};
+        const { appointmentId, newStatus, newPaymentStatus } = detail;
+        if (appointmentId) {
+          // optimistic update: update appointments array in place
+          // updateAppointment hook exists but we can optimistically update the cached appointments
+          // Since appointments come from useAppointmentModal, call refresh to get canonical state
+          refreshAppointments(filters);
+        }
+      } catch (err) {}
+    };
+    window.addEventListener('appointments:updated', onUpdated as EventListener);
+    return () => window.removeEventListener('appointments:updated', onUpdated as EventListener);
+  }, [filters, refreshAppointments]);
 
   useEffect(() => {
     setIsLoadingView(true);
@@ -332,7 +393,7 @@ export function PatientCalendarView() {
   };
 
   const calculateAppointmentStyle = (duration: number = 60) => {
-    const slotHeight = 80;
+  const slotHeight = 64;
     const slotsOccupied = duration / 30;
     return {
       height: `${slotHeight * slotsOccupied - 4}px`
@@ -383,7 +444,7 @@ export function PatientCalendarView() {
           const isPast = new Date(`${formatDateToYYYYMMDD(selectedDate)}T${timeSlot}`) < new Date();
 
           return (
-            <div key={timeSlot} className="flex items-start min-h-[80px] border-b border-gray-100 relative group">
+            <div key={timeSlot} className="flex items-start min-h-[64px] border-b border-gray-100 relative group">
               {!currentSlotIsCovered && !isPast && (
                 <div
                   className="absolute inset-y-2 left-32 right-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-10 hover:bg-violet-50/50 rounded-xl border-2 border-dashed border-transparent hover:border-violet-200/50 group/plus"
@@ -397,7 +458,7 @@ export function PatientCalendarView() {
                 {formatTime(timeSlot)}
               </div>
               
-              <div className="flex-1 relative min-h-[80px]">
+              <div className="flex-1 relative min-h-[64px]">
                 {appointmentsStartingAtSlot.map((appointment: Appointment) => {
                   const columnIndex = appointmentColumns.get(appointment.id) ?? 0;
                   const totalColumns = maxOverlappingAt.get(appointment.id) ?? 1;
@@ -422,17 +483,31 @@ export function PatientCalendarView() {
                       }}
                     >
                       <div className="flex flex-col h-full">
-                        <div className="font-semibold text-sm truncate pr-2 flex items-center gap-2">
-                          {appointment.patientName}
-                          {appointment.paymentStatus === 'unpaid' && (
-                            <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[8px] h-3 px-1 uppercase font-black">Unpaid</Badge>
-                          )}
-                        </div>
-                        <div className="text-xs opacity-90 truncate">
-                          {typeName} • {appointment.duration || 30}min
-                        </div>
-                        <div className="text-xs opacity-80 mt-1 truncate flex items-center gap-1">
-                          <Stethoscope className="h-3 w-3" /> Dr. {appointment.doctor}
+                        <div className="flex items-start gap-3">
+                          <div className="flex-shrink-0">
+                            <Avatar className="h-10 w-10 border border-gray-100">
+                              {(() => {
+                                const doc = doctors.find(d => String(d.name) === String(appointment.doctor) || String(d.id) === String(appointment.doctor));
+                                const src = doc?.profilePicture || (appointment as any).doctorProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.doctor}`;
+                                return <AvatarImage src={src} alt={appointment.doctor} />;
+                              })()}
+                              <AvatarFallback>{String(appointment.doctor || '').substring(0,2).toUpperCase()}</AvatarFallback>
+                            </Avatar>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-semibold text-sm truncate pr-2 flex items-center gap-2">
+                              {appointment.patientName}
+                              {appointment.paymentStatus === 'unpaid' && (
+                                <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[8px] h-3 px-1 uppercase font-black">Unpaid</Badge>
+                              )}
+                            </div>
+                            <div className="text-xs opacity-90 truncate">
+                              {typeName} • {appointment.duration || 30}min
+                            </div>
+                            <div className="text-xs opacity-80 mt-1 truncate flex items-center gap-2">
+                              <div className="text-[12px] font-medium">Dr. {appointment.doctor}</div>
+                            </div>
+                          </div>
                         </div>
                         <Badge variant="outline" className="text-[10px] bg-white/50 backdrop-blur-sm mt-auto self-start">
                           {appointment.status}
@@ -491,7 +566,7 @@ export function PatientCalendarView() {
 
           <div className="relative">
             {TIME_SLOTS.map((timeSlot) => (
-              <div key={timeSlot} className="flex min-h-[80px] border-b border-gray-50">
+              <div key={timeSlot} className="flex min-h-[64px] border-b border-gray-50">
                 <div className="w-20 flex-shrink-0 pt-2 pr-4 text-right text-sm font-medium text-muted-foreground sticky left-0 bg-white z-10">
                   {formatTime(timeSlot)}
                 </div>
@@ -512,7 +587,7 @@ export function PatientCalendarView() {
                   return (
                     <div 
                       key={idx} 
-                      className="flex-1 border-l border-gray-100 relative min-h-[80px] group"
+                      className="flex-1 border-l border-gray-100 relative min-h-[64px] group"
                     >
                         {!currentSlotIsCovered && (
                             <div
@@ -548,15 +623,29 @@ export function PatientCalendarView() {
                               }}
                             >
                               <div className="flex justify-between items-start">
-                                <div className="font-semibold truncate pr-1 flex items-center gap-1">
-                                  {appointment.patientName}
-                                  {appointment.paymentStatus === 'unpaid' && (
-                                    <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[7px] h-2.5 px-0.5 uppercase font-black">UNPAID</Badge>
-                                  )}
+                                <div className="flex items-start gap-2">
+                                  <div className="flex-shrink-0">
+                                    <Avatar className="h-8 w-8 border border-gray-100">
+                                      {(() => {
+                                        const doc = doctors.find(d => String(d.name) === String(appointment.doctor) || String(d.id) === String(appointment.doctor));
+                                        const src = doc?.profilePicture || (appointment as any).doctorProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.doctor}`;
+                                        return <AvatarImage src={src} alt={appointment.doctor} />;
+                                      })()}
+                                      <AvatarFallback>{String(appointment.doctor || '').substring(0,2).toUpperCase()}</AvatarFallback>
+                                    </Avatar>
+                                  </div>
+                                  <div className="font-semibold truncate pr-1 flex items-center gap-1 min-w-0">
+                                    {appointment.patientName}
+                                    {appointment.paymentStatus === 'unpaid' && (
+                                      <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[7px] h-2.5 px-0.5 uppercase font-black">UNPAID</Badge>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                               <div className="truncate opacity-90">{typeName}</div>
-                              <div className="truncate opacity-75 mt-0.5">{appointment.doctor}</div>
+                              <div className="truncate opacity-75 mt-0.5 flex items-center gap-2">
+                                <span className="text-sm font-medium">Dr. {appointment.doctor}</span>
+                              </div>
                             </div>
                           )
                         })}
@@ -679,10 +768,25 @@ export function PatientCalendarView() {
                   return (
                     <div
                       key={apt.id}
-                      className={`text-[10px] p-1 rounded truncate border-l-2 ${colors.bg} ${colors.text} ${colors.border} ${apt.paymentStatus === 'unpaid' ? 'opacity-75 border-dashed' : ''} flex items-center justify-between`}
+                      className={`text-[10px] p-1 rounded truncate border-l-2 ${colors.bg} ${colors.text} ${colors.border} ${apt.paymentStatus === 'unpaid' ? 'opacity-75 border-dashed' : ''} flex items-center justify-between gap-2`}
                       onClick={(e) => { e.stopPropagation(); setSelectedAppointment(apt); }}
                     >
-                      <span className="truncate">{apt.time} with Dr. {apt.doctor}</span>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="flex-shrink-0">
+                          <Avatar className="h-7 w-7 border border-gray-100">
+                            {(() => {
+                              const doc = doctors.find(d => String(d.name) === String(apt.doctor) || String(d.id) === String(apt.doctor));
+                              const src = doc?.profilePicture || (apt as any).doctorProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${apt.doctor}`;
+                              return <AvatarImage src={src} alt={apt.doctor} />;
+                            })()}
+                            <AvatarFallback>{String(apt.doctor || '').substring(0,2).toUpperCase()}</AvatarFallback>
+                          </Avatar>
+                        </div>
+                        <div className="truncate text-[11px]">
+                          <div className="font-medium truncate">{apt.time} • Dr. {apt.doctor}</div>
+                          <div className="text-[10px] opacity-80 truncate">{typeName}</div>
+                        </div>
+                      </div>
                       {apt.paymentStatus === 'unpaid' && (
                         <span className="ml-1 text-[7px] font-black text-orange-600 bg-orange-50 px-0.5 rounded border border-orange-100 uppercase">U</span>
                       )}
@@ -1016,6 +1120,27 @@ export function PatientCalendarView() {
         </CardContent>
       </Card>
       
+      <ConfirmDialog
+        open={isConfirmOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setConfirmAction(null);
+          }
+          setIsConfirmOpen(open);
+        }}
+        title={confirmTitle}
+        message={confirmMessage}
+        loading={isProcessing}
+        onConfirm={async () => {
+          if (confirmAction) {
+            await confirmAction();
+            setConfirmAction(null);
+          }
+        }}
+        confirmLabel="Confirm"
+        cancelLabel="Cancel"
+      />
+
       <Dialog open={!!selectedAppointment} onOpenChange={() => setSelectedAppointment(null)}>
         <DialogContent className="max-w-md">
             <DialogHeader>
@@ -1068,17 +1193,36 @@ export function PatientCalendarView() {
                     )}
 
                     <DialogFooter className="flex-col sm:flex-row gap-2 pt-4 border-t">
-                      {selectedAppointment.status === 'pending' && (
-                        <Button 
-                          variant="destructive" 
-                          className="w-full gap-2" 
-                          onClick={() => handleDelete(selectedAppointment.id)}
-                          disabled={isProcessing}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          Delete Appointment
-                        </Button>
-                      )}
+                      {(() => {
+                        // show cancel when the appointment is NOT confirmed/scheduled and not in the past
+                        const aptDate = parseBackendDateToLocal(selectedAppointment.date);
+                        const endOfDay = new Date(aptDate);
+                        endOfDay.setHours(23, 59, 59, 999);
+                        const isPast = endOfDay.getTime() < new Date().getTime();
+                        const showCancel = !["scheduled", "confirmed"].includes(selectedAppointment.status) && !isPast;
+
+                        if (showCancel) {
+                          return (
+                            <Button
+                              variant="destructive"
+                              className="w-full gap-2"
+                              onClick={() => {
+                                if (selectedAppointment.status === 'pending') {
+                                  handleDelete(selectedAppointment.id);
+                                } else {
+                                  handleCancelReservation(selectedAppointment.id);
+                                }
+                              }}
+                              disabled={isProcessing}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              Cancel Appointment
+                            </Button>
+                          );
+                        }
+
+                        return null;
+                      })()}
 
                       {(selectedAppointment.status === 'scheduled' || selectedAppointment.status === 'confirmed') && (
                         <Button 

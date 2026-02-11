@@ -1925,9 +1925,9 @@ export function StaffView() {
                 </div>
                 <div className="space-y-2">
                   <Label>Status</Label>
-                  <Select
+                    <Select
                     value={editAppointment.status}
-                    onValueChange={(value) => setEditAppointment({ ...editAppointment, status: value })}
+                    onValueChange={(value) => setEditAppointment({ ...editAppointment, status: value as import('@/hooks/useAppointments').Appointment['status'] })}
                   >
                     <SelectTrigger>
                       <SelectValue />

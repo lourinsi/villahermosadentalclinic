@@ -49,8 +49,12 @@ interface RequestsViewProps {
 }
 
 export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
-  const { appointments, isLoading, updateAppointment, refreshTrigger, openEditModal } = useAppointmentModal();
+  const { appointments, isLoading, updateAppointment, openEditModal, refreshAppointments } = useAppointmentModal();
   
+  useEffect(() => {
+    refreshAppointments();
+  }, [refreshAppointments]);
+
   // History filters state
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -176,6 +180,10 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
               : "Review pending requests or browse processed booking history for all doctors."}
           </p>
         </div>
+        <Button onClick={() => refreshAppointments()} variant="outline" className="flex items-center gap-2">
+          <RotateCcw className="h-4 w-4" />
+          Refresh
+        </Button>
       </div>
 
       <Tabs defaultValue="pending" className="w-full">

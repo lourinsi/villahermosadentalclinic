@@ -102,6 +102,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
             portal="admin" 
             onUpdateAppointmentStatus={handleUpdateAppointmentStatus}
             onMarkAsRead={markAsRead}
+            onRefresh={refreshNotifications}
           />
         </header>
         <main className="flex-1 p-6 overflow-auto bg-gray-50">{children}</main>

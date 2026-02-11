@@ -61,23 +61,42 @@ export default function DoctorAvailabilityPage() {
   }, [selectedDate, viewMode]);
 
   useEffect(() => {
-    if (doctorName) {
-      const fetchAppointments = async () => {
-        try {
-          setIsLoadingAvailability(true);
-          const response = await fetch(`http://localhost:3001/api/appointments?doctor=${encodeURIComponent(doctorName)}&startDate=${dateRange.start}&endDate=${dateRange.end}`);
-          const result = await response.json();
-          if (result.success) {
-            setAppointments(result.data);
-          }
-        } catch (error) {
-          console.error("Failed to fetch doctor appointments", error);
-        } finally {
-          setIsLoadingAvailability(false);
+    // extract fetch into callback so we can call it from event listeners
+    const fetchAppointments = async () => {
+      if (!doctorName) return;
+      try {
+        setIsLoadingAvailability(true);
+        const response = await fetch(`http://localhost:3001/api/appointments?doctor=${encodeURIComponent(doctorName)}&startDate=${dateRange.start}&endDate=${dateRange.end}`);
+        const result = await response.json();
+        if (result.success) {
+          setAppointments(result.data);
         }
-      };
-      fetchAppointments();
-    }
+      } catch (error) {
+        console.error("Failed to fetch doctor appointments", error);
+      } finally {
+        setIsLoadingAvailability(false);
+      }
+    };
+
+    fetchAppointments();
+
+    // refresh when other components dispatch an appointments:updated event (e.g. after payment)
+    const handler = (e: Event) => {
+      try {
+        const detail = (e as CustomEvent)?.detail;
+        // if there's an update, re-fetch appointments for the current date range
+        if (detail) {
+          fetchAppointments();
+        }
+      } catch (err) {
+        // ignore
+      }
+    };
+
+    window.addEventListener('appointments:updated', handler as EventListener);
+    return () => {
+      window.removeEventListener('appointments:updated', handler as EventListener);
+    };
   }, [dateRange, doctorName]);
 
   const getDaySlots = useCallback((date: Date) => {
@@ -101,12 +120,14 @@ export default function DoctorAvailabilityPage() {
       const [hour, minute] = slot.split(':').map(Number);
       const isPastTime = isToday && (hour < currentHour || (hour === currentHour && minute <= currentMinute));
       const isBooked = bookedTimes.includes(slot);
+      const isTentative = dayAppointments.some(apt => apt.time === slot && apt.status === 'tentative');
       const isPast = isPastTime || isPastDate;
       
       return {
         time: slot,
         isAvailable: !isBooked && !isPast,
         isBooked,
+        isTentative,
         isPast
       };
     });
@@ -182,13 +203,15 @@ export default function DoctorAvailabilityPage() {
                       className={`
                         font-bold px-2.5 py-0.5 text-[10px] uppercase
                         ${slot.isAvailable 
-                          ? "bg-green-600 text-white border-green-700" 
-                          : slot.isBooked 
-                            ? "bg-orange-500 text-white border-orange-600"
-                            : "bg-gray-400 text-white border-gray-500"}
+                          ? "bg-emerald-600 text-white border-emerald-700" 
+                          : slot.isTentative
+                            ? "bg-emerald-100 text-emerald-700 border-emerald-200"
+                            : slot.isBooked
+                              ? "bg-emerald-700 text-white border-emerald-800"
+                              : "bg-gray-400 text-white border-gray-500"}
                       `}
                     >
-                      {slot.isAvailable ? "Open" : (slot.isBooked ? "Booked" : "Passed")}
+                      {slot.isAvailable ? "Open" : (slot.isTentative ? "Reserved" : (slot.isBooked ? "Booked" : "Passed"))}
                     </Badge>
                   </div>
                 ))}
@@ -238,11 +261,11 @@ export default function DoctorAvailabilityPage() {
                     >
                       <div className={`
                         flex flex-col items-center justify-center p-1 rounded-md border text-center transition-all ${slot.isAvailable ? 'hover:scale-[1.02]' : ''}
-                        ${slot.isAvailable ? 'bg-green-600 border-green-700' : 'bg-orange-500 border-orange-600'}
+                          ${slot.isAvailable ? 'bg-emerald-600 border-emerald-700' : (slot.isTentative ? 'bg-emerald-100 border-emerald-200' : 'bg-emerald-700 border-emerald-800')}
                       `}>
                         <span className="text-[8px] font-bold text-white/90 leading-none">{formatTimeTo12h(slot.time)}</span>
                         <p className="text-[8px] font-black text-white uppercase mt-0.5 leading-none">
-                          {slot.isAvailable ? 'OPEN' : 'BOOKED'}
+                          {slot.isAvailable ? 'OPEN' : (slot.isTentative ? 'RESERVED' : 'BOOKED')}
                         </p>
                       </div>
                     </button>
@@ -314,10 +337,10 @@ export default function DoctorAvailabilityPage() {
                   >
                     <div className={`
                       px-1 py-0.5 rounded text-[7px] font-black text-white flex items-center justify-between transition-transform ${slot.isAvailable ? 'hover:scale-[1.03]' : ''}
-                      ${slot.isAvailable ? 'bg-green-600' : 'bg-orange-500'}
+                      ${slot.isAvailable ? 'bg-emerald-600' : (slot.isTentative ? 'bg-emerald-100' : 'bg-emerald-700')}
                     `}>
                       <span className="leading-tight">{formatTimeTo12h(slot.time)}</span>
-                      <span className="leading-tight">{slot.isAvailable ? 'OPEN' : 'BOOKED'}</span>
+                      <span className="leading-tight">{slot.isAvailable ? 'OPEN' : (slot.isTentative ? 'RESERVED' : 'BOOKED')}</span>
                     </div>
                   </button>
                 ))}
@@ -507,21 +530,25 @@ export default function DoctorAvailabilityPage() {
                </div>
              )}
 
-             {/* Legend */}
-             <div className="flex items-center gap-6 mt-8 px-6 py-4 bg-white rounded-3xl shadow-sm border border-gray-100 w-fit">
-                <div className="flex items-center gap-2">
-                   <div className="h-3 w-3 rounded-full bg-green-600" />
-                   <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Open Slot</span>
-                </div>
-                <div className="flex items-center gap-2">
-                   <div className="h-3 w-3 rounded-full bg-orange-500" />
-                   <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Booked Slot</span>
-                </div>
-                <div className="flex items-center gap-2">
-                   <div className="h-3 w-3 rounded-full bg-gray-400" />
-                   <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Passed Slot</span>
-                </div>
-             </div>
+         {/* Legend */}
+         <div className="flex items-center gap-6 mt-8 px-6 py-4 bg-white rounded-3xl shadow-sm border border-gray-100 w-fit">
+           <div className="flex items-center gap-2">
+             <div className="h-3 w-3 rounded-full bg-emerald-600" />
+             <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Open Slot</span>
+           </div>
+           <div className="flex items-center gap-2">
+             <div className="h-3 w-3 rounded-full bg-emerald-200 border border-emerald-200" />
+             <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Reserved Slot</span>
+           </div>
+           <div className="flex items-center gap-2">
+             <div className="h-3 w-3 rounded-full bg-emerald-700" />
+             <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Booked Slot</span>
+           </div>
+           <div className="flex items-center gap-2">
+             <div className="h-3 w-3 rounded-full bg-gray-400" />
+             <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Passed Slot</span>
+           </div>
+         </div>
           </div>
         </div>
       </div>

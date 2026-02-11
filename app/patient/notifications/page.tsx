@@ -5,6 +5,7 @@ import { NotificationView } from "@/components/NotificationView";
 import { useNotifications } from "@/hooks/useNotifications";
 import { toast } from "sonner";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { Appointment } from '@/hooks/useAppointments';
 
 export default function PatientNotificationsPage() {
   const { 
@@ -18,7 +19,7 @@ export default function PatientNotificationsPage() {
 
   const { updateAppointment, refreshAppointments } = useAppointmentModal();
 
-  const handleUpdateAppointmentStatus = async (appointmentId: string, status: string, notificationId: string) => {
+  const handleUpdateAppointmentStatus = async (appointmentId: string, status: Appointment['status'], notificationId: string) => {
     try {
       await updateAppointment(appointmentId, { status });
       const message = status === 'tentative' 

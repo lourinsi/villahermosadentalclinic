@@ -15,6 +15,7 @@ import {
   CheckCircle
 } from "lucide-react";
 import { Notification, NotificationType } from "../lib/notification-types";
+import { Appointment } from "@/hooks/useAppointments";
 import { format, isAfter, subHours } from "date-fns";
 import {
   DropdownMenu,
@@ -29,7 +30,7 @@ interface NotificationViewProps {
   onMarkAsRead: (id: string) => void;
   onDelete: (id: string) => void;
   onMarkAllAsRead: () => void;
-  onUpdateAppointmentStatus?: (appointmentId: string, status: string, notificationId: string) => void;
+  onUpdateAppointmentStatus?: (appointmentId: string, status: Appointment["status"], notificationId: string) => void;
   portal?: 'admin' | 'doctor' | 'patient';
 }
 

@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import { EditAppointmentModal } from "./EditAppointmentModal";
 import { EditPaymentModal } from "./EditPaymentModal";
+import ConfirmDialog from "./ConfirmDialog";
 import { Appointment } from "../hooks/useAppointments";
 import { RecentTransaction } from "../lib/finance-types";
 import { DentalChart } from "./DentalChart";
@@ -82,6 +83,13 @@ interface PatientsViewProps {
   doctorFilter?: string; // When set, only show patients this doctor has seen
 }
 
+// Local history appointment shape (type can be string for display)
+interface HistoryAppointment extends Omit<Appointment, 'type' | 'date' | 'transactions'> {
+  type: string;
+  date: string;
+  transactions: RecentTransaction[];
+}
+
 export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -106,6 +114,13 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   const patientDetailsRef = useRef<{ save: () => Promise<boolean> } | null>(null);
   const itemsPerPage = 10;
   const { openScheduleModal, openAddPatientModal, refreshPatients, refreshTrigger, appointments } = useAppointmentModal();
+
+  // Generic confirm dialog state (reusable across this component)
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const [confirmLoading, setConfirmLoading] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<null | (() => Promise<void>)>(null);
+  const [confirmTitle, setConfirmTitle] = useState<string>("");
+  const [confirmMessage, setConfirmMessage] = useState<string>("");
 
   // State to hold doctor's appointments (for filtering patients by doctor)
   const [doctorAppointments, setDoctorAppointments] = useState<Appointment[]>([]);
@@ -716,7 +731,7 @@ const PatientDetails = React.forwardRef<{
   doctorFilter
 }, ref) => {
   const { openEditModal, refreshPatients, appointments } = useAppointmentModal();
-  const { openPaymentModal, openEditPaymentModal } = usePaymentModal();
+  const { openPaymentModal, openEditPaymentModal, openPaymentFor } = usePaymentModal();
   const [formData, setFormData] = useState({
     firstName: patient.firstName || patient.name?.split(' ')[0] || '',
     lastName: patient.lastName || patient.name?.split(' ').slice(1).join(' ') || '',
@@ -753,6 +768,13 @@ const PatientDetails = React.forwardRef<{
   const [mockAppointmentHistoryLocal, setMockAppointmentHistoryLocal] = useState<Appointment[]>([]);
   const [expandedTransactions, setExpandedTransactions] = useState<Set<string>>(new Set());
 
+  // Local confirm dialog state for PatientDetails (prefixed to avoid collisions)
+  const [pdIsConfirmOpen, setPdIsConfirmOpen] = useState(false);
+  const [pdConfirmLoading, setPdConfirmLoading] = useState(false);
+  const [pdConfirmAction, setPdConfirmAction] = useState<null | (() => Promise<void>)>(null);
+  const [pdConfirmTitle, setPdConfirmTitle] = useState<string>("");
+  const [pdConfirmMessage, setPdConfirmMessage] = useState<string>("");
+
   // New state for filters
   const [historyStatusFilter, setHistoryStatusFilter] = useState('all');
   const [historyDoctorFilter, setHistoryDoctorFilter] = useState('all');
@@ -763,19 +785,29 @@ const PatientDetails = React.forwardRef<{
     return ['all', ...Array.from(doctors)];
   }, [mockAppointmentHistoryLocal]);
 
-  const uniqueProcedures = React.useMemo(() => {
-      const procedures = new Set(mockAppointmentHistoryLocal.map(apt => apt.type).filter(Boolean));
-      return ['all', ...Array.from(procedures)];
+  // Build a display-only history array (string `type`) derived from internal Appointment[]
+  const mappedHistory: HistoryAppointment[] = React.useMemo(() => {
+    return (mockAppointmentHistoryLocal || []).map((apt: Appointment) => ({
+      ...apt,
+      type: getAppointmentTypeName(apt.type as number, apt.customType) || String(apt.type || ''),
+      date: String(apt.date || ''),
+      transactions: apt.transactions || [],
+    } as HistoryAppointment));
   }, [mockAppointmentHistoryLocal]);
 
+  const uniqueProcedures = React.useMemo(() => {
+      const procedures = new Set(mappedHistory.map(apt => apt.type).filter(Boolean));
+      return ['all', ...Array.from(procedures) as string[]];
+  }, [mappedHistory]);
+
   const filteredHistory = React.useMemo(() => {
-    return mockAppointmentHistoryLocal.filter(apt => {
+    return mappedHistory.filter(apt => {
         if (historyStatusFilter !== 'all' && apt.paymentStatus !== historyStatusFilter) return false;
         if (historyDoctorFilter !== 'all' && apt.doctor !== historyDoctorFilter) return false;
-        if (historyProcedureFilter !== 'all' && apt.type !== historyProcedureFilter) return false;
+        if (historyProcedureFilter !== 'all' && String(apt.type) !== historyProcedureFilter) return false;
         return true;
     });
-  }, [mockAppointmentHistoryLocal, historyStatusFilter, historyDoctorFilter, historyProcedureFilter]);
+  }, [mappedHistory, historyStatusFilter, historyDoctorFilter, historyProcedureFilter]);
 
   // Filters for Payments tab
   const [paymentDoctorFilter, setPaymentDoctorFilter] = useState('all');
@@ -1007,7 +1039,7 @@ const PatientDetails = React.forwardRef<{
 
     // Map patientAppointments into local appointment history shape used for payments
     useEffect(() => {
-      const mapped: Appointment[] = patientAppointments.map((apt: Appointment, i: number) => {
+  const mapped: Appointment[] = patientAppointments.map((apt: Appointment, i: number) => {
         const id = apt.id || `apt-${i}`;
         const cost = (apt.price != null ? apt.price : 0);
         const totalPaid = apt.totalPaid != null ? apt.totalPaid : 0;
@@ -1032,17 +1064,18 @@ const PatientDetails = React.forwardRef<{
         }
 
         return {
-          ...apt,
-          id,
-          date: apt.date + (apt.time ? ` ${apt.time}` : ''),
-          type: getAppointmentTypeName(apt.type, apt.customType) || apt.type || 'Appointment',
-          doctor: apt.doctor || '',
-          notes: apt.notes || '',
-          price: cost,
-          totalPaid,
-          paymentStatus: paymentStatus as Appointment["paymentStatus"],
-          transactions: transactions,
-        };
+            ...apt,
+            id,
+            date: apt.date + (apt.time ? ` ${apt.time}` : ''),
+            // keep internal type numeric if available
+            type: (typeof apt.type === 'number' ? apt.type : 0) as number,
+            doctor: apt.doctor || '',
+            notes: apt.notes || '',
+            price: cost,
+            totalPaid,
+            paymentStatus: paymentStatus as Appointment["paymentStatus"],
+            transactions: transactions,
+          } as Appointment;
       });
 
       setMockAppointmentHistoryLocal(mapped);
@@ -1085,7 +1118,7 @@ const PatientDetails = React.forwardRef<{
                       totalPaid,
                       transactions: aptPayments,
                       paymentStatus: paymentStatus as Appointment["paymentStatus"],
-                    };
+                    } as Appointment;
                   }
                   return apt;
                 });
@@ -1579,7 +1612,7 @@ const PatientDetails = React.forwardRef<{
                     </div>
                 ) : (
                   <div className="space-y-4">
-                    {filteredHistory.map((appointment: Appointment, index: number) => {
+                    {filteredHistory.map((appointment: HistoryAppointment, index: number) => {
                       const sortedTransactions = Array.from(new Map((appointment.transactions || []).map((t: RecentTransaction) => [t.id, t])).values())
                         .sort((a: RecentTransaction, b: RecentTransaction) => new Date(b.date).getTime() - new Date(a.date).getTime());
                       
@@ -1595,7 +1628,7 @@ const PatientDetails = React.forwardRef<{
                                   <div className="font-medium text-base">{appointment.type}</div>
                                   <div className="text-muted-foreground">{appointment.date}</div>
                                 </div>
-                                {getPaymentStatusBadge(appointment.paymentStatus)}
+                                {getPaymentStatusBadge(String(appointment.paymentStatus || ''))}
                               </div>
                               <div className="text-sm">
                                 <div className="font-medium">{appointment.doctor}</div>
@@ -1632,7 +1665,8 @@ const PatientDetails = React.forwardRef<{
                                 variant="outline"
                                 onClick={() => {
                                   if (patient.id && patient.name) {
-                                    openPaymentModal(patient.id, patient.name, mockAppointmentHistoryLocal, appointment.id);
+                                    const original = patientAppointments.find((x: Appointment) => x.id === appointment.id);
+                                    if (original) openPaymentFor(original, patient.id, patient.name);
                                   }
                                 }}
                               >
@@ -1666,7 +1700,7 @@ const PatientDetails = React.forwardRef<{
                                         size="sm"
                                         className="h-8 w-8 p-0"
                                         onClick={() => {
-                                          if (txn.id) openEditPaymentModal(txn.id, txn, patient.id, mockAppointmentHistoryLocal);
+                                          if (txn.id && patient.id) openEditPaymentModal(txn.id, txn as any, String(patient.id), mockAppointmentHistoryLocal as any);
                                         }}
                                       >
                                         <Edit className="h-4 w-4" />
@@ -1677,8 +1711,13 @@ const PatientDetails = React.forwardRef<{
                                         size="sm"
                                         className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
                                         onClick={() => {
-                                          if (confirm(`Are you sure you want to delete this payment (${txn.method} - $${txn.amount})?`)) {
-                                            handleDeletePayment(txn.id, appointment.id);
+                                          if (txn.id && appointment.id) {
+                                            setPdConfirmTitle("Delete Payment");
+                                            setPdConfirmMessage(`Are you sure you want to delete this payment (${txn.method} - $${txn.amount})?`);
+                                            setPdConfirmAction(() => async () => {
+                                              await handleDeletePayment(String(txn.id), String(appointment.id));
+                                            });
+                                            setPdIsConfirmOpen(true);
                                           }
                                         }}
                                       >
@@ -1707,10 +1746,11 @@ const PatientDetails = React.forwardRef<{
                 <div className="flex justify-between items-center flex-wrap gap-2">
                     <CardTitle>Payment History</CardTitle>
                     <div className="flex flex-col items-end gap-1">
-                        <Button 
+                            <Button 
                             size="sm"
                             onClick={() => {
                               if (patient.id && patient.name) {
+                                // Open payment modal for adding a new payment (no appointment selected)
                                 openPaymentModal(patient.id, patient.name, mockAppointmentHistoryLocal, null);
                               }
                             }}
@@ -1741,9 +1781,9 @@ const PatientDetails = React.forwardRef<{
                               <SelectValue placeholder="Filter by doctor" />
                           </SelectTrigger>
                           <SelectContent>
-                              {uniquePaymentDoctors.map(doctor => (
-                                  <SelectItem key={doctor} value={doctor}>{doctor === 'all' ? 'All Doctors' : doctor}</SelectItem>
-                              ))}
+                {uniquePaymentDoctors.map(doctor => (
+                  <SelectItem key={String(doctor)} value={String(doctor)}>{String(doctor) === 'all' ? 'All Doctors' : String(doctor)}</SelectItem>
+                ))}
                           </SelectContent>
                       </Select>
                     )}
@@ -1752,9 +1792,9 @@ const PatientDetails = React.forwardRef<{
                             <SelectValue placeholder="Filter by procedure" />
                         </SelectTrigger>
                         <SelectContent>
-                            {uniquePaymentProcedures.map(proc => (
-                                <SelectItem key={proc} value={proc}>{proc === 'all' ? 'All Procedures' : proc}</SelectItem>
-                            ))}
+              {uniquePaymentProcedures.map(proc => (
+                <SelectItem key={String(proc)} value={String(proc)}>{String(proc) === 'all' ? 'All Procedures' : String(proc)}</SelectItem>
+              ))}
                         </SelectContent>
                     </Select>
                 </div>
@@ -1844,7 +1884,7 @@ const PatientDetails = React.forwardRef<{
                                 <DropdownMenuItem 
                                   onClick={() => {
                                     if (patient.id && patient.name) {
-                                      openEditPaymentModal(txn.id, txn, patient.id, mockAppointmentHistoryLocal);
+                                      if (txn.id && patient.id) openEditPaymentModal(String(txn.id), txn as any, String(patient.id), mockAppointmentHistoryLocal as Appointment[]);
                                     }
                                   }}
                                 >
@@ -1853,7 +1893,9 @@ const PatientDetails = React.forwardRef<{
                                 </DropdownMenuItem>
                                 <DropdownMenuItem 
                                   onClick={() => {
-                                    if (confirm("Are you sure you want to delete this payment?")) {
+                                    setPdConfirmTitle("Delete Payment");
+                                    setPdConfirmMessage("Are you sure you want to delete this payment?");
+                                    setPdConfirmAction(() => async () => {
                                       const updatedHistory = mockAppointmentHistoryLocal.map(apt => {
                                         if (apt.id === txn.appointmentId) {
                                           const newTransactions = apt.transactions?.filter((t: RecentTransaction) => t.id !== txn.id) || [];
@@ -1868,7 +1910,8 @@ const PatientDetails = React.forwardRef<{
                                       });
                                       setMockAppointmentHistoryLocal(updatedHistory);
                                       toast.success("Payment deleted successfully");
-                                    }
+                                    });
+                                    setPdIsConfirmOpen(true);
                                   }}
                                   className="text-red-600"
                                 >
@@ -1908,6 +1951,29 @@ const PatientDetails = React.forwardRef<{
         </TabsContent>
       </Tabs>
       {/* Record Payment Dialog is now a separate component */}
+      <ConfirmDialog
+        open={pdIsConfirmOpen}
+        onOpenChange={(open) => {
+          if (!open) setPdConfirmAction(null);
+          setPdIsConfirmOpen(open);
+        }}
+        title={pdConfirmTitle || "Confirm"}
+        message={pdConfirmMessage || "Are you sure?"}
+        loading={pdConfirmLoading}
+        onConfirm={async () => {
+          if (pdConfirmAction) {
+            try {
+              setPdConfirmLoading(true);
+              await pdConfirmAction();
+            } finally {
+              setPdConfirmLoading(false);
+              setPdConfirmAction(null);
+            }
+          }
+        }}
+        confirmLabel="Yes"
+        cancelLabel="No"
+      />
     </div>
   );
 });

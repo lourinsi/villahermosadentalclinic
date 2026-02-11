@@ -26,6 +26,7 @@ interface NotificationsOpenedProps {
   onUpdateAppointmentStatus?: (appointmentId: string, status: string, notificationId: string) => void;
   onMarkAsRead?: (id: string) => void;
   onDelete?: (id: string) => void;
+  onRefresh?: () => void;
 }
 
 export function NotificationsOpened({ 
@@ -34,7 +35,8 @@ export function NotificationsOpened({
   portal,
   onUpdateAppointmentStatus,
   onMarkAsRead,
-  onDelete
+  onDelete,
+  onRefresh
 }: NotificationsOpenedProps) {
   const [filter, setFilter] = useState<'all' | 'unread' | 'appointment' | 'payment'>('all');
   
@@ -214,7 +216,7 @@ export function NotificationsOpened({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative rounded-full bg-gray-100 hover:bg-gray-200">
+        <Button variant="ghost" size="icon" className="relative rounded-full bg-gray-100 hover:bg-gray-200" onClick={onRefresh}>
           <Bell className="h-5 w-5" />
           {unreadCount > 0 && (
             <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-[10px] font-bold text-white border-2 border-white">

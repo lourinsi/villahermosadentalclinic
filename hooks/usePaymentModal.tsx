@@ -25,8 +25,11 @@ interface PaymentModalContextType {
   paymentId: string | null;
   paymentData: Payment | null;
   openPaymentModal: (patientId: string, patientName: string, appointments: Appointment[], appointmentId?: string | null) => void;
-  openPatientPaymentModal: (appointments: Appointment[], appointmentId: string) => void;
-  openEditPaymentModal: (paymentId: string, paymentData: Payment, patientId?: string | null, appointments?: Appointment[]) => void;
+  // Open the payment modal for a single appointment (admin-facing helper)
+  openPaymentFor: (appointment?: Appointment | null, patientId?: string | null, patientName?: string | null) => void;
+  // New: open the patient payment modal with a single appointment object (optional). Prefer this API.
+  openPatientPaymentFor: (appointment?: Appointment | null) => void;
+  openEditPaymentModal: (paymentId: string, paymentData: any, patientId?: string | null, appointments?: Appointment[]) => void;
   closePaymentModal: () => void;
 }
 
@@ -52,13 +55,24 @@ export const PaymentModalProvider = ({ children }: { children: ReactNode }) => {
     setPaymentModalOpen(true);
   }, []);
 
-  const openPatientPaymentModal = useCallback((apts: Appointment[], aptId: string) => {
-    setAppointments(apts);
-    setAppointmentId(aptId);
+  const openPaymentFor = useCallback((appointment?: Appointment | null, pId?: string | null, pName?: string | null) => {
+    setPatientId(pId || null);
+    setPatientName(pName || null);
+    setAppointments(appointment ? [appointment] : []);
+    setAppointmentId(appointment?.id || null);
+    setPaymentId(null);
+    setPaymentData(null);
+    setPaymentModalOpen(true);
+  }, []);
+
+  const openPatientPaymentFor = useCallback((appointment?: Appointment | null) => {
+    // Prefer passing a single appointment to the modal to avoid races with global refresh
+    setAppointments(appointment ? [appointment] : []);
+    setAppointmentId(appointment?.id || null);
     setPatientPaymentModalOpen(true);
   }, []);
 
-  const openEditPaymentModal = useCallback((pId: string, pData: Payment, pIdParam?: string | null, apts?: Appointment[]) => {
+  const openEditPaymentModal = useCallback((pId: string, pData: any, pIdParam?: string | null, apts?: Appointment[]) => {
     setPaymentId(pId);
     setPaymentData(pData);
     setAppointmentId(pData.appointmentId || null);
@@ -89,8 +103,9 @@ export const PaymentModalProvider = ({ children }: { children: ReactNode }) => {
     paymentId,
     paymentData,
     openPaymentModal,
-    openPatientPaymentModal,
+  openPaymentFor,
     openEditPaymentModal,
+  openPatientPaymentFor,
     closePaymentModal,
   }), [
     isPaymentModalOpen,
@@ -102,7 +117,8 @@ export const PaymentModalProvider = ({ children }: { children: ReactNode }) => {
     paymentId,
     paymentData,
     openPaymentModal,
-    openPatientPaymentModal,
+  openPaymentFor,
+  openPatientPaymentFor,
     openEditPaymentModal,
     closePaymentModal,
   ]);

@@ -12,7 +12,7 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
   const pathname = usePathname();
   const router = useRouter();
   const { logout, user } = useAuth();
-  const { notifications } = useNotifications();
+  const { notifications, refreshNotifications, markAsRead } = useNotifications();
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
@@ -82,6 +82,8 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
             notifications={notifications} 
             unreadCount={unreadCount} 
             portal="patient" 
+            onRefresh={refreshNotifications}
+            onMarkAsRead={markAsRead}
           />
         </header>
         <main className="flex-1 p-6 overflow-auto bg-gray-50">{children}</main>

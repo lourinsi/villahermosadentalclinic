@@ -6,6 +6,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Eraser, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Plus, Trash2, MoreVertical } from "lucide-react";
 import { toast } from "sonner";
 import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
+import ConfirmDialog from "./ConfirmDialog";
 
 // NOTE: Dental chart state - stores which sections of which teeth are colored
 type ToothSection = "top" | "bottom" | "left" | "right" | "center";
@@ -77,6 +78,9 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
   const [currentDate, setCurrentDate] = useState("");
   const [isConfirmDeleteChartOpen, setIsConfirmDeleteChartOpen] = useState(false);
   const [isConfirmDeleteEmptyChartsOpen, setIsConfirmDeleteEmptyChartsOpen] = useState(false);
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const [confirmLoading, setConfirmLoading] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
 
   // Load teeth state when index or records change
   useEffect(() => {
@@ -160,9 +164,8 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
   };
 
   const handleClear = () => {
-    if (confirm("Are you sure you want to clear all markings for this chart?")) {
-      setTeethState({});
-    }
+  setConfirmAction(() => () => setTeethState({}));
+  setIsConfirmOpen(true);
   };
 
 
@@ -285,6 +288,35 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
 
     setIsConfirmDeleteEmptyChartsOpen(false); // Close the modal
   };
+
+  // Render confirm dialog(s)
+  const renderConfirmDialogs = () => (
+    <>
+      <ConfirmDialog
+        open={isConfirmOpen}
+        onOpenChange={(open) => {
+          if (!open) setConfirmAction(null);
+          setIsConfirmOpen(open);
+        }}
+        title="Confirm"
+        message="Are you sure?"
+        loading={confirmLoading}
+        onConfirm={async () => {
+          if (confirmAction) {
+            try {
+              setConfirmLoading(true);
+              await confirmAction();
+            } finally {
+              setConfirmLoading(false);
+              setConfirmAction(null);
+            }
+          }
+        }}
+        confirmLabel="Yes"
+        cancelLabel="No"
+      />
+    </>
+  );
 
   const canGoPrevious = currentIndex > 0;
   const canGoNext = currentIndex < localRecords.length - 1;

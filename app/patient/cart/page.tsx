@@ -8,6 +8,8 @@ import { AllAppointmentsView } from "@/components/AllAppointmentsView";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { toast } from "sonner";
+import { useState } from "react";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 
 const CartPage = () => {
@@ -15,7 +17,7 @@ const CartPage = () => {
     const parentId = user?.patientId;
 
     const { appointments, isLoading, refreshAppointments, deleteAppointment } = useAppointmentModal();
-    const { openPatientPaymentModal } = usePaymentModal();
+    const { openPatientPaymentFor } = usePaymentModal();
 
     // Use filters to fetch all appointments for this patient/family, including unpaid
     const filters = useMemo(() => ({
@@ -30,24 +32,48 @@ const CartPage = () => {
         }
     }, [filters, refreshAppointments, parentId]);
 
+    useEffect(() => {
+        const onUpdated = (e: Event) => {
+            try {
+                const detail = (e as CustomEvent)?.detail || {};
+                const { appointmentId, newStatus, newPaymentStatus } = detail;
+                if (appointmentId) {
+                    // refresh to get server canonical state
+                    refreshAppointments(filters);
+                }
+            } catch (err) {}
+        };
+        window.addEventListener('appointments:updated', onUpdated as EventListener);
+        return () => window.removeEventListener('appointments:updated', onUpdated as EventListener);
+    }, [filters, refreshAppointments]);
+
     const cartAppointments = useMemo(() => {
-        return appointments.filter(apt => apt.status === "pending" || apt.status === "tentative");
+        // Cart should only show pending (unpaid) appointments — tentative/reserved appear in Orders
+        return appointments.filter(apt => apt.status === "pending");
     }, [appointments]);
 
     const handlePay = (appointment: Appointment) => {
-        openPatientPaymentModal(appointments, appointment.id);
+        openPatientPaymentFor(appointment);
     };
 
-    const handleDelete = async (id: string) => {
-        if (!confirm("Are you sure you want to remove this appointment from your cart?")) return;
-        
-        try {
-            await deleteAppointment(id);
-            toast.success("Appointment removed from cart");
-            refreshAppointments(filters);
-        } catch {
-            toast.error("Failed to remove appointment");
-        }
+    const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+    const [confirmLoading, setConfirmLoading] = useState(false);
+    const [confirmAction, setConfirmAction] = useState<(() => Promise<void>) | null>(null);
+
+    const handleDelete = (id: string) => {
+        setConfirmAction(() => async () => {
+            setConfirmLoading(true);
+            try {
+                await deleteAppointment(id);
+                toast.success("Appointment removed from cart");
+                refreshAppointments(filters);
+            } catch {
+                toast.error("Failed to remove appointment");
+            } finally {
+                setConfirmLoading(false);
+            }
+        });
+        setIsConfirmOpen(true);
     };
 
     return (
@@ -92,6 +118,23 @@ const CartPage = () => {
                     )}
                 </CardContent>
             </Card>
+            <ConfirmDialog
+                open={isConfirmOpen}
+                onOpenChange={(open) => {
+                    if (!open) setConfirmAction(null);
+                    setIsConfirmOpen(open);
+                }}
+                title="Remove appointment"
+                message="Are you sure you want to remove this appointment from your cart?"
+                loading={confirmLoading}
+                onConfirm={async () => {
+                    if (confirmAction) {
+                        await confirmAction();
+                    }
+                }}
+                confirmLabel="Remove"
+                cancelLabel="Cancel"
+            />
         </div>
     );
 };

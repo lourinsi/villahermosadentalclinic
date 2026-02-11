@@ -16,6 +16,7 @@ import { getAppointmentTypeName } from "@/lib/appointment-types";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import { parseBackendDateToLocal } from "@/lib/utils";
 import { toast } from "sonner";
+import ConfirmDialog from "./ConfirmDialog";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { Appointment } from "@/hooks/useAppointments";
 import { Label } from "./ui/label";
@@ -34,6 +35,10 @@ export function PatientPaymentModal() {
   const [paymentMethod, setPaymentMethod] = useState<string>("GCash");
   const [paymentAmount, setPaymentAmount] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
+  // confirm dialog state for partial payments
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const [confirmLoading, setConfirmLoading] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<(() => Promise<void>) | null>(null);
 
   const selectedAppointment = appointments.find(
     (a: Appointment) => a.id === appointmentId
@@ -54,14 +59,7 @@ export function PatientPaymentModal() {
       return;
     }
 
-    const isPartial = amountToPay > 0 && amountToPay < (selectedAppointment.price || 0) && paymentMethod !== "Pay at Clinic";
-    
-    if (isPartial) {
-      const confirmPartial = window.confirm(
-        "Your appointment is not scheduled yet, but the slot is reserved for you until the doctor will accept. Proceed?"
-      );
-      if (!confirmPartial) return;
-    }
+  const isPartial = amountToPay > 0 && amountToPay < (selectedAppointment.price || 0) && paymentMethod !== "Pay at Clinic";
 
     try {
       setIsLoading(true);
@@ -92,13 +90,88 @@ export function PatientPaymentModal() {
       if (paymentMethod === "Pay at Clinic") {
         toast.success("Request received! Your appointment is now set to 'To Pay' and is scheduled. See you at the clinic!");
       } else if (isPartial) {
-        toast.success("Partial payment received! Your slot is reserved as 'Tentative'.");
+        toast.success("Partial payment received! Your slot is reserved (status: Reserved).");
       } else if (json.data?.appointment?.status === 'pending') {
         toast.success("Payment received! Our staff will review your booking shortly.");
       } else {
         toast.success("Payment successful! Your appointment is now confirmed and added to your calendar.");
       }
+      // Refresh global appointments and broadcast an update so other UI (availability checks)
+      // can react immediately without a manual page refresh.
       refreshAppointments();
+      try {
+        const appointmentId = json.data?.appointment?.id || selectedAppointment.id;
+        const newPaymentStatus = isPartial ? 'half-paid' : (paymentMethod === 'Pay at Clinic' ? (selectedAppointment.paymentStatus || 'unpaid') : 'paid');
+        // Map to internal appointment status: full paid -> scheduled/confirmed (use 'scheduled'), partial -> tentative/reserved
+        const newStatus = isPartial ? 'tentative' : (paymentMethod === 'Pay at Clinic' ? (json.data?.appointment?.status || selectedAppointment.status) : 'scheduled');
+        const ev = new CustomEvent('appointments:updated', { detail: { appointmentId, newStatus, newPaymentStatus } });
+        window.dispatchEvent(ev);
+      } catch (e) {
+        // Fallback for older browsers
+        (window as any).dispatchEvent && (window as any).dispatchEvent(new Event('appointments:updated'));
+      }
+      closePaymentModal();
+    } catch (err) {
+      console.error("Error completing payment", err);
+      toast.error("Error completing payment");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Extracted payment performer so confirm can call it
+  const performPayment = async () => {
+    if (!selectedAppointment) return;
+
+    try {
+      setIsLoading(true);
+      const body = {
+        appointmentId: selectedAppointment.id,
+        patientId: selectedAppointment.patientId,
+        amount: amountToPay,
+        method: paymentMethod,
+        date: new Date().toISOString().split("T")[0],
+        transactionId: paymentMethod === "Pay at Clinic" 
+          ? `PAC-${Math.random().toString(36).slice(2, 9).toUpperCase()}`
+          : `T-${Math.random().toString(36).slice(2, 9).toUpperCase()}`,
+        notes: paymentMethod === "Pay at Clinic" ? "Cash upon appointment" : "Online payment via Patient Portal",
+      };
+
+      const res = await fetch(`http://localhost:3001/api/payments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json?.message || "Failed to complete payment");
+        return;
+      }
+
+      const isPartial = amountToPay > 0 && amountToPay < (selectedAppointment.price || 0) && paymentMethod !== "Pay at Clinic";
+
+      if (paymentMethod === "Pay at Clinic") {
+        toast.success("Request received! Your appointment is now set to 'To Pay' and is scheduled. See you at the clinic!");
+      } else if (isPartial) {
+        toast.success("Partial payment received! Your slot is reserved (status: Reserved).");
+      } else if (json.data?.appointment?.status === 'pending') {
+        toast.success("Payment received! Our staff will review your booking shortly.");
+      } else {
+        toast.success("Payment successful! Your appointment is now confirmed and added to your calendar.");
+      }
+      // Refresh global appointments and broadcast an update so other UI (availability checks)
+      // can react immediately without a manual page refresh.
+      refreshAppointments();
+      try {
+        const appointmentId = json.data?.appointment?.id || selectedAppointment.id;
+        const newPaymentStatus = isPartial ? 'half-paid' : (paymentMethod === 'Pay at Clinic' ? (selectedAppointment.paymentStatus || 'unpaid') : 'paid');
+        const newStatus = isPartial ? 'tentative' : (paymentMethod === 'Pay at Clinic' ? (json.data?.appointment?.status || selectedAppointment.status) : 'scheduled');
+        const ev = new CustomEvent('appointments:updated', { detail: { appointmentId, newStatus, newPaymentStatus } });
+        window.dispatchEvent(ev);
+      } catch (e) {
+        (window as any).dispatchEvent && (window as any).dispatchEvent(new Event('appointments:updated'));
+      }
       closePaymentModal();
     } catch (err) {
       console.error("Error completing payment", err);
@@ -111,6 +184,7 @@ export function PatientPaymentModal() {
   if (!selectedAppointment) return null;
 
   return (
+    <>
     <Dialog open={isPatientPaymentModalOpen} onOpenChange={closePaymentModal}>
       <DialogContent className="max-w-md">
         <DialogHeader>
@@ -257,13 +331,51 @@ export function PatientPaymentModal() {
           </Button>
           <Button
             className="w-full sm:flex-1 bg-blue-600 hover:bg-blue-700"
-            onClick={handleConfirmPayment}
+            onClick={() => {
+              const isPartialNow = amountToPay > 0 && amountToPay < (selectedAppointment.price || 0) && paymentMethod !== "Pay at Clinic";
+              if (isPartialNow) {
+                // queue and open confirm
+                setConfirmAction(() => async () => {
+                  await performPayment();
+                });
+                setIsConfirmOpen(true);
+                return;
+              }
+              performPayment();
+            }}
             disabled={isLoading}
           >
             {isLoading ? "Processing..." : "Confirm Payment"}
           </Button>
         </DialogFooter>
       </DialogContent>
-    </Dialog>
+  </Dialog>
+  {/* Confirm dialog for partial payments */}
+  <ConfirmDialog
+      open={isConfirmOpen}
+      onOpenChange={(open) => {
+        if (!open) {
+          setConfirmAction(null);
+        }
+        setIsConfirmOpen(open);
+      }}
+      title="Confirm Partial Payment"
+      message="Your appointment is not scheduled yet, but the slot is reserved for you until the doctor will accept. Proceed?"
+      loading={confirmLoading}
+      onConfirm={async () => {
+        if (confirmAction) {
+          setConfirmLoading(true);
+          try {
+            await confirmAction();
+          } finally {
+            setConfirmLoading(false);
+            setConfirmAction(null);
+          }
+        }
+      }}
+      confirmLabel="Proceed"
+      cancelLabel="Cancel"
+    />
+    </>
   );
 }
