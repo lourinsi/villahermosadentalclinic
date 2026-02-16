@@ -55,10 +55,15 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     refreshAppointments();
   }, [refreshAppointments]);
 
+  // Pending filters state
+  const [pendingSearchTerm, setPendingSearchTerm] = useState("");
+  const [pendingStatusFilter, setPendingStatusFilter] = useState("all");
+  const [pendingDateFilter, setPendingDateFilter] = useState("");
+
   // History filters state
-  const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [dateFilter, setDateFilter] = useState("");
+  const [historySearchTerm, setHistorySearchTerm] = useState("");
+  const [historyStatusFilter, setHistoryStatusFilter] = useState("all");
+  const [historyDateFilter, setHistoryDateFilter] = useState("");
   
   // Confirmation dialog state
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
@@ -68,9 +73,28 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     return appointments.filter((apt) => {
       const isRequestStatus = ["pending", "tentative", "To Pay"].includes(apt.status);
       const matchesDoctor = !doctorFilter || apt.doctor.toLowerCase() === doctorFilter.toLowerCase();
-      return isRequestStatus && matchesDoctor;
+      
+      if (!isRequestStatus || !matchesDoctor) return false;
+
+      // Search filter
+      if (pendingSearchTerm && !apt.patientName.toLowerCase().includes(pendingSearchTerm.toLowerCase()) && 
+          !getAppointmentTypeName(apt.type, apt.customType).toLowerCase().includes(pendingSearchTerm.toLowerCase())) {
+        return false;
+      }
+      
+      // Status filter
+      if (pendingStatusFilter !== "all" && apt.status !== pendingStatusFilter) {
+        return false;
+      }
+      
+      // Date filter
+      if (pendingDateFilter && apt.date !== pendingDateFilter) {
+        return false;
+      }
+
+      return true;
     });
-  }, [appointments, doctorFilter]);
+  }, [appointments, doctorFilter, pendingSearchTerm, pendingStatusFilter, pendingDateFilter]);
 
   const history = useMemo(() => {
     return appointments
@@ -82,18 +106,18 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         if (isRequestStatus || !matchesDoctor) return false;
         
         // Search filter
-        if (searchTerm && !apt.patientName.toLowerCase().includes(searchTerm.toLowerCase()) && 
-            !getAppointmentTypeName(apt.type, apt.customType).toLowerCase().includes(searchTerm.toLowerCase())) {
+        if (historySearchTerm && !apt.patientName.toLowerCase().includes(historySearchTerm.toLowerCase()) && 
+            !getAppointmentTypeName(apt.type, apt.customType).toLowerCase().includes(historySearchTerm.toLowerCase())) {
           return false;
         }
         
         // Status filter
-        if (statusFilter !== "all" && apt.status !== statusFilter) {
+        if (historyStatusFilter !== "all" && apt.status !== historyStatusFilter) {
           return false;
         }
         
         // Date filter
-        if (dateFilter && apt.date !== dateFilter) {
+        if (historyDateFilter && apt.date !== historyDateFilter) {
           return false;
         }
         
@@ -104,14 +128,14 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         if (a.date !== b.date) return b.date.localeCompare(a.date);
         return b.time.localeCompare(a.time);
       });
-  }, [appointments, doctorFilter, searchTerm, statusFilter, dateFilter]);
+  }, [appointments, doctorFilter, historySearchTerm, historyStatusFilter, historyDateFilter]);
 
   const handleApprove = async (appointment: Appointment) => {
     try {
       const newStatus = appointment.status === "tentative" ? "confirmed" : "scheduled";
       await updateAppointment(appointment.id, { status: newStatus });
       toast.success(`Appointment for ${appointment.patientName} approved`);
-    } catch (error) {
+    } catch {
       toast.error("Failed to approve appointment");
     }
   };
@@ -120,7 +144,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     try {
       await updateAppointment(appointment.id, { status: "cancelled" });
       toast.success(`Appointment for ${appointment.patientName} rejected`);
-    } catch (error) {
+    } catch {
       toast.error("Failed to reject appointment");
     }
   };
@@ -137,7 +161,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     try {
       await updateAppointment(appointment.id, { status: newStatus });
       toast.success(`Status for ${appointment.patientName} updated to ${newStatus}`);
-    } catch (error) {
+    } catch {
       toast.error("Failed to update status");
     } finally {
       setIsConfirmOpen(false);
@@ -201,9 +225,58 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="pending">
+        <TabsContent value="pending" className="space-y-4">
           <Card>
-            <CardContent className="p-0">
+            <CardHeader className="pb-3">
+              <div className="flex flex-col md:flex-row md:items-center gap-4 justify-between">
+                <CardTitle className="text-lg font-medium">Request Filters</CardTitle>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="relative min-w-[200px]">
+                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500" />
+                    <Input
+                      placeholder="Search patient or service..."
+                      className="pl-9"
+                      value={pendingSearchTerm}
+                      onChange={(e) => setPendingSearchTerm(e.target.value)}
+                    />
+                  </div>
+                  <div className="relative">
+                    <CalendarIcon className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500 z-10" />
+                    <Input
+                      type="date"
+                      className="pl-9 w-[180px]"
+                      value={pendingDateFilter}
+                      onChange={(e) => setPendingDateFilter(e.target.value)}
+                    />
+                  </div>
+                  <Select value={pendingStatusFilter} onValueChange={setPendingStatusFilter}>
+                    <SelectTrigger className="w-[150px]">
+                      <Filter className="h-4 w-4 mr-2 text-gray-500" />
+                      <SelectValue placeholder="Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Statuses</SelectItem>
+                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="tentative">Tentative</SelectItem>
+                      <SelectItem value="To Pay">To Pay</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button 
+                    variant="outline" 
+                    size="icon" 
+                    onClick={() => {
+                      setPendingSearchTerm("");
+                      setPendingStatusFilter("all");
+                      setPendingDateFilter("");
+                    }}
+                    title="Reset Filters"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0 border-t">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -231,7 +304,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                       <TableCell colSpan={doctorFilter ? 6 : 7} className="text-center py-12 text-muted-foreground">
                         <div className="flex flex-col items-center gap-2">
                           <Clock className="h-8 w-8 text-gray-300" />
-                          No pending requests found.
+                          No requests found matching your filters.
                         </div>
                       </TableCell>
                     </TableRow>
@@ -312,8 +385,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     <Input
                       placeholder="Search patient or service..."
                       className="pl-9"
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
+                      value={historySearchTerm}
+                      onChange={(e) => setHistorySearchTerm(e.target.value)}
                     />
                   </div>
                   <div className="relative">
@@ -321,11 +394,11 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     <Input
                       type="date"
                       className="pl-9 w-[180px]"
-                      value={dateFilter}
-                      onChange={(e) => setDateFilter(e.target.value)}
+                      value={historyDateFilter}
+                      onChange={(e) => setHistoryDateFilter(e.target.value)}
                     />
                   </div>
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <Select value={historyStatusFilter} onValueChange={setHistoryStatusFilter}>
                     <SelectTrigger className="w-[150px]">
                       <Filter className="h-4 w-4 mr-2 text-gray-500" />
                       <SelectValue placeholder="Status" />
@@ -342,9 +415,9 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     variant="outline" 
                     size="icon" 
                     onClick={() => {
-                      setSearchTerm("");
-                      setStatusFilter("all");
-                      setDateFilter("");
+                      setHistorySearchTerm("");
+                      setHistoryStatusFilter("all");
+                      setHistoryDateFilter("");
                     }}
                     title="Reset Filters"
                   >

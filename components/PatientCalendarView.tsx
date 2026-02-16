@@ -38,8 +38,10 @@ import { toast } from "sonner";
 import ConfirmDialog from "./ConfirmDialog";
 import { Avatar, AvatarImage, AvatarFallback } from "./ui/avatar";
 import { useDoctors } from "@/hooks/useDoctors";
+import ViewMode from "./viewMode";
 
-type ViewMode = "month" | "week" | "day" | "custom" | "all" | "cart";
+ 
+ 
 
 const appointmentColors: Record<string, { bg: string; text: string; border: string }> = {
   "Routine Cleaning": { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" },

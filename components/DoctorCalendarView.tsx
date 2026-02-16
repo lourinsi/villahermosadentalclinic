@@ -33,8 +33,7 @@ import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { AllAppointmentsView } from "./AllAppointmentsView";
 import { Avatar, AvatarImage, AvatarFallback } from "./ui/avatar";
-
-type ViewMode = "month" | "week" | "day" | "custom" | "all";
+import ViewMode from "./viewMode";
 
 const appointmentColors: Record<string, { bg: string; text: string; border: string }> = {
   "Routine Cleaning": { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" },

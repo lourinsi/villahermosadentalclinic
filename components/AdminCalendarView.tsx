@@ -17,8 +17,7 @@ import { APPOINTMENT_TYPES } from "../lib/appointment-types";
 import { useDoctors } from "../hooks/useDoctors";
 import { Badge } from "./ui/badge";
 import { Avatar, AvatarImage, AvatarFallback } from "./ui/avatar";
-
-type ViewMode = "month" | "week" | "day" | "custom" | "all";
+import ViewMode from "./viewMode";
 
 const APPOINTMENT_STATUSES = ["all", "scheduled", "confirmed", "To Pay", "tentative", "pending", "completed", "cancelled"];
 

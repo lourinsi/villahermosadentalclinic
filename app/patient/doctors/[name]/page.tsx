@@ -21,8 +21,7 @@ import { TIME_SLOTS, formatTimeTo12h } from "@/lib/time-slots";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Appointment } from "@/hooks/useAppointments";
-
-type ViewMode = "day" | "week" | "month";
+import ViewMode from "@/components/viewMode";
 
 export default function DoctorAvailabilityPage() {
   const params = useParams();

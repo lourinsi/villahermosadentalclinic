@@ -33,7 +33,7 @@ import { AllAppointmentsView } from "./AllAppointmentsView";
 import { Avatar, AvatarImage, AvatarFallback } from "./ui/avatar";
 import CalendarPopover from "./CalendarPopover";
 
-type ViewMode = "month" | "week" | "day" | "custom" | "all";
+import ViewMode from "./viewMode";
 
 const appointmentColors: Record<string, { bg: string; text: string; border: string }> = {
   "Routine Cleaning": { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" },
@@ -361,6 +361,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
 
           return (
             <div key={timeSlot} className="flex items-start min-h-[64px] border-b border-gray-100 relative group">
+              {/* Plus button for occupied slots - upper right */}
               {!currentSlotIsCovered && (
                 /* Wide position for empty slots: centered in the main area */
                 <div
@@ -374,11 +375,15 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
               {/* Time Label */}
               <div className="w-28 pl-4 pt-2 text-sm text-muted-foreground font-medium sticky left-0 bg-white z-10 pointer-events-none">
                 <div>{formatTime(timeSlot)}</div>
+                {/* Plus button for occupied slots - underneath time */}
                 {currentSlotIsCovered && (
-                  <div className="mt-2 opacity-0 group-hover:opacity-100 transition-all">
+                  <div className="mt-2 opacity-0 group-hover:opacity-100 transition-all pointer-events-auto">
                     <button
-                      className="bg-white p-1 rounded-md shadow-sm hover:bg-violet-50/50 hover:border-violet-200 border border-transparent cursor-pointer"
-                      onClick={() => openCreateModal(selectedDate, timeSlot)}
+                      className="bg-white p-1 rounded-md shadow-sm hover:bg-violet-50/50 hover:border-violet-200 border border-transparent cursor-pointer flex items-center justify-center"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openCreateModal(selectedDate, timeSlot);
+                      }}
                       aria-label={`Add appointment at ${timeSlot}`}
                     >
                       <Plus className="h-4 w-4 text-violet-300 group-hover:text-violet-600" />
@@ -527,29 +532,33 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                       key={idx} 
                       className="flex-1 border-l border-gray-100 relative min-h-[80px] group"
                     >
-                        {/* Plus button */}
+                        {/* Plus button for occupied slots - upper right */}
+                        {currentSlotIsCovered && (
+                            <div className="absolute right-1 top-1 opacity-0 group-hover:opacity-100 transition-all z-30">
+                                <button
+                                    className=" "
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        openCreateModal(day, timeSlot);
+                                    }}
+                                    aria-label={`Add appointment at ${timeSlot}`}
+                                >
+                                    <Plus className="h-4 w-4 text-violet-300 group-hover:text-violet-600" />
+                                </button>
+                            </div>
+                        )}
+
+                        {/* Centered plus button for empty slots */}
                         {!currentSlotIsCovered && (
                             <div
-                            className="absolute inset-1 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-10 hover:bg-violet-50/50 rounded border border-dashed border-transparent hover:border-violet-200/50"
-                            onClick={() => openCreateModal(day, timeSlot)}
+                                className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-10 hover:bg-violet-50/50 flex items-center justify-center"
+                                onClick={() => openCreateModal(day, timeSlot)}
                             >
-                            <Plus className="h-5 w-5 text-violet-300" />
+                                <Plus className="h-5 w-5 text-violet-300" />
                             </div>
                         )}
 
                       <div className="relative w-full h-full">
-                        {/* Small plus for occupied slots (shows on hover) */}
-                        {currentSlotIsCovered && (
-                          <div className="absolute left-2 top-2 opacity-0 group-hover:opacity-100 transition-all z-20">
-                            <button
-                              className="bg-white p-1 rounded-md shadow-sm hover:bg-violet-50/50 hover:border-violet-200 border border-transparent"
-                              onClick={() => openCreateModal(day, timeSlot)}
-                              aria-label={`Add appointment at ${timeSlot}`}
-                            >
-                              <Plus className="h-4 w-4 text-violet-300" />
-                            </button>
-                          </div>
-                        )}
 
                         {appointmentsForSlot.map((appointment: Appointment) => {
                           const columnIndex = appointmentColumns.get(appointment.id) ?? 0;

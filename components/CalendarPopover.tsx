@@ -7,9 +7,11 @@ import { Calendar } from "./ui/calendar";
 import { Label } from "./ui/label";
 import { Keyboard } from "lucide-react";
 
+import ViewMode from "./viewMode";
+
 type Props = {
-  viewMode: string;
-  setViewMode: (m: any) => void;
+  viewMode: ViewMode;
+  setViewMode: (m: ViewMode) => void;
   selectedDate: Date;
   setSelectedDate: (d: Date) => void;
   dateRange?: DateRange | undefined;
