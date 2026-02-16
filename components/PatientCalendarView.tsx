@@ -27,6 +27,7 @@ import { formatTimeTo12h, TIME_SLOTS } from "../lib/time-slots";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { Calendar } from "./ui/calendar";
+import CalendarPopover from "./CalendarPopover";
 import { Label } from "./ui/label";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
@@ -226,15 +227,32 @@ export function PatientCalendarView() {
       status: viewMode === "cart" ? undefined : (statusFilter === "all" ? undefined : statusFilter),
       startDate: fetchStartStr,
       endDate: fetchEndStr,
-      includeUnpaid: true // Always include unpaid for patients so the Cart badge is accurate
+      // Only request unpaid appointments when viewing the Cart — otherwise
+      // asking for includeUnpaid may return unpaid records outside the requested
+      // date range depending on backend semantics.
+      includeUnpaid: viewMode === "cart" ? true : undefined
     };
   }, [parentId, statusFilter, viewMode, selectedDate, dateRange, getViewRange]);
 
   useEffect(() => {
+    // Don't trigger a backend fetch when the custom picker is opened but a full
+    // range isn't selected yet. This prevents fetching unrelated dates when only
+    // the start date is set.
+    if (viewMode === 'custom' && !(dateRange?.from && dateRange?.to)) return;
+
     if (parentId) {
+      // Debug: log filters so we can confirm what ranges are being requested
+      // in the browser console when the custom range is applied.
+      // Remove or guard these logs in production.
+      try {
+        // eslint-disable-next-line no-console
+        console.debug("PatientCalendarView: refreshAppointments called with filters:", filters);
+      } catch (e) {}
       refreshAppointments(filters);
     }
-  }, [filters, refreshAppointments, parentId]);
+  // Narrow dependencies so changes to the actual start/end dates trigger refresh,
+  // but opening the picker (which may create a new DateRange object) does not.
+  }, [parentId, filters.parentId, filters.status, filters.startDate, filters.endDate, refreshAppointments, viewMode, dateRange?.from, dateRange?.to]);
 
   useEffect(() => {
     const onUpdated = (e: Event) => {
@@ -663,52 +681,88 @@ export function PatientCalendarView() {
 
   const renderCustomView = () => {
     const sortedAppointments = [...filteredAppointments].sort((a, b) => parseBackendDateToLocal(a.date).getTime() - parseBackendDateToLocal(b.date).getTime());
-    
+    const days = dateRange && dateRange.from && dateRange.to ? Math.ceil((+dateRange.to - +dateRange.from) / (1000 * 60 * 60 * 24)) + 1 : undefined;
+
     return (
-      <div className="space-y-4 p-4">
-        {sortedAppointments.length === 0 ? (
-          <div className="text-center py-12 text-muted-foreground bg-gray-50 rounded-lg border-2 border-dashed">
-            <CalendarIcon className="h-12 w-12 mx-auto mb-4 opacity-20" />
-            <p>No appointments found for the selected range.</p>
+      <div>
+        <div className="p-6 border-b bg-white">
+          <div className="flex items-start justify-between">
+            <div>
+              <h2 className="text-2xl font-bold">{days ? `${days} days range` : 'Custom range'}</h2>
+              <p className="text-sm text-muted-foreground">{dateRange && dateRange.from && dateRange.to ? `${dateRange.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${dateRange.to.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}` : 'Select a start and end date'}</p>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="p-2 border rounded-lg">
+                <div className="text-xs text-muted-foreground uppercase">Start date</div>
+                <div className="font-medium">{dateRange?.from ? dateRange.from.toLocaleDateString() : '—'}</div>
+              </div>
+              <div className="p-2 border rounded-lg">
+                <div className="text-xs text-muted-foreground uppercase">End date</div>
+                <div className="font-medium">{dateRange?.to ? dateRange.to.toLocaleDateString() : '—'}</div>
+              </div>
+            </div>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {sortedAppointments.map((apt: Appointment) => {
-              const typeName = getAppointmentTypeName(apt.type, apt.customType);
-              const colors = getColorForType(typeName);
-              return (
-                <Card key={apt.id} className={`overflow-hidden hover:shadow-md transition-shadow cursor-pointer ${apt.paymentStatus === 'unpaid' ? 'bg-orange-50/20 border-dashed border-orange-200' : ''}`} onClick={() => { setSelectedAppointment(apt); }}>
-                  <div className={`h-1 ${colors.bg.replace('bg-', 'bg-').split(' ')[0]}`} />
-                  <CardContent className="p-4">
-                    <div className="flex justify-between items-start mb-2">
-                      <div className="font-bold text-lg flex items-center gap-2">
-                        {apt.patientName}
-                        {apt.paymentStatus === 'unpaid' && (
-                          <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[10px] uppercase font-black">Unpaid</Badge>
-                        )}
-                      </div>
-                      <Badge className={`${colors.bg} ${colors.text} border-none`}>{typeName}</Badge>
-                    </div>
-                    <div className="space-y-2 text-sm text-muted-foreground">
-                      <div className="flex items-center gap-2">
-                        <CalendarIcon className="h-4 w-4" />
-                        <span>{parseBackendDateToLocal(apt.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} at {apt.time}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Clock className="h-4 w-4" />
-                        <span>{apt.duration || 60} minutes</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Stethoscope className="h-4 w-4" />
-                        <span>Dr. {apt.doctor}</span>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
+        </div>
+
+        <div className="p-6 bg-gray-50">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="md:col-span-2">
+              {sortedAppointments.length === 0 ? (
+                <div className="text-center p-12 bg-white rounded border-2 border-dashed text-muted-foreground">No appointments in this range</div>
+              ) : (
+                <div className="space-y-4">
+                  {sortedAppointments.map((apt) => {
+                    const typeName = getAppointmentTypeName(apt.type, apt.customType);
+                    const colors = getColorForType(typeName);
+                    return (
+                      <Card key={apt.id} className={`overflow-hidden hover:shadow-md transition-shadow cursor-pointer ${apt.paymentStatus === 'unpaid' ? 'bg-orange-50/20 border-dashed border-orange-200' : ''}`} onClick={() => { setSelectedAppointment(apt); }}>
+                        <div className={`h-1 ${colors.bg.replace('bg-', 'bg-').split(' ')[0]}`} />
+                        <CardContent className="p-4">
+                          <div className="flex justify-between items-start mb-2">
+                            <div className="font-bold text-lg flex items-center gap-2">
+                              {apt.patientName}
+                              {apt.paymentStatus === 'unpaid' && (
+                                <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[10px] uppercase font-black">Unpaid</Badge>
+                              )}
+                            </div>
+                            <Badge className={`${colors.bg} ${colors.text} border-none`}>{typeName}</Badge>
+                          </div>
+                          <div className="space-y-2 text-sm text-muted-foreground">
+                            <div className="flex items-center gap-2">
+                              <CalendarIcon className="h-4 w-4" />
+                              <span>{parseBackendDateToLocal(apt.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} at {apt.time}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Clock className="h-4 w-4" />
+                              <span>{apt.duration || 60} minutes</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Stethoscope className="h-4 w-4" />
+                              <span>Dr. {apt.doctor}</span>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div>
+              <div className="p-4 bg-white rounded border shadow-sm">
+                <div className="text-sm font-semibold mb-2">Range controls</div>
+                <div className="space-y-2">
+                  <div className="text-xs text-muted-foreground">Select range using the calendar</div>
+                  <Calendar mode="range" selected={dateRange} onSelect={(r) => setDateRange(r as DateRange | undefined)} className="rounded-md" />
+                  <div className="flex items-center justify-between mt-3">
+                    <Button variant="ghost" onClick={() => setDateRange(undefined)}>Clear dates</Button>
+                    <Button onClick={() => { /* noop - keep range */ }} className="bg-violet-600 text-white">Apply</Button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-        )}
+        </div>
       </div>
     );
   };
@@ -844,229 +898,17 @@ export function PatientCalendarView() {
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0 shadow-2xl border-none rounded-2xl" align="start">
-                  <div className={`bg-white rounded-2xl overflow-hidden ${viewMode === "custom" ? "min-w-[600px]" : "min-w-[320px]"}`}>
-                    {viewMode === "custom" ? (
-                      <>
-                        {/* Header: Range Summary and Inputs */}
-                        <div className="p-6 border-b flex items-start justify-between">
-                          <div className="space-y-1">
-                            <h3 className="text-2xl font-bold text-gray-900">
-                              {dateRange?.from && dateRange?.to ? (
-                                <>
-                                  {Math.ceil(Math.abs(dateRange.to.getTime() - dateRange.from.getTime()) / (1000 * 60 * 60 * 24)) + 1} days range
-                                </>
-                              ) : (
-                                "Select dates"
-                              )}
-                            </h3>
-                            <p className="text-sm text-gray-500 font-medium">
-                              {dateRange?.from ? (
-                                <>
-                                  {dateRange.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                                  {dateRange.to && ` - ${dateRange.to.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`}
-                                </>
-                              ) : (
-                                "Choose your appointment period"
-                              )}
-                            </p>
-                          </div>
-
-                          <div className="flex items-center gap-0 border rounded-xl overflow-hidden shadow-sm">
-                            <button 
-                              onClick={() => setActiveRangeType("from")}
-                              className={`px-4 py-2 border-r bg-white min-w-[140px] text-left transition-colors ${activeRangeType === "from" ? "ring-2 ring-inset ring-violet-600" : "hover:bg-gray-50"}`}
-                            >
-                              <Label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-0.5 cursor-pointer">Start Date</Label>
-                              <div className="text-sm font-semibold text-gray-700">
-                                {dateRange?.from ? dateRange.from.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }) : "MM/DD/YYYY"}
-                              </div>
-                            </button>
-                            <button 
-                              onClick={() => setActiveRangeType("to")}
-                              className={`px-4 py-2 bg-white min-w-[140px] text-left transition-colors ${activeRangeType === "to" ? "ring-2 ring-inset ring-violet-600" : "hover:bg-gray-50"}`}
-                            >
-                              <Label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-0.5 cursor-pointer">End Date</Label>
-                              <div className="text-sm font-semibold text-gray-700">
-                                {dateRange?.to ? dateRange.to.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }) : "MM/DD/YYYY"}
-                              </div>
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* View Mode Switcher */}
-                        <div className="px-6 py-3 bg-gray-50/50 border-b flex items-center gap-3">
-                          <span className="text-xs font-bold text-gray-400 uppercase tracking-widest mr-2">View:</span>
-                          <div className="flex items-center bg-white rounded-lg p-1 border shadow-sm">
-                            {(["day", "week", "month", "custom", "all", "cart"] as const).map((mode) => (
-                              <Button
-                                key={mode}
-                                variant={viewMode === mode ? "brand" : "ghost"}
-                                size="sm"
-                                className={`h-8 px-4 capitalize font-bold text-xs ${viewMode === mode ? "" : "text-gray-500 hover:text-gray-900"}`}
-                                onClick={() => {
-                                  setViewMode(mode);
-                                }}
-                              >
-                                {mode}
-                                {mode === "cart" && appointments.filter(a => a.status === "pending" || a.paymentStatus === "unpaid").length > 0 && (
-                                  <span className="ml-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-orange-500 text-[10px] text-white font-black">
-                                    {appointments.filter(a => a.status === "pending" || a.paymentStatus === "unpaid").length}
-                                  </span>
-                                )}
-                              </Button>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* Calendar Content */}
-                        <div className="p-4 flex justify-center">
-                          <Calendar
-                            mode="range"
-                            selected={dateRange}
-                            onSelect={(_range: DateRange | undefined, selectedDay: Date) => {
-                              const selectedDate = selectedDay;
-                              
-                              if (activeRangeType === "from") {
-                                if (selectedDate) {
-                                  setDateRange({ from: selectedDate, to: dateRange?.to && selectedDate <= dateRange.to ? dateRange.to : undefined });
-                                  setActiveRangeType("to");
-                                }
-                              } else {
-                                if (selectedDate) {
-                                  if (dateRange?.from && selectedDate < dateRange.from) {
-                                    setDateRange({ from: selectedDate, to: undefined });
-                                    setActiveRangeType("to");
-                                  } else {
-                                    setDateRange({ from: dateRange?.from || selectedDate, to: selectedDate });
-                                  }
-                                }
-                              }
-                            }}
-                            numberOfMonths={2}
-                            className="border-none shadow-none"
-                            classNames={{
-                              months: "flex flex-row gap-8",
-                              month: "space-y-4",
-                              caption: "flex justify-center pt-1 relative items-center",
-                              caption_label: "text-sm font-bold text-gray-900",
-                              nav: "space-x-1 flex items-center",
-                              nav_button: "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100",
-                              nav_button_previous: "absolute left-1",
-                              nav_button_next: "absolute right-1",
-                              table: "w-full border-collapse space-y-1",
-                              head_row: "flex",
-                              head_cell: "text-gray-400 rounded-md w-9 font-bold text-[10px] uppercase",
-                              row: "flex w-full mt-2",
-                              cell: "h-9 w-9 text-center text-sm p-0 relative [&:has([aria-selected].day-range-end)]:rounded-r-full [&:has([aria-selected].day-range-start)]:rounded-l-full first:[&:has([aria-selected])]:rounded-l-full last:[&:has([aria-selected])]:rounded-r-full focus-within:relative focus-within:z-20",
-                              day: "h-9 w-9 p-0 font-bold aria-selected:opacity-100 rounded-full hover:bg-gray-100 transition-colors",
-                              day_range_start: "day-range-start bg-violet-600 text-white hover:bg-violet-600 hover:text-white focus:bg-violet-600 focus:text-white",
-                              day_range_end: "day-range-end bg-violet-600 text-white hover:bg-violet-600 hover:text-white focus:bg-violet-600 focus:text-white",
-                              day_selected: "bg-violet-600 text-white hover:bg-violet-600 hover:text-white focus:bg-violet-600 focus:text-white",
-                              day_today: "bg-gray-100 text-gray-900",
-                              day_outside: "text-gray-300 opacity-50",
-                              day_disabled: "text-gray-300 opacity-50",
-                              day_range_middle: "aria-selected:bg-violet-50 aria-selected:text-violet-900 rounded-none",
-                              day_hidden: "invisible",
-                            }}
-                          />
-                        </div>
-
-                        {/* Footer: Action Buttons */}
-                        <div className="p-4 border-t bg-gray-50/30 flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                             <Button 
-                              variant="ghost" 
-                              size="icon" 
-                              className="h-10 w-10 text-gray-400 hover:text-violet-600"
-                            >
-                              <Keyboard className="h-5 w-5" />
-                            </Button>
-                          </div>
-                          
-                          <div className="flex items-center gap-3">
-                            <Button 
-                              variant="ghost" 
-                              className="text-sm font-bold text-gray-900 hover:bg-gray-100 underline decoration-2 underline-offset-4"
-                              onClick={() => {
-                                setDateRange(undefined);
-                              }}
-                            >
-                              Clear dates
-                            </Button>
-                            <Button 
-                              className="bg-violet-600 hover:bg-violet-700 text-white px-6 py-2 rounded-xl font-bold transition-all shadow-md active:scale-95"
-                              onClick={() => setShowDatePicker(false)}
-                            >
-                              Close
-                            </Button>
-                          </div>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="p-4 space-y-4 bg-white rounded-xl">
-                        <div className="space-y-2">
-                          <Label className="text-xs font-bold uppercase tracking-wider text-gray-400">View Mode</Label>
-                          <div className="grid grid-cols-2 gap-2">
-                            {(["day", "week", "month", "custom", "all", "cart"] as const).map((mode) => (
-                              <Button
-                                key={mode}
-                                variant={viewMode === mode ? "brand" : "outline"}
-                                size="sm"
-                                className="h-9 capitalize font-medium flex items-center justify-center gap-2"
-                                onClick={() => {
-                                  setViewMode(mode);
-                                  if (mode !== "custom") setShowDatePicker(false);
-                                }}
-                              >
-                                {mode}
-                                {mode === "cart" && appointments.filter(a => a.status === "pending" || a.paymentStatus === "unpaid").length > 0 && (
-                                  <Badge className="bg-orange-500 text-white border-none h-4 px-1 min-w-[16px] flex items-center justify-center text-[10px] font-black">
-                                    {appointments.filter(a => a.status === "pending" || a.paymentStatus === "unpaid").length}
-                                  </Badge>
-                                )}
-                              </Button>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="border-t pt-4">
-                          <Label className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3 block">
-                            Select Date
-                          </Label>
-                          <Calendar
-                            mode="single"
-                            selected={selectedDate}
-                            onSelect={(date: Date | undefined) => {
-                              if (date) {
-                                setSelectedDate(date);
-                                setShowDatePicker(false);
-                              }
-                            }}
-                            className="rounded-md border shadow-sm"
-                            classNames={{
-                              today: "bg-violet-600 text-white rounded-full",
-                            }}
-                            components={{
-                              MonthCaption: ({ calendarMonth, ...props }: { calendarMonth: { date: Date } }) => (
-                                <div {...props}>
-                                  <span 
-                                    className="hover:text-violet-600 transition-colors cursor-pointer text-sm font-medium"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setSelectedDate(calendarMonth.date);
-                                      setViewMode("month");
-                                      setShowDatePicker(false);
-                                    }}
-                                  >
-                                    {calendarMonth.date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-                                  </span>
-                                </div>
-                              )
-                            }}
-                          />
-                        </div>
-                      </div>
-                    )}
+                  <div className="p-2">
+                    <CalendarPopover
+                      viewMode={viewMode}
+                      setViewMode={setViewMode}
+                      selectedDate={selectedDate}
+                      setSelectedDate={setSelectedDate}
+                      dateRange={dateRange}
+                      setDateRange={setDateRange}
+                      includeCart={true}
+                      onClose={() => setShowDatePicker(false)}
+                    />
                   </div>
                 </PopoverContent>
               </Popover>

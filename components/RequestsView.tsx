@@ -432,7 +432,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
           <AlertDialogHeader>
             <AlertDialogTitle>Confirm Status Change</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to change the status of {pendingStatusChange?.appointment.patientName}'s appointment 
+              Are you sure you want to change the status of {pendingStatusChange?.appointment.patientName}&apos;s appointment 
               from <strong>{pendingStatusChange?.appointment.status}</strong> to <strong>{pendingStatusChange?.newStatus}</strong>?
             </AlertDialogDescription>
           </AlertDialogHeader>

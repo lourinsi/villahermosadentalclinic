@@ -20,6 +20,8 @@ export interface Appointment {
   paymentStatus?: "paid" | "unpaid" | "overdue" | "half-paid";
   balance?: number;
   totalPaid?: number;
+  patientProfile?: string;
+  doctorProfile?: string;
   transactions?: RecentTransaction[];
   createdAt?: string;
 }
@@ -61,6 +63,10 @@ export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFi
         if (filters?.includeUnpaid) queryParams.append("includeUnpaid", "true");
 
         const url = queryParams.toString() ? `${API_URL}?${queryParams.toString()}` : API_URL;
+        try {
+          // eslint-disable-next-line no-console
+          console.debug("useAppointments: fetching appointments URL:", url);
+        } catch (e) {}
         const response = await fetch(url);
         const result = await response.json();
         if (result.success && result.data) {

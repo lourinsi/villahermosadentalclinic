@@ -283,6 +283,46 @@ export function CreateAppointmentModal() {
     }
 
     try {
+      // Conflict checks per rules:
+      // - Cannot double-book the same doctor at overlapping times
+      // - Cannot double-book the same patient at overlapping times
+      // - Overlaps with other doctors are allowed as long as the selected doctor is available
+      const [selHours, selMinutes] = formData.time.split(':').map(Number);
+      const newStart = selHours * 60 + selMinutes;
+      const newEnd = newStart + formData.duration;
+
+      const hasOverlapSameDoctor = dateAppointments.some(apt => {
+        if (apt.status === 'cancelled') return false;
+        if (String(apt.doctor) !== String(formData.doctor)) return false;
+        const [aptH, aptM] = apt.time.split(':').map(Number);
+        const aptStart = aptH * 60 + aptM;
+        const aptEnd = aptStart + (apt.duration || 30);
+        return (newStart < aptEnd) && (newEnd > aptStart);
+      });
+
+      const hasOverlapSamePatient = dateAppointments.some(apt => {
+        if (apt.status === 'cancelled') return false;
+        // match by patientId when available, otherwise patientName
+        const samePatient = (patientId && apt.patientId && String(apt.patientId) === String(patientId)) || (!patientId && String(apt.patientName) === String(patientName)) || (patientId && !apt.patientId && String(apt.patientName) === String(patientName));
+        if (!samePatient) return false;
+        const [aptH, aptM] = apt.time.split(':').map(Number);
+        const aptStart = aptH * 60 + aptM;
+        const aptEnd = aptStart + (apt.duration || 30);
+        return (newStart < aptEnd) && (newEnd > aptStart);
+      });
+
+      if (hasOverlapSameDoctor) {
+        toast.error("Selected doctor is not available at that time.");
+        setIsLoading(false);
+        return;
+      }
+
+      if (hasOverlapSamePatient) {
+        toast.error("Selected patient already has an overlapping appointment.");
+        setIsLoading(false);
+        return;
+      }
+
       await addAppointment({
         patientName: patientName,
         patientId: patientId || patientName, // Fallback for safety
@@ -323,17 +363,22 @@ export function CreateAppointmentModal() {
   }, [patients, formData.patientId]);
 
   const isSlotBusy = useCallback((time: string, duration: number) => {
+    // If no date selected or appointments not loaded, treat as available
     if (!formData.date || !dateAppointments) return false;
-    
+
+    // If no doctor selected yet, do not mark slots as busy — occupied state should depend on selected doctor
+    if (!formData.doctor) return false;
+
     const [hours, minutes] = time.split(':').map(Number);
     const newStart = hours * 60 + minutes;
     const newEnd = newStart + duration;
 
+    // Only consider appointments for the selected doctor when determining busy slots
     return dateAppointments.some(apt => {
-      // Basic check: not cancelled
       if (apt.status === 'cancelled') return false;
-      
-      const [aptHours, aptMinutes] = apt.time.split(':').map(Number);
+      if (String(apt.doctor) !== String(formData.doctor)) return false;
+
+      const [aptHours, aptMinutes] = String(apt.time).split(':').map(Number);
       const aptStart = aptHours * 60 + aptMinutes;
       const aptDuration = apt.duration || 30;
       const aptEnd = aptStart + aptDuration;
@@ -647,6 +692,13 @@ export function CreateAppointmentModal() {
                     )}
                   </SelectContent>
                 </Select>
+                <div className="text-xs text-gray-500 mt-2">
+                  {formData.doctor ? (
+                    <span>Showing availability for: <span className="font-medium">{formData.doctor}</span></span>
+                  ) : (
+                    <span>Select a doctor to view availability</span>
+                  )}
+                </div>
               </div>
 
               <div className="space-y-2">
