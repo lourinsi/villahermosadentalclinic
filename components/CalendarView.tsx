@@ -45,7 +45,7 @@ const appointmentColors: Record<string, { bg: string; text: string; border: stri
   "Other": { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200" },
 };
 
-const APPOINTMENT_STATUSES = ["all", "scheduled", "confirmed", "To Pay", "tentative", "pending", "completed", "cancelled"];
+const APPOINTMENT_STATUSES = ["all", "scheduled", "confirmed", "completed", "cancelled"];
 
 
 export function CalendarView() {
@@ -54,7 +54,8 @@ export function CalendarView() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedDoctor, setSelectedDoctor] = useState("all");
   const [selectedType, setSelectedType] = useState("all");
-  const [selectedStatus, setSelectedStatus] = useState("all");
+  // Default to showing scheduled appointments only (remove cart/pending filters)
+  const [selectedStatus, setSelectedStatus] = useState("scheduled");
   const [isLoadingView, setIsLoadingView] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
@@ -391,7 +392,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                   </div>
                 )}
               </div>
-              
+
               <div className="flex-1 relative min-h-[64px]">
                 {/* Appointments starting at this slot */}
                 {appointmentsStartingAtSlot.map((appointment: Appointment) => {

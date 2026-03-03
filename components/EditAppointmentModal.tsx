@@ -285,12 +285,21 @@ export function EditAppointmentModal() {
 
     setIsLoading(true);
     try {
-      console.log("=== UPDATING APPOINTMENT ===", appointment.id);
       const updatedForm = {
         ...form,
         patientId: finalPatientId,
         patientName: finalPatientName,
       };
+
+      // Detailed client-side logging for debugging: show old vs new
+      console.log("=== UPDATING APPOINTMENT ===", appointment.id);
+      console.log("[CLIENT APPOINTMENT UPDATE] oldAppointment=", appointment);
+      try {
+        console.log("[CLIENT APPOINTMENT UPDATE] updatedForm=", JSON.stringify(updatedForm, null, 2));
+      } catch (e) {
+        console.log("[CLIENT APPOINTMENT UPDATE] updatedForm (raw)=", updatedForm);
+      }
+
       await updateAppointment(appointment.id, updatedForm as Partial<Appointment>);
       toast.success("Appointment updated");
       refreshAppointments();

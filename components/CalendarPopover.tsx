@@ -16,12 +16,12 @@ type Props = {
   setSelectedDate: (d: Date) => void;
   dateRange?: DateRange | undefined;
   setDateRange?: (r?: DateRange) => void;
-  includeCart?: boolean;
+  // includeCart removed - cart view is handled on its own page
   onClose?: () => void;
 };
 
-export default function CalendarPopover({ viewMode, setViewMode, selectedDate, setSelectedDate, dateRange, setDateRange, includeCart = false, onClose }: Props) {
-  const modes = includeCart ? (["day", "week", "month", "custom", "all", "cart"] as const) : (["day", "week", "month", "custom", "all"] as const);
+export default function CalendarPopover({ viewMode, setViewMode, selectedDate, setSelectedDate, dateRange, setDateRange, onClose }: Props) {
+  const modes = (["day", "week", "month", "custom", "all"] as const);
 
   const [activeRangeType, setActiveRangeType] = useState<"from" | "to">("from");
 

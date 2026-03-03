@@ -7,14 +7,45 @@ import { LogOut, User, Home, Users, Calendar, Search, ShoppingBag, ShoppingCart,
 import { toast } from "sonner";
 import { NotificationsOpened } from "./notificationsOpened";
 import { useNotifications } from "@/hooks/useNotifications";
+import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 
 const PatientLayout = ({ children }: { children: React.ReactNode }) => {
   const pathname = usePathname();
   const router = useRouter();
   const { logout, user } = useAuth();
   const { notifications, refreshNotifications, markAsRead } = useNotifications();
+  const { 
+    appointments, 
+    openEditModal, 
+    updateAppointment, 
+    refreshAppointments 
+  } = useAppointmentModal();
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
+
+  const handleReschedule = (appointmentId: string) => {
+    const appointment = appointments.find(a => a.id === appointmentId);
+    if (appointment) {
+      openEditModal(appointment, true);
+    } else {
+      toast.error("Appointment not found");
+    }
+  };
+
+  const handleCancelAppointment = async (appointmentId: string) => {
+    const confirmed = window.confirm("This appointment is unrefundable. Are you sure you want to cancel?");
+    if (confirmed) {
+      try {
+        await updateAppointment(appointmentId, { status: 'cancelled' });
+        toast.success("Appointment cancelled successfully");
+        refreshAppointments();
+        refreshNotifications();
+      } catch (error) {
+        toast.error("Failed to cancel appointment");
+        console.error(error);
+      }
+    }
+  };
 
   const handleLogout = async () => {
     try {
@@ -84,6 +115,8 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
             portal="patient" 
             onRefresh={refreshNotifications}
             onMarkAsRead={markAsRead}
+            onReschedule={handleReschedule}
+            onCancelAppointment={handleCancelAppointment}
           />
         </header>
         <main className="flex-1 p-6 overflow-auto bg-gray-50">{children}</main>

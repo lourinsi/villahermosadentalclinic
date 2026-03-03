@@ -14,6 +14,8 @@ export interface Notification {
     appointmentId?: string;
     currentStatus?: string;
     patientName?: string;
+  appointmentDate?: string;
+  appointmentTime?: string;
     isRequest?: boolean;
   };
 }

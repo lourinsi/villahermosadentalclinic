@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { Bell, MoreHorizontal, Calendar, CreditCard, MessageSquare, Info, Check, X, Trash2, CheckCircle } from "lucide-react";
+import { Bell, MoreHorizontal, Calendar, CreditCard, MessageSquare, Info, Check, X, Trash2, CheckCircle, Edit2, Ban } from "lucide-react";
 import { Button } from "./ui/button";
 import {
   Popover,
@@ -12,6 +12,7 @@ import { Notification, NotificationType } from "../lib/notification-types";
 import { format, isAfter, subHours } from "date-fns";
 import Link from "next/link";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
+import { useDoctors } from "../hooks/useDoctors";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,6 +28,8 @@ interface NotificationsOpenedProps {
   onMarkAsRead?: (id: string) => void;
   onDelete?: (id: string) => void;
   onRefresh?: () => void;
+  onReschedule?: (appointmentId: string) => void;
+  onCancelAppointment?: (appointmentId: string) => void;
 }
 
 export function NotificationsOpened({ 
@@ -36,9 +39,12 @@ export function NotificationsOpened({
   onUpdateAppointmentStatus,
   onMarkAsRead,
   onDelete,
-  onRefresh
+  onRefresh,
+  onReschedule,
+  onCancelAppointment
 }: NotificationsOpenedProps) {
   const [filter, setFilter] = useState<'all' | 'unread' | 'appointment' | 'payment'>('all');
+  const { doctors } = useDoctors();
   
   const filteredNotifications = notifications
     .filter(n => {
@@ -87,12 +93,33 @@ export function NotificationsOpened({
 
   const renderNotificationItem = (n: Notification) => {
     const isActionTaken = ['confirmed', 'cancelled', 'completed', 'scheduled'].includes(n.metadata?.currentStatus || '');
-    
+
+  const avatarSrc = (() => {
+      try {
+        if (n.type === 'appointment') {
+          const meta: any = n.metadata || {};
+          if (meta.doctorProfile) return meta.doctorProfile;
+          const doctorKey = meta.doctor || meta.doctorId || meta.doctorName;
+          if (doctorKey && Array.isArray(doctors)) {
+            const doc = doctors.find((d: any) => String(d.id) === String(doctorKey) || String(d.name) === String(doctorKey));
+            if (doc) return doc.profilePicture || (doc as any).profilePictureUrl || undefined;
+          }
+        }
+      } catch (e) {
+        // ignore and fallback
+      }
+      return undefined;
+    })();
+
     return (
       <div key={n.id} className={`group relative p-2 flex gap-3 hover:bg-gray-100 transition-colors rounded-lg cursor-pointer ${!n.isRead ? 'bg-violet-50/40' : ''}`}>
         <div className="relative flex-shrink-0">
           <Avatar className="h-12 w-12 border border-gray-100">
-            <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${n.metadata?.patientName || n.title}`} />
+            {avatarSrc ? (
+              <AvatarImage src={avatarSrc} />
+            ) : (
+              <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${n.metadata?.patientName || n.title}`} />
+            )}
             <AvatarFallback>{n.title.substring(0, 2).toUpperCase()}</AvatarFallback>
           </Avatar>
           <div className={`absolute -bottom-1 -right-1 p-0.5 rounded-full border-2 border-white ${getIconBg(n.type)}`}>
@@ -104,13 +131,14 @@ export function NotificationsOpened({
             {n.message}
           </p>
           <p className={`text-[10px] mt-1 ${!n.isRead ? 'text-violet-600 font-medium' : 'text-gray-400'}`}>
-            {format(new Date(n.updatedAt || n.createdAt), 'p')}
+            {format(new Date(n.updatedAt || n.createdAt), "yyyy-MM-dd HH:mm")}
           </p>
 
           {n.type === 'appointment' && 
            n.metadata?.appointmentId && 
            (n.metadata?.isRequest || isActionTaken) && 
-           onUpdateAppointmentStatus && (
+           onUpdateAppointmentStatus && 
+           portal !== 'patient' && (
               <div className="mt-2 flex gap-1.5">
                 <Button 
                   size="sm" 
@@ -171,25 +199,52 @@ export function NotificationsOpened({
               )}
 
               {/* Reversal & Action options in menu */}
-              {n.type === 'appointment' && n.metadata?.appointmentId && onUpdateAppointmentStatus && (
+              {n.type === 'appointment' && n.metadata?.appointmentId && (
                 <>
-                  {['cancelled', 'pending', 'tentative', 'To Pay'].includes(n.metadata.currentStatus || '') && (
-                    <DropdownMenuItem onClick={(e) => {
-                      e.stopPropagation();
-                      onUpdateAppointmentStatus(n.metadata!.appointmentId!, 'confirmed', n.id);
-                    }}>
-                      <CheckCircle className="h-3.5 w-3.5 mr-2 text-green-600" />
-                      <span className="text-xs">{n.metadata.currentStatus === 'cancelled' ? 'Re-accept Appointment' : 'Accept Appointment'}</span>
-                    </DropdownMenuItem>
+                  {portal !== 'patient' && onUpdateAppointmentStatus && (
+                    <>
+                      {['cancelled', 'pending', 'tentative', 'To Pay'].includes(n.metadata.currentStatus || '') && (
+                        <DropdownMenuItem onClick={(e) => {
+                          e.stopPropagation();
+                          onUpdateAppointmentStatus(n.metadata!.appointmentId!, 'confirmed', n.id);
+                        }}>
+                          <CheckCircle className="h-3.5 w-3.5 mr-2 text-green-600" />
+                          <span className="text-xs">{n.metadata.currentStatus === 'cancelled' ? 'Re-accept Appointment' : 'Accept Appointment'}</span>
+                        </DropdownMenuItem>
+                      )}
+                      {['confirmed', 'scheduled', 'pending', 'tentative', 'To Pay'].includes(n.metadata.currentStatus || '') && (
+                        <DropdownMenuItem onClick={(e) => {
+                          e.stopPropagation();
+                          onUpdateAppointmentStatus(n.metadata!.appointmentId!, 'cancelled', n.id);
+                        }}>
+                          <X className="h-3.5 w-3.5 mr-2 text-red-600" />
+                          <span className="text-xs">{['confirmed', 'scheduled'].includes(n.metadata.currentStatus || '') ? 'Cancel Appointment' : 'Decline Request'}</span>
+                        </DropdownMenuItem>
+                      )}
+                    </>
                   )}
-                  {['confirmed', 'scheduled', 'pending', 'tentative', 'To Pay'].includes(n.metadata.currentStatus || '') && (
-                    <DropdownMenuItem onClick={(e) => {
-                      e.stopPropagation();
-                      onUpdateAppointmentStatus(n.metadata!.appointmentId!, 'cancelled', n.id);
-                    }}>
-                      <X className="h-3.5 w-3.5 mr-2 text-red-600" />
-                      <span className="text-xs">{['confirmed', 'scheduled'].includes(n.metadata.currentStatus || '') ? 'Cancel Appointment' : 'Decline Request'}</span>
-                    </DropdownMenuItem>
+                  
+                  {portal === 'patient' && n.metadata?.appointmentId && n.metadata?.currentStatus !== 'cancelled' && (
+                    <>
+                      {onReschedule && (
+                        <DropdownMenuItem onClick={(e) => {
+                          e.stopPropagation();
+                          onReschedule(n.metadata!.appointmentId!);
+                        }}>
+                          <Edit2 className="h-3.5 w-3.5 mr-2 text-violet-600" />
+                          <span className="text-xs">Reschedule</span>
+                        </DropdownMenuItem>
+                      )}
+                      {onCancelAppointment && (
+                        <DropdownMenuItem onClick={(e) => {
+                          e.stopPropagation();
+                          onCancelAppointment(n.metadata!.appointmentId!);
+                        }}>
+                          <Ban className="h-3.5 w-3.5 mr-2 text-red-600" />
+                          <span className="text-xs">Cancel Appointment</span>
+                        </DropdownMenuItem>
+                      )}
+                    </>
                   )}
                 </>
               )}

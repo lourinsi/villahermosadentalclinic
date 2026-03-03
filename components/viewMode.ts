@@ -1,3 +1,3 @@
-export type ViewMode = "month" | "week" | "day" | "custom" | "all" | "cart";
+export type ViewMode = "month" | "week" | "day" | "custom" | "all";
 
 export default ViewMode;

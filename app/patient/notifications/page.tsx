@@ -10,14 +10,22 @@ import { Appointment } from '@/hooks/useAppointments';
 export default function PatientNotificationsPage() {
   const { 
     notifications, 
-    isLoading, 
+    isLoading: notificationsLoading, 
     markAsRead, 
     deleteNotification, 
     markAllAsRead,
     refreshNotifications
   } = useNotifications();
 
-  const { updateAppointment, refreshAppointments } = useAppointmentModal();
+  const { 
+    updateAppointment, 
+    refreshAppointments, 
+    openEditModal, 
+    appointments,
+    isLoading: appointmentsLoading
+  } = useAppointmentModal();
+
+  const isLoading = notificationsLoading || appointmentsLoading;
 
   const handleUpdateAppointmentStatus = async (appointmentId: string, status: Appointment['status'], notificationId: string) => {
     try {
@@ -39,6 +47,30 @@ export default function PatientNotificationsPage() {
     }
   };
 
+  const handleReschedule = (appointmentId: string) => {
+    const appointment = appointments.find(a => a.id === appointmentId);
+    if (appointment) {
+      openEditModal(appointment, true); // true for patient view read-only patient field
+    } else {
+      toast.error("Appointment not found");
+    }
+  };
+
+  const handleCancelAppointment = async (appointmentId: string) => {
+    const confirmed = window.confirm("This appointment is unrefundable. Are you sure you want to cancel?");
+    if (confirmed) {
+      try {
+        await updateAppointment(appointmentId, { status: 'cancelled' });
+        toast.success("Appointment cancelled successfully");
+        refreshAppointments();
+        refreshNotifications();
+      } catch (error) {
+        toast.error("Failed to cancel appointment");
+        console.error(error);
+      }
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -55,6 +87,8 @@ export default function PatientNotificationsPage() {
         onDelete={deleteNotification}
         onMarkAllAsRead={markAllAsRead}
         onUpdateAppointmentStatus={handleUpdateAppointmentStatus}
+        onReschedule={handleReschedule}
+        onCancelAppointment={handleCancelAppointment}
         portal="patient"
       />
     </div>

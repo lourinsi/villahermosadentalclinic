@@ -72,23 +72,20 @@ export function PatientCalendarView() {
   const [confirmMessage, setConfirmMessage] = useState<string | undefined>(undefined);
   const [confirmAction, setConfirmAction] = useState<(() => Promise<void>) | null>(null);
 
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [activeFilter, setActiveFilter] = useState<'scheduled' | 'cart'>('scheduled');
 
   const { openPatientBookingModal, appointments, isLoading, refreshAppointments, deleteAppointment, updateAppointment } = useAppointmentModal();
   const { openPatientPaymentFor } = usePaymentModal();
   const { doctors, isLoadingDoctors } = useDoctors();
 
   const filteredAppointments = useMemo(() => {
-    if (viewMode === "cart") {
+    if (activeFilter === "cart") {
       return appointments.filter(apt => apt.status === "pending" || apt.status === "tentative");
     }
     
-    // In normal calendar views, hide pending appointments (they are in the "Cart")
-    // but show confirmed/scheduled/completed/To Pay/tentative even if unpaid
-    const filtered = appointments.filter(apt => apt.status !== "pending");
-
-    return filtered;
-  }, [appointments, viewMode]);
+    // "Scheduled" view shows confirmed, scheduled, and anything normally shown (not pending/cancelled)
+    return appointments.filter(apt => apt.status !== "pending" && apt.status !== "cancelled");
+  }, [appointments, activeFilter]);
 
   const handleDelete = (id: string) => {
     setConfirmTitle("Delete appointment");
@@ -214,7 +211,7 @@ export function PatientCalendarView() {
     if (viewMode === 'custom' && dateRange?.from && dateRange?.to) {
       fetchStartStr = formatDateToYYYYMMDD(dateRange.from);
       fetchEndStr = formatDateToYYYYMMDD(dateRange.to);
-    } else if (viewMode !== 'all' && viewMode !== 'cart') {
+  } else if (viewMode !== 'all') {
       // For day, week, month, use the range calculated by getViewRange
       // Actually, Admin portal uses a monthly range for day/week/month to avoid too many fetches
       const monthStart = new Date(start.getFullYear(), start.getMonth(), 1);
@@ -226,15 +223,11 @@ export function PatientCalendarView() {
 
     return { 
       parentId,
-      status: viewMode === "cart" ? undefined : (statusFilter === "all" ? undefined : statusFilter),
       startDate: fetchStartStr,
       endDate: fetchEndStr,
-      // Only request unpaid appointments when viewing the Cart — otherwise
-      // asking for includeUnpaid may return unpaid records outside the requested
-      // date range depending on backend semantics.
-      includeUnpaid: viewMode === "cart" ? true : undefined
+      includeUnpaid: activeFilter === "cart" ? true : undefined
     };
-  }, [parentId, statusFilter, viewMode, selectedDate, dateRange, getViewRange]);
+  }, [parentId, activeFilter, viewMode, selectedDate, dateRange, getViewRange]);
 
   useEffect(() => {
     // Don't trigger a backend fetch when the custom picker is opened but a full
@@ -254,7 +247,7 @@ export function PatientCalendarView() {
     }
   // Narrow dependencies so changes to the actual start/end dates trigger refresh,
   // but opening the picker (which may create a new DateRange object) does not.
-  }, [parentId, filters.parentId, filters.status, filters.startDate, filters.endDate, refreshAppointments, viewMode, dateRange?.from, dateRange?.to]);
+  }, [parentId, filters.parentId, filters.startDate, filters.endDate, filters.includeUnpaid, refreshAppointments, viewMode, dateRange?.from, dateRange?.to]);
 
   useEffect(() => {
     const onUpdated = (e: Event) => {
@@ -293,10 +286,8 @@ export function PatientCalendarView() {
       return `${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
     } else if (viewMode === "month") {
       return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-    } else if (viewMode === "all") {
-      return "All Appointments";
-    } else if (viewMode === "cart") {
-      return "My Appointment Cart";
+    } else if (viewMode === "all" || activeFilter === "cart") {
+      return activeFilter === "cart" ? "My Appointment Cart" : "All Appointments";
     } else if (viewMode === "custom") {
       if (dateRange?.from && dateRange?.to) {
         return `${dateRange.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${dateRange.to.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
@@ -908,7 +899,6 @@ export function PatientCalendarView() {
                       setSelectedDate={setSelectedDate}
                       dateRange={dateRange}
                       setDateRange={setDateRange}
-                      includeCart={true}
                       onClose={() => setShowDatePicker(false)}
                     />
                   </div>
@@ -916,23 +906,26 @@ export function PatientCalendarView() {
               </Popover>
             </div>
 
-            <div className="flex items-center space-x-3">
-              <div className="flex items-center gap-2">
-                <Filter className="h-4 w-4 text-gray-400" />
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="w-[140px] h-10 shadow-sm">
-                      <SelectValue placeholder="Status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Statuses</SelectItem>
-                      <SelectItem value="pending">Pending</SelectItem>
-                      <SelectItem value="scheduled">Scheduled</SelectItem>
-                      <SelectItem value="confirmed">Confirmed</SelectItem>
-                      <SelectItem value="completed">Completed</SelectItem>
-                      <SelectItem value="cancelled">Cancelled</SelectItem>
-                    </SelectContent>
-                </Select>
-              </div>
+            <div className="flex items-center space-x-2 bg-gray-100 p-1 rounded-lg border border-gray-200">
+              <Button 
+                variant={activeFilter === 'scheduled' ? 'secondary' : 'ghost'} 
+                size="sm" 
+                onClick={() => { setActiveFilter('scheduled'); }}
+                className={`h-8 px-4 font-semibold rounded-md transition-all ${activeFilter === 'scheduled' ? 'bg-white shadow-sm text-violet-600' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                Scheduled
+              </Button>
+              <Button 
+                variant={activeFilter === 'cart' ? 'secondary' : 'ghost'} 
+                size="sm" 
+                onClick={() => {
+                  setActiveFilter('cart');
+                  // We don't change viewMode here, but we ensure the list view is shown
+                }}
+                className={`h-8 px-4 font-semibold rounded-md transition-all ${activeFilter === 'cart' ? 'bg-white shadow-sm text-violet-600' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                Cart
+              </Button>
             </div>
           </div>
         </CardContent>
@@ -945,17 +938,28 @@ export function PatientCalendarView() {
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-violet-600"></div>
               </div>
             ) : (
-              viewMode === "day" ? renderDayView() : 
-              viewMode === "week" ? renderWeekView() : 
-              viewMode === "month" ? renderMonthView() : 
-              viewMode === "all" || viewMode === "cart" ? (
+              activeFilter === "cart" ? (
                 <div className="p-4 bg-white">
                   <AllAppointmentsView 
                     appointments={filteredAppointments} 
                     isLoading={isLoading || isLoadingView}
                     onPay={handlePay}
                     onDelete={handleDelete}
-                    isCart={viewMode === "cart"}
+                    isCart={true}
+                  />
+                </div>
+              ) :
+              viewMode === "day" ? renderDayView() : 
+              viewMode === "week" ? renderWeekView() : 
+              viewMode === "month" ? renderMonthView() : 
+              viewMode === "all" ? (
+                <div className="p-4 bg-white">
+                  <AllAppointmentsView 
+                    appointments={filteredAppointments} 
+                    isLoading={isLoading || isLoadingView}
+                    onPay={handlePay}
+                    onDelete={handleDelete}
+                    isCart={false}
                   />
                 </div>
               ) :

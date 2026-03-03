@@ -376,7 +376,6 @@ export default function AdminCalendarView() {
                       setSearchTerm("");
                       setDateRange(range);
                     }} 
-                    includeCart={false} 
                     onClose={() => setShowDatePicker(false)} 
                   />
                 </PopoverContent>

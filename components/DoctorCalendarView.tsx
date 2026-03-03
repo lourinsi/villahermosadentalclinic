@@ -595,7 +595,6 @@ export function DoctorCalendarView() {
                       setSelectedDate={setSelectedDate}
                       dateRange={dateRange}
                       setDateRange={setDateRange}
-                      includeCart={false}
                       onClose={() => setShowDatePicker(false)}
                     />
                   </div>

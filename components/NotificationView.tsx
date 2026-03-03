@@ -12,7 +12,9 @@ import {
   Check,
   X,
   MoreHorizontal,
-  CheckCircle
+  CheckCircle,
+  Edit2,
+  Ban
 } from "lucide-react";
 import { Notification, NotificationType } from "../lib/notification-types";
 import { Appointment } from "@/hooks/useAppointments";
@@ -24,6 +26,7 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
+import { useDoctors } from "../hooks/useDoctors";
 
 interface NotificationViewProps {
   notifications: Notification[];
@@ -31,6 +34,8 @@ interface NotificationViewProps {
   onDelete: (id: string) => void;
   onMarkAllAsRead: () => void;
   onUpdateAppointmentStatus?: (appointmentId: string, status: Appointment["status"], notificationId: string) => void;
+  onReschedule?: (appointmentId: string) => void;
+  onCancelAppointment?: (appointmentId: string) => void;
   portal?: 'admin' | 'doctor' | 'patient';
 }
 
@@ -40,6 +45,8 @@ export function NotificationView({
   onDelete, 
   onMarkAllAsRead,
   onUpdateAppointmentStatus,
+  onReschedule,
+  onCancelAppointment,
   portal = 'admin'
 }: NotificationViewProps) {
   const [filter, setFilter] = useState<'all' | 'unread' | 'appointment' | 'payment'>('all');
@@ -89,6 +96,24 @@ export function NotificationView({
   };
 
   const renderNotificationItem = (notification: Notification) => {
+    const { doctors } = useDoctors();
+    // Determine avatar source: for appointment notifications prefer the doctor's profile image
+    const avatarSrc = (() => {
+      try {
+        if (notification.type === 'appointment') {
+          const meta: any = notification.metadata || {};
+          if (meta.doctorProfile) return meta.doctorProfile;
+          const doctorKey = meta.doctor || meta.doctorId || meta.doctorName;
+          if (doctorKey && Array.isArray(doctors)) {
+            const doc = doctors.find((d: any) => String(d.id) === String(doctorKey) || String(d.name) === String(doctorKey));
+            if (doc) return doc.profilePicture || (doc as any).profilePictureUrl || undefined;
+          }
+        }
+      } catch (e) {
+        // ignore and fallback to dicebear
+      }
+      return `https://api.dicebear.com/7.x/avataaars/svg?seed=${notification.metadata?.patientName || notification.title}`;
+    })();
     const isActionTaken = ['confirmed', 'cancelled', 'completed', 'scheduled'].includes(notification.metadata?.currentStatus || '');
     
     return (
@@ -98,7 +123,7 @@ export function NotificationView({
       >
         <div className="relative flex-shrink-0">
           <Avatar className="h-14 w-14 border border-gray-100">
-            <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${notification.metadata?.patientName || notification.title}`} />
+            {avatarSrc ? <AvatarImage src={avatarSrc} /> : <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${notification.metadata?.patientName || notification.title}`} />}
             <AvatarFallback>{notification.title.substring(0, 2).toUpperCase()}</AvatarFallback>
           </Avatar>
           <div className={`absolute -bottom-1 -right-1 p-1 rounded-full border-2 border-white ${getIconBg(notification.type)}`}>
@@ -112,14 +137,15 @@ export function NotificationView({
               {notification.message}
             </p>
             <span className={`text-xs mt-1 ${!notification.isRead ? 'text-violet-600 font-medium' : 'text-gray-500'}`}>
-              {format(new Date(notification.updatedAt || notification.createdAt), 'p')}
+              {format(new Date(notification.updatedAt || notification.createdAt), "yyyy-MM-dd HH:mm")}
             </span>
           </div>
 
           {notification.type === 'appointment' && 
            notification.metadata?.appointmentId && 
            (notification.metadata?.isRequest || isActionTaken) && 
-           onUpdateAppointmentStatus && (
+           onUpdateAppointmentStatus && 
+           portal !== 'patient' && (
               <div className="mt-3 flex gap-2">
                 <Button 
                   size="sm" 
@@ -161,35 +187,67 @@ export function NotificationView({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
+              {/* Always offer mark-as-read when unread */}
               {!notification.isRead && (
                 <DropdownMenuItem onClick={() => onMarkAsRead(notification.id)}>
                   <Check className="h-4 w-4 mr-2" />
                   Mark as read
                 </DropdownMenuItem>
               )}
-              
-              {/* Reversal & Action options in menu */}
-              {notification.type === 'appointment' && notification.metadata?.appointmentId && onUpdateAppointmentStatus && (
+
+              {/*
+                For patient portal: if the notification is NOT an appointment,
+                has no appointmentId, or the appointment is already cancelled,
+                only show the 'Mark as read' option (per requirement).
+              */}
+              {!(portal === 'patient' && (notification.type !== 'appointment' || !notification.metadata?.appointmentId || notification.metadata?.currentStatus === 'cancelled')) && (
                 <>
-                  {['cancelled', 'pending', 'tentative', 'To Pay'].includes(notification.metadata.currentStatus || '') && (
-                    <DropdownMenuItem onClick={() => onUpdateAppointmentStatus(notification.metadata!.appointmentId!, 'confirmed', notification.id)}>
-                      <CheckCircle className="h-4 w-4 mr-2 text-green-600" />
-                      {notification.metadata.currentStatus === 'cancelled' ? 'Re-accept Appointment' : 'Accept Appointment'}
-                    </DropdownMenuItem>
+                  {/* Reversal & Action options in menu */}
+                  {notification.type === 'appointment' && notification.metadata?.appointmentId && (
+                    <>
+                      {portal !== 'patient' && onUpdateAppointmentStatus && (
+                        <>
+                          {['cancelled', 'pending', 'tentative', 'To Pay'].includes(notification.metadata.currentStatus || '') && (
+                            <DropdownMenuItem onClick={() => onUpdateAppointmentStatus(notification.metadata!.appointmentId!, 'confirmed', notification.id)}>
+                              <CheckCircle className="h-4 w-4 mr-2 text-green-600" />
+                              {notification.metadata.currentStatus === 'cancelled' ? 'Re-accept Appointment' : 'Accept Appointment'}
+                            </DropdownMenuItem>
+                          )}
+                          {['confirmed', 'scheduled', 'pending', 'tentative', 'To Pay'].includes(notification.metadata.currentStatus || '') && (
+                            <DropdownMenuItem onClick={() => onUpdateAppointmentStatus(notification.metadata!.appointmentId!, 'cancelled', notification.id)}>
+                              <X className="h-4 w-4 mr-2 text-red-600" />
+                              {['confirmed', 'scheduled'].includes(notification.metadata.currentStatus || '') ? 'Cancel Appointment' : 'Decline Request'}
+                            </DropdownMenuItem>
+                          )}
+                        </>
+                      )}
+
+                      {portal === 'patient' && notification.type === 'appointment' && notification.metadata?.currentStatus !== 'cancelled' && (
+                        <>
+                          {onReschedule && (
+                            <DropdownMenuItem onClick={() => onReschedule(notification.metadata!.appointmentId!)}>
+                              <Edit2 className="h-4 w-4 mr-2 text-violet-600" />
+                              Reschedule
+                            </DropdownMenuItem>
+                          )}
+                          {onCancelAppointment && (
+                            <DropdownMenuItem onClick={() => onCancelAppointment(notification.metadata!.appointmentId!)}>
+                              <Ban className="h-4 w-4 mr-2 text-red-600" />
+                              Cancel Appointment
+                            </DropdownMenuItem>
+                          )}
+                        </>
+                      )}
+                    </>
                   )}
-                  {['confirmed', 'scheduled', 'pending', 'tentative', 'To Pay'].includes(notification.metadata.currentStatus || '') && (
-                    <DropdownMenuItem onClick={() => onUpdateAppointmentStatus(notification.metadata!.appointmentId!, 'cancelled', notification.id)}>
-                      <X className="h-4 w-4 mr-2 text-red-600" />
-                      {['confirmed', 'scheduled'].includes(notification.metadata.currentStatus || '') ? 'Cancel Appointment' : 'Decline Request'}
-                    </DropdownMenuItem>
-                  )}
+
+                  {/* Delete stays available for non-limited menus */}
+                  <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={() => onDelete(notification.id)}>
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete this notification
+                  </DropdownMenuItem>
                 </>
               )}
-
-              <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={() => onDelete(notification.id)}>
-                <Trash2 className="h-4 w-4 mr-2" />
-                Delete this notification
-              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
