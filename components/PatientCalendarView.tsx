@@ -857,6 +857,9 @@ export function PatientCalendarView() {
   // For brevity, I'll focus on the month view and the main structure.
   // A full implementation would require adapting renderDayView and renderWeekView as well.
 
+  // compute statusStr for selected appointment to avoid TypeScript union mismatches
+  const statusStr = selectedAppointment ? String(selectedAppointment.status) : '';
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -1041,69 +1044,70 @@ export function PatientCalendarView() {
                     )}
 
                     <DialogFooter className="flex-col sm:flex-row gap-2 pt-4 border-t">
-                      {(() => {
-                        // show cancel when the appointment is NOT confirmed/scheduled and not in the past
-                        const aptDate = parseBackendDateToLocal(selectedAppointment.date);
-                        const endOfDay = new Date(aptDate);
-                        endOfDay.setHours(23, 59, 59, 999);
-                        const isPast = endOfDay.getTime() < new Date().getTime();
-                        const showCancel = !["scheduled", "confirmed"].includes(selectedAppointment.status) && !isPast;
+                        {/* Cancel button for non-confirmed/non-scheduled and future appointments */}
+                        {(() => {
+                          const aptDateLocal = parseBackendDateToLocal(selectedAppointment.date);
+                          const endOfDayLocal = new Date(aptDateLocal);
+                          endOfDayLocal.setHours(23, 59, 59, 999);
+                          const isPastLocal = endOfDayLocal.getTime() < new Date().getTime();
+                          const showCancel = !["scheduled", "confirmed"].includes(statusStr) && !isPastLocal;
 
-                        if (showCancel) {
-                          return (
-                            <Button
-                              variant="destructive"
-                              className="w-full gap-2"
-                              onClick={() => {
-                                if (selectedAppointment.status === 'pending') {
-                                  handleDelete(selectedAppointment.id);
-                                } else {
-                                  handleCancelReservation(selectedAppointment.id);
-                                }
-                              }}
-                              disabled={isProcessing}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              Cancel Appointment
-                            </Button>
-                          );
-                        }
+                          if (showCancel) {
+                            return (
+                              <Button
+                                variant="destructive"
+                                className="w-full gap-2"
+                                onClick={() => {
+                                  if (selectedAppointment.status === 'pending') {
+                                    handleDelete(selectedAppointment.id);
+                                  } else {
+                                    handleCancelReservation(selectedAppointment.id);
+                                  }
+                                }}
+                                disabled={isProcessing}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                                Cancel Appointment
+                              </Button>
+                            );
+                          }
+                          return null;
+                        })()}
 
-                        return null;
-                      })()}
+                        {/* Request cancellation for scheduled/confirmed */
+                        (statusStr === 'scheduled' || statusStr === 'confirmed') && (
+                          <Button 
+                            variant="outline" 
+                            className="w-full gap-2 border-amber-200 text-amber-700 hover:bg-amber-50" 
+                            onClick={() => handleRequestCancellation(selectedAppointment)}
+                            disabled={isProcessing}
+                          >
+                            <AlertCircle className="h-4 w-4" />
+                            Request Cancellation
+                          </Button>
+                        )}
 
-                      {(selectedAppointment.status === 'scheduled' || selectedAppointment.status === 'confirmed') && (
+                        {/* Pay Now when not paid and not cancelled */}
+                        {selectedAppointment.paymentStatus !== 'paid' && selectedAppointment.status !== 'cancelled' && (
+                          <Button 
+                            className="w-full bg-blue-600 hover:bg-blue-700 text-white gap-2" 
+                            onClick={() => handlePay(selectedAppointment)}
+                            disabled={isProcessing}
+                          >
+                            <CreditCard className="h-4 w-4" />
+                            Pay Now
+                          </Button>
+                        )}
+
                         <Button 
-                          variant="outline" 
-                          className="w-full gap-2 border-amber-200 text-amber-700 hover:bg-amber-50" 
-                          onClick={() => handleRequestCancellation(selectedAppointment)}
+                          variant="ghost" 
+                          onClick={() => setSelectedAppointment(null)}
+                          className="w-full"
                           disabled={isProcessing}
                         >
-                          <AlertCircle className="h-4 w-4" />
-                          Request Cancellation
+                          Close
                         </Button>
-                      )}
-
-                      {selectedAppointment.paymentStatus !== 'paid' && selectedAppointment.status !== 'cancelled' && (
-                        <Button 
-                          className="w-full bg-blue-600 hover:bg-blue-700 text-white gap-2" 
-                          onClick={() => handlePay(selectedAppointment)}
-                          disabled={isProcessing}
-                        >
-                          <CreditCard className="h-4 w-4" />
-                          Pay Now
-                        </Button>
-                      )}
-
-                      <Button 
-                        variant="ghost" 
-                        onClick={() => setSelectedAppointment(null)}
-                        className="w-full"
-                        disabled={isProcessing}
-                      >
-                        Close
-                      </Button>
-                    </DialogFooter>
+                      </DialogFooter>
                 </div>
             )}
         </DialogContent>

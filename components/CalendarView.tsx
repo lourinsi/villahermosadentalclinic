@@ -34,6 +34,7 @@ import { Avatar, AvatarImage, AvatarFallback } from "./ui/avatar";
 import CalendarPopover from "./CalendarPopover";
 
 import ViewMode from "./viewMode";
+import { useRouter, useSearchParams } from 'next/navigation';
 
 const appointmentColors: Record<string, { bg: string; text: string; border: string }> = {
   "Routine Cleaning": { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" },
@@ -45,10 +46,10 @@ const appointmentColors: Record<string, { bg: string; text: string; border: stri
   "Other": { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200" },
 };
 
-const APPOINTMENT_STATUSES = ["all", "scheduled", "confirmed", "completed", "cancelled"];
+const APPOINTMENT_STATUSES = ["all", "scheduled", "completed"];
 
 
-export function CalendarView() {
+export function CalendarView({ portal = 'admin' }: { portal?: 'admin' | 'doctor' | 'patient' }) {
   const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [searchTerm, setSearchTerm] = useState("");
@@ -72,11 +73,23 @@ export function CalendarView() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [appointmentToDelete, setAppointmentToDelete] = useState<string | null>(null);
   const { doctors, isLoadingDoctors } = useDoctors();
-  
-  // Filter appointments when "all" status is selected to exclude "pending"
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    const doctorId = searchParams.get("doctor");
+    if (doctorId) {
+      setSelectedDoctor(doctorId);
+    }
+  }, [searchParams]);
+
+  // Normalize statuses and exclude cancelled appointments from the calendar
   const filteredAppointments = useMemo(() => {
-    return appointments;
-  }, [appointments]);
+    return appointments
+      .map((a) => ({ ...a, status: (a.status as string) === 'confirmed' ? 'scheduled' : a.status }))
+      .filter((a) => a.status !== 'cancelled')
+      .filter((a) => selectedStatus === 'all' ? true : a.status === selectedStatus);
+  }, [appointments, selectedStatus]);
 
   const getViewRange = useCallback((date: Date) => {
     const start = new Date(date);
@@ -418,7 +431,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                       }}
                       onClick={(e) => {
                         e.stopPropagation();
-                        openEditModal(appointment);
+                        openEditModal(appointment, portal === 'patient');
                       }}
                     >
                       <div className="flex flex-col h-full">
@@ -584,7 +597,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                               }}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                openEditModal(appointment);
+                                openEditModal(appointment, portal === 'patient');
                               }}
                             >
                               <div className="flex justify-between items-start">
@@ -669,7 +682,8 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
               className={`min-h-[120px] p-2 border-r border-b border-gray-200 transition-colors cursor-pointer ${
                 item.currentMonth ? 'bg-white hover:bg-gray-50' : 'bg-gray-50/50 text-gray-400'
               }`}
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation();
                 setSelectedDate(item.date);
                 setViewMode("day");
               }}
@@ -810,10 +824,17 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
               </button>
             )}
           </div>
-          <Button variant="brand" onClick={() => openCreateModal(selectedDate)} className="h-10">
-            <Plus className="h-4 w-4 mr-2" />
-            New Appointment
-          </Button>
+          {portal === 'patient' ? (
+            <Button variant="brand" onClick={() => router.push('/patient/doctors')} className="h-10">
+              <Plus className="h-4 w-4 mr-2" />
+              Find Doctors
+            </Button>
+          ) : (
+            <Button variant="brand" onClick={() => openCreateModal(selectedDate)} className="h-10">
+              <Plus className="h-4 w-4 mr-2" />
+              New Appointment
+            </Button>
+          )}
         </div>
       </div>
 
@@ -861,20 +882,22 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
             </div>
             
             <div className="flex items-center space-x-3">
-              <div className="flex items-center gap-2">
-                <Users className="h-4 w-4 text-gray-400" />
-                <Select value={selectedDoctor} onValueChange={setSelectedDoctor}>
-                  <SelectTrigger className="w-[180px] h-10 shadow-sm">
-                    <SelectValue placeholder={isLoadingDoctors ? "Loading..." : "Filter by doctor"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Doctors</SelectItem>
-                    {doctors.map((doctor) => (
-                      <SelectItem key={doctor.id} value={doctor.name}>{doctor.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {portal !== 'patient' && (
+                <div className="flex items-center gap-2">
+                  <Users className="h-4 w-4 text-gray-400" />
+                  <Select value={selectedDoctor} onValueChange={setSelectedDoctor}>
+                    <SelectTrigger className="w-[180px] h-10 shadow-sm">
+                      <SelectValue placeholder={isLoadingDoctors ? "Loading..." : "Filter by doctor"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Doctors</SelectItem>
+                      {doctors.map((doctor) => (
+                        <SelectItem key={doctor.id} value={doctor.name}>{doctor.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <div className="flex items-center gap-2">
                 <ListFilter className="h-4 w-4 text-gray-400" />
                 <Select value={selectedType} onValueChange={setSelectedType}>
@@ -946,7 +969,14 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                     {viewMode === "day" && renderDayView()}
                     {viewMode === "week" && renderWeekView()}
                     {viewMode === "month" && renderMonthView()}
-                    {viewMode === "custom" && renderCustomView()}
+                    {viewMode === "custom" && (
+                      (dateRange?.from && dateRange?.to) ? renderCustomView() : (
+                        <div className="p-8 text-center text-muted-foreground">
+                          <div className="text-lg font-bold mb-2">Select a start and end date</div>
+                          <div className="text-sm">Choose both a start and end date from the date picker (calendar icon) to view appointments for a custom range.</div>
+                        </div>
+                      )
+                    )}
                     {viewMode === "all" && (
                       <div className="p-4">
                         <AllAppointmentsView appointments={filteredAppointments} isLoading={isLoadingView} />

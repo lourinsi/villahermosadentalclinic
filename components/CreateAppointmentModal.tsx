@@ -16,7 +16,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { useDoctors } from "../hooks/useDoctors";
 import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
-import { APPOINTMENT_TYPES } from "../lib/appointment-types";
+import { APPOINTMENT_TYPES, getAppointmentPrice } from "../lib/appointment-types";
 import { formatDateToYYYYMMDD } from "../lib/utils";
 import { Appointment } from "@/hooks/useAppointments";
 
@@ -31,6 +31,7 @@ interface AppointmentFormData {
   type: number;
   customType?: string;
   price?: number;
+  discount?: number;
   doctor: string;
   notes: string;
   status: string;
@@ -71,13 +72,19 @@ export function CreateAppointmentModal() {
     duration: 30,
     type: -1,
     customType: "",
-    price: 0,
+  price: 0,
+  discount: 0,
     doctor: user?.role === "doctor" ? user.username : "",
     notes: "",
     status: "scheduled",
     paymentStatus: "unpaid",
     balance: 0
   });
+
+  const recalcBalance = (price: number, discount?: number) => {
+    const d = discount || 0;
+    return Math.max(0, price - d);
+  };
 
   const [showNewPatient, setShowNewPatient] = useState(false);
   const [patients, setPatients] = useState<PatientSelectItem[]>([]);
@@ -323,7 +330,7 @@ export function CreateAppointmentModal() {
         return;
       }
 
-      await addAppointment({
+  await addAppointment({
         patientName: patientName,
         patientId: patientId || patientName, // Fallback for safety
         date: formData.date,
@@ -334,7 +341,7 @@ export function CreateAppointmentModal() {
         price: formData.price,
         doctor: formData.doctor,
         notes: formData.notes,
-        status: formData.status as "scheduled" | "confirmed" | "pending" | "tentative" | "completed" | "cancelled",
+  status: formData.status as "scheduled" | "pending" | "tentative" | "completed" | "cancelled" | "To Pay",
         paymentStatus: formData.paymentStatus,
         balance: formData.balance
       });
@@ -605,7 +612,8 @@ export function CreateAppointmentModal() {
                   value={formData.type.toString()}
                   onValueChange={(value) => {
                     const typeIndex = parseInt(value);
-                    setFormData(prev => ({ ...prev, type: typeIndex, customType: "" }));
+                      const price = getAppointmentPrice(typeIndex);
+                      setFormData(prev => ({ ...prev, type: typeIndex, customType: "", price, balance: recalcBalance(price, prev.discount) }));
                     setShowCustomTypeInput(typeIndex === APPOINTMENT_TYPES.length - 1);
                   }}
                 >
@@ -639,10 +647,28 @@ export function CreateAppointmentModal() {
                   id="price"
                   type="number"
                   value={formData.price !== undefined ? formData.price : ""}
-                  onChange={(e) => setFormData(prev => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
+                  onChange={(e) => {
+                    const p = parseFloat(e.target.value) || 0;
+                    setFormData(prev => ({ ...prev, price: p, balance: recalcBalance(p, prev.discount) }));
+                  }}
                   min="0"
                   step="0.01"
                   required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="discount">Discount ($)</Label>
+                <Input
+                  id="discount"
+                  type="number"
+                  value={formData.discount !== undefined ? formData.discount : 0}
+                  onChange={(e) => {
+                    const d = parseFloat(e.target.value) || 0;
+                    setFormData(prev => ({ ...prev, discount: d, balance: recalcBalance(prev.price || 0, d) }));
+                  }}
+                  min="0"
+                  step="0.01"
                 />
               </div>
 
@@ -712,7 +738,6 @@ export function CreateAppointmentModal() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="scheduled">Scheduled</SelectItem>
-                    <SelectItem value="confirmed">Confirmed</SelectItem>
                     <SelectItem value="pending">Pending</SelectItem>
                     <SelectItem value="tentative">Tentative</SelectItem>
                   </SelectContent>

@@ -92,7 +92,7 @@ export function NotificationsOpened({
   };
 
   const renderNotificationItem = (n: Notification) => {
-    const isActionTaken = ['confirmed', 'cancelled', 'completed', 'scheduled'].includes(n.metadata?.currentStatus || '');
+    const isActionTaken = ['cancelled', 'completed', 'scheduled'].includes(n.metadata?.currentStatus || '');
 
   const avatarSrc = (() => {
       try {
@@ -144,16 +144,16 @@ export function NotificationsOpened({
                   size="sm" 
                   disabled={isActionTaken}
                   className={`h-7 flex-1 text-[10px] font-semibold rounded-md ${
-                    n.metadata?.currentStatus === 'confirmed' || n.metadata?.currentStatus === 'scheduled'
+                    n.metadata?.currentStatus === 'scheduled'
                       ? "bg-emerald-600 hover:bg-emerald-700 text-white disabled:bg-emerald-200"
                       : "bg-violet-600 hover:bg-violet-700 text-white disabled:bg-violet-200"
                   }`}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onUpdateAppointmentStatus(n.metadata!.appointmentId!, 'confirmed', n.id);
+                    onUpdateAppointmentStatus(n.metadata!.appointmentId!, 'scheduled', n.id);
                   }}
                 >
-                  {n.metadata?.currentStatus === 'confirmed' || n.metadata?.currentStatus === 'scheduled' ? 'Accepted' : 'Accept'}
+                  {n.metadata?.currentStatus === 'scheduled' ? 'Accepted' : 'Accept'}
                 </Button>
                 <Button 
                   size="sm" 
@@ -206,19 +206,19 @@ export function NotificationsOpened({
                       {['cancelled', 'pending', 'tentative', 'To Pay'].includes(n.metadata.currentStatus || '') && (
                         <DropdownMenuItem onClick={(e) => {
                           e.stopPropagation();
-                          onUpdateAppointmentStatus(n.metadata!.appointmentId!, 'confirmed', n.id);
+                          onUpdateAppointmentStatus(n.metadata!.appointmentId!, 'scheduled', n.id);
                         }}>
                           <CheckCircle className="h-3.5 w-3.5 mr-2 text-green-600" />
                           <span className="text-xs">{n.metadata.currentStatus === 'cancelled' ? 'Re-accept Appointment' : 'Accept Appointment'}</span>
                         </DropdownMenuItem>
                       )}
-                      {['confirmed', 'scheduled', 'pending', 'tentative', 'To Pay'].includes(n.metadata.currentStatus || '') && (
+                      {['scheduled', 'pending', 'tentative', 'To Pay'].includes(n.metadata.currentStatus || '') && (
                         <DropdownMenuItem onClick={(e) => {
                           e.stopPropagation();
                           onUpdateAppointmentStatus(n.metadata!.appointmentId!, 'cancelled', n.id);
                         }}>
                           <X className="h-3.5 w-3.5 mr-2 text-red-600" />
-                          <span className="text-xs">{['confirmed', 'scheduled'].includes(n.metadata.currentStatus || '') ? 'Cancel Appointment' : 'Decline Request'}</span>
+                          <span className="text-xs">{['scheduled'].includes(n.metadata.currentStatus || '') ? 'Cancel Appointment' : 'Decline Request'}</span>
                         </DropdownMenuItem>
                       )}
                     </>

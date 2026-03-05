@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { DateRange } from "react-day-picker";
 import { Button } from "./ui/button";
 import { Calendar } from "./ui/calendar";
@@ -24,6 +24,20 @@ export default function CalendarPopover({ viewMode, setViewMode, selectedDate, s
   const modes = (["day", "week", "month", "custom", "all"] as const);
 
   const [activeRangeType, setActiveRangeType] = useState<"from" | "to">("from");
+  const calendarRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    // If the popover is opened to custom mode, focus the calendar container
+    if (viewMode === 'custom' && calendarRef.current) {
+      // small delay to allow animation/DOM placement
+      const t = setTimeout(() => {
+        try { calendarRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
+        try { calendarRef.current?.focus(); } catch (e) {}
+      }, 80);
+      return () => clearTimeout(t);
+    }
+    return;
+  }, [viewMode]);
 
   return (
     <div className={`bg-white rounded-2xl overflow-hidden ${viewMode === "custom" ? "min-w-[700px]" : "min-w-[320px]"}`}>
@@ -39,7 +53,8 @@ export default function CalendarPopover({ viewMode, setViewMode, selectedDate, s
                 className="h-9 capitalize font-medium flex items-center justify-center gap-2"
                 onClick={() => {
                   setViewMode(mode);
-                  if (onClose) onClose();
+                  // If selecting custom range, keep the popover open so user can pick start/end dates.
+                  if (mode !== 'custom' && onClose) onClose();
                 }}
               >
                 {mode.charAt(0).toUpperCase() + mode.slice(1)}
@@ -95,29 +110,10 @@ export default function CalendarPopover({ viewMode, setViewMode, selectedDate, s
             </div>
           </div>
 
-          {/* View Mode Switcher */}
-          <div className="px-6 py-3 bg-gray-50/50 border-b flex items-center gap-3">
-            <span className="text-xs font-bold text-gray-400 uppercase tracking-widest mr-2">View:</span>
-            <div className="flex items-center bg-white rounded-lg p-1 border shadow-sm">
-              {modes.map((mode) => (
-                <Button
-                  key={mode}
-                  variant={viewMode === mode ? "brand" : "ghost"}
-                  size="sm"
-                  className={`h-8 px-4 capitalize font-bold text-xs ${viewMode === mode ? "" : "text-gray-500 hover:text-gray-900"}`}
-                  onClick={() => {
-                    setViewMode(mode);
-                    if (mode !== "custom" && onClose) onClose();
-                  }}
-                >
-                  {mode}
-                </Button>
-              ))}
-            </div>
-          </div>
+          {/* View Mode Switcher removed to avoid duplication with the main view mode controls */}
 
           {/* Calendar Content */}
-          <div className="p-4 flex justify-center bg-white">
+          <div ref={calendarRef} tabIndex={-1} className="p-4 flex justify-center bg-white">
             <Calendar
               mode="range"
               selected={dateRange}

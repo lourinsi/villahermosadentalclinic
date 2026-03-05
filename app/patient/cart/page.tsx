@@ -16,7 +16,7 @@ const CartPage = () => {
     const { user } = useAuth();
     const parentId = user?.patientId;
 
-    const { appointments, isLoading, refreshAppointments, deleteAppointment } = useAppointmentModal();
+    const { appointments, isLoading, refreshAppointments, deleteAppointment, openEditModal } = useAppointmentModal();
     const { openPatientPaymentFor } = usePaymentModal();
 
     // Use filters to fetch all appointments for this patient/family, including unpaid

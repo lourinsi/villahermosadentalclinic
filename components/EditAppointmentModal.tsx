@@ -1,18 +1,22 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { Avatar, AvatarImage, AvatarFallback } from "./ui/avatar";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { toast } from "sonner";
 import { Appointment } from "../hooks/useAppointments";
 import { useDoctors } from "../hooks/useDoctors";
 import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
-import { APPOINTMENT_TYPES } from "../lib/appointment-types";
+import { APPOINTMENT_TYPES, getAppointmentPrice } from "../lib/appointment-types";
+import { usePaymentModal } from "@/hooks/usePaymentModal";
+
+type EditAppointmentModalProps = any;
 
 interface PatientOption {
   id: string;
@@ -21,7 +25,7 @@ interface PatientOption {
   phone?: string;
 }
 
-export function EditAppointmentModal() {
+export function EditAppointmentModal(props: EditAppointmentModalProps) {
   const { 
     isEditModalOpen, 
     closeEditModal, 
@@ -31,6 +35,7 @@ export function EditAppointmentModal() {
     refreshAppointments,
     isPatientFieldReadOnly
   } = useAppointmentModal();
+  const { openPaymentModal } = usePaymentModal();
   const [dateAppointments, setDateAppointments] = useState<Appointment[]>([]);
 
   const [form, setForm] = useState<Partial<Appointment>>({});
@@ -199,6 +204,37 @@ export function EditAppointmentModal() {
       return;
     }
 
+    // If this modal is opened in patient-readonly mode we allow updating date, time and notes only
+    if (isPatientFieldReadOnly) {
+      // Basic validation for patient edits: date and time are required
+      if (!form.date || !form.time) {
+        toast.error("Please select a valid date and time.");
+        return;
+      }
+
+      setIsLoading(true);
+      try {
+        const updatedFields: Partial<Appointment> = {
+          date: form.date,
+          time: form.time,
+          notes: form.notes,
+        };
+
+        if (form.duration) updatedFields.duration = form.duration;
+
+        await updateAppointment(appointment.id, updatedFields as Partial<Appointment>);
+        toast.success("Appointment updated");
+        refreshAppointments();
+        closeEditModal();
+      } catch (err) {
+        console.error("Error updating appointment (patient):", err);
+        toast.error("Failed to update appointment");
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+
     if (form.type == null || form.type < 0) {
       toast.error("Please select an appointment type.");
       return;
@@ -335,6 +371,20 @@ export function EditAppointmentModal() {
     }
   };
 
+  // call the payment modal hook unconditionally to preserve hooks order
+  const pmAny: any = usePaymentModal() as any || {};
+  const paymentOpener = pmAny?.openPaymentModal || pmAny?.open || pmAny?.openPayment || (() => {});
+
+  // computed balance should be derived from price - discount - totalPaid
+  const computedBalance = useMemo(() => {
+    if (!appointment) return 0;
+    const price = Number(appointment.price || 0);
+    const discount = Number(appointment.discount || 0);
+    const paid = Number(appointment.totalPaid || 0);
+    const bal = price - discount - paid;
+    return bal > 0 ? bal : 0;
+  }, [appointment?.price, appointment?.discount, appointment?.totalPaid]);
+
   return (
     <>
     <Dialog open={isEditModalOpen} onOpenChange={closeEditModal}>
@@ -347,8 +397,56 @@ export function EditAppointmentModal() {
           <div className="space-y-2">
             <Label>Patient</Label>
             {isPatientFieldReadOnly && form.patientName ? (
-              <div className="bg-gray-100 p-2 rounded-lg border border-gray-200">
-                <div className="text-sm font-medium text-gray-800">{form.patientName}</div>
+              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 space-y-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Avatar className="h-10 w-10">
+                      {(() => {
+                        const doc = doctors.find(d => String(d.name) === String(form.doctor) || String(d.id) === String(form.doctor));
+                        const src = doc?.profilePicture || form.doctorProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${form.doctor ?? form.patientName}`;
+                        return <AvatarImage src={src} alt={String(form.doctor || form.patientName || '')} />;
+                      })()}
+                      <AvatarFallback>{String(form.patientName || '').substring(0,2).toUpperCase()}</AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold truncate">{form.patientName}</div>
+                      <div className="text-xs text-muted-foreground truncate">{form.doctor}</div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm text-muted-foreground">Price</div>
+                    {(() => {
+                      const price = Number(form.price ?? 0);
+                      const discount = Number((form.discount as number) || 0);
+                      const discounted = Math.max(0, price - discount);
+                      return (
+                        <div>
+                          <div className="text-lg font-bold">₱{discounted.toFixed(2)}</div>
+                          {discount > 0 && (
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              <span className="line-through">₱{price.toFixed(2)}</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4 pt-4 border-t border-gray-100">
+                  <div>
+                    <div className="text-xs text-muted-foreground">Duration</div>
+                    <div className="text-sm font-medium">{form.duration ? `${form.duration} mins` : '-'}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Status</div>
+                    <div className="text-sm font-medium capitalize">{form.status || '-'}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Balance</div>
+                    <div className="text-sm font-medium text-red-600">₱{Number(form.balance ?? 0).toFixed(2)}</div>
+                  </div>
+                </div>
               </div>
             ) : (
             <Select
@@ -442,6 +540,7 @@ export function EditAppointmentModal() {
           )}
 
           <div className="grid grid-cols-2 gap-4">
+            {/* Date and Time should be editable for patients; other fields remain read-only to avoid redundancy. */}
             <div className="space-y-2">
               <Label>Date</Label>
               <Input type="date" value={form.date || ''} onChange={(e) => setForm(prev => ({ ...prev, date: e.target.value }))} />
@@ -481,7 +580,8 @@ export function EditAppointmentModal() {
                 value={form.type != null ? form.type.toString() : "-1"} 
                 onValueChange={(v) => {
                   const typeIndex = parseInt(v);
-                  setForm(prev => ({ ...prev, type: typeIndex, customType: "" }));
+                  const price = getAppointmentPrice(typeIndex);
+                  setForm(prev => ({ ...prev, type: typeIndex, customType: "", price }));
                   setShowCustomTypeInput(typeIndex === APPOINTMENT_TYPES.length - 1);
                 }}
               >
@@ -496,7 +596,7 @@ export function EditAppointmentModal() {
               </Select>
             </div>
 
-            {showCustomTypeInput && (
+            {showCustomTypeInput && !isPatientFieldReadOnly && (
               <div className="space-y-2 col-span-2">
                 <Label htmlFor="customType">Please Specify</Label>
                 <Input
@@ -509,102 +609,137 @@ export function EditAppointmentModal() {
               </div>
             )}
 
-            <div className="space-y-2">
-              <Label htmlFor="price">Price ($)</Label>
-              <Input
-                id="price"
-                type="number"
-                value={form.price !== undefined ? form.price : ""}
-                onChange={(e) => setForm(prev => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
-                min="0"
-                step="0.01"
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Duration (minutes)</Label>
-              <Select 
-                value={String(form.duration || 60)} 
-                onValueChange={(v) => setForm(prev => ({ ...prev, duration: parseInt(v) }))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Duration" />
-                </SelectTrigger>
-                <SelectContent>
-                  {[30, 60, 90, 120].map((mins) => {
-                    const busy = form.time ? isSlotBusy(form.time, mins) : false;
-                    return (
-                      <SelectItem key={mins} value={String(mins)} disabled={busy}>
-                        {mins >= 60 ? `${mins / 60} hour${mins / 60 > 1 ? 's' : ''}` : `${mins} mins`} {busy && "(Conflict)"}
-                      </SelectItem>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
-            </div>
+            {!isPatientFieldReadOnly && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="price">Price ($)</Label>
+                  <Input
+                    id="price"
+                    type="number"
+                    value={form.price !== undefined ? form.price : ""}
+                    onChange={(e) => {
+                      const p = parseFloat(e.target.value) || 0;
+                      setForm(prev => ({ ...prev, price: p, balance: Math.max(0, p - ((prev.discount as number) || 0) - (prev.totalPaid || 0)) }));
+                    }}
+                    min="0"
+                    step="0.01"
+                    required
+                  />
+
+                  <Label htmlFor="discount">Discount ($)</Label>
+                  <Input
+                    id="discount"
+                    type="number"
+                    value={(form.discount as number) || 0}
+                    onChange={(e) => {
+                      const d = parseFloat(e.target.value) || 0;
+                      setForm(prev => ({ ...prev, discount: d, balance: Math.max(0, (prev.price || 0) - d - (prev.totalPaid || 0)) }));
+                    }}
+                    min="0"
+                    step="0.01"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Duration (minutes)</Label>
+                  <Select 
+                    value={String(form.duration || 60)} 
+                    onValueChange={(v) => setForm(prev => ({ ...prev, duration: parseInt(v) }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Duration" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[30, 60, 90, 120].map((mins) => {
+                        const busy = form.time ? isSlotBusy(form.time, mins) : false;
+                        return (
+                          <SelectItem key={mins} value={String(mins)} disabled={busy}>
+                            {mins >= 60 ? `${mins / 60} hour${mins / 60 > 1 ? 's' : ''}` : `${mins} mins`} {busy && "(Conflict)"}
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
+            )}
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Doctor</Label>
-              <Select
-                value={String(form.doctor || '')}
-                onValueChange={(v) => setForm(prev => ({ ...prev, doctor: v }))}
-                disabled={isLoadingDoctors}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={isLoadingDoctors ? "Loading doctors..." : doctors.length === 0 ? "No doctors available" : "Doctor"} />
-                </SelectTrigger>
-                <SelectContent>
-                  {isLoadingDoctors ? (
-                    <div className="p-2 text-sm text-gray-500">Loading doctors...</div>
-                  ) : doctors.length > 0 ? (
-                    doctors.map((doctor) => (
-                      <SelectItem key={doctor.id} value={doctor.name}>
-                        {doctor.name}
-                      </SelectItem>
-                    ))
-                  ) : (
-                    <div className="p-2 text-sm text-gray-500">No doctors available</div>
-                  )}
-                  {!isLoadingDoctors && form.doctor && !doctors.some((doctor) => doctor.name === form.doctor) ? (
-                    <SelectItem value={String(form.doctor)}>{form.doctor}</SelectItem>
-                  ) : null}
-                </SelectContent>
-              </Select>
+          {!isPatientFieldReadOnly && (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Doctor</Label>
+                <Select
+                  value={String(form.doctor || '')}
+                  onValueChange={(v) => setForm(prev => ({ ...prev, doctor: v }))}
+                  disabled={isLoadingDoctors}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={isLoadingDoctors ? "Loading doctors..." : doctors.length === 0 ? "No doctors available" : "Doctor"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {isLoadingDoctors ? (
+                      <div className="p-2 text-sm text-gray-500">Loading doctors...</div>
+                    ) : doctors.length > 0 ? (
+                      doctors.map((doctor) => (
+                        <SelectItem key={doctor.id} value={doctor.name}>
+                          {doctor.name}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <div className="p-2 text-sm text-gray-500">No doctors available</div>
+                    )}
+                    {!isLoadingDoctors && form.doctor && !doctors.some((doctor) => doctor.name === form.doctor) ? (
+                      <SelectItem value={String(form.doctor)}>{form.doctor}</SelectItem>
+                    ) : null}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Status</Label>
+                <Select value={String(form.status || 'scheduled')} onValueChange={(v) => setForm(prev => ({ ...prev, status: v as Appointment["status"] }))}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="scheduled">Scheduled</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="tentative">Tentative</SelectItem>
+                    <SelectItem value="To Pay">To Pay</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
+                    <SelectItem value="cancelled">Cancelled</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label>Status</Label>
-              <Select value={String(form.status || 'scheduled')} onValueChange={(v) => setForm(prev => ({ ...prev, status: v as Appointment["status"] }))}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="scheduled">Scheduled</SelectItem>
-                  <SelectItem value="confirmed">Confirmed</SelectItem>
-                  <SelectItem value="pending">Pending</SelectItem>
-                  <SelectItem value="tentative">Tentative</SelectItem>
-                  <SelectItem value="To Pay">To Pay</SelectItem>
-                  <SelectItem value="completed">Completed</SelectItem>
-                  <SelectItem value="cancelled">Cancelled</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+          )}
 
           <div className="space-y-2">
             <Label>Notes</Label>
+            {/* Notes are editable for both staff and patient mode (patients can save only notes) */}
             <Textarea value={form.notes || ''} onChange={(e) => setForm(prev => ({ ...prev, notes: e.target.value }))} />
           </div>
 
-          <div className="flex justify-end space-x-2">
-            <Button variant="outline" onClick={() => closeEditModal()} disabled={isLoading}>Cancel</Button>
-            <Button variant="secondary" onClick={handleDelete} disabled={isLoading}>
-              {isLoading ? "Deleting..." : "Delete"}
-            </Button>
-            <Button variant="brand" onClick={handleSave} disabled={isLoading}>
-              {isLoading ? "Saving..." : "Save"}
-            </Button>
+            <div className="modal-footer">
+            <div className="flex justify-end items-center gap-3 mt-4">
+              {isPatientFieldReadOnly ? (
+                <div className="flex items-center gap-3">
+                  <Button variant="outline" onClick={closeEditModal} disabled={isLoading}>Close</Button>
+                  <Button onClick={handleSave} className="bg-purple-600 text-white" disabled={isLoading}>
+                    {isLoading ? "Saving..." : "Save"}
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <Button variant="outline" onClick={closeEditModal} disabled={isLoading}>Cancel</Button>
+                  <Button variant="destructive" onClick={handleDelete} disabled={isLoading}>
+                    {isLoading ? "Deleting..." : "Delete"}
+                  </Button>
+                  <Button onClick={handleSave} className="bg-purple-600 text-white" disabled={isLoading}>
+                    {isLoading ? "Saving..." : "Save"}
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </DialogContent>

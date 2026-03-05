@@ -12,11 +12,12 @@ export interface Appointment {
   type: number;
   customType?: string;
   price?: number;
+  discount?: number;
   doctor: string;
   duration?: number;
   notes: string;
   serviceType?: string;
-  status: "scheduled" | "confirmed" | "pending" | "tentative" | "completed" | "cancelled" | "To Pay";
+  status: "scheduled" | "pending" | "tentative" | "completed" | "cancelled" | "To Pay";
   paymentStatus?: "paid" | "unpaid" | "overdue" | "half-paid";
   balance?: number;
   totalPaid?: number;
