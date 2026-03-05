@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth.tsx";
 import { Button } from "@/components/ui/button";
-import { LogOut, User, LayoutDashboard, Users, Calendar, CreditCard, Shield, Settings, Bell, ClipboardList } from "lucide-react";
+import { LogOut, User, LayoutDashboard, Users, Calendar, CreditCard, Shield, Settings, Bell, ClipboardList, Stethoscope } from "lucide-react";
 import { toast } from "sonner";
 import { NotificationsOpened } from "./notificationsOpened";
 import { useNotifications } from "@/hooks/useNotifications";
@@ -48,7 +48,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
     { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/admin/requests", label: "Requests", icon: ClipboardList },
     { href: "/admin/patients", label: "Patients", icon: Users },
-    // { href: "/admin/doctors", label: "Find Doctors", icon: Search },
+    { href: "/admin/find-doctors", label: "Find Doctors", icon: Stethoscope },
     { href: "/admin/calendar", label: "Calendar", icon: Calendar },
     { href: "/admin/finance", label: "Finance", icon: CreditCard },
     { href: "/admin/staff", label: "Staff", icon: Shield },
