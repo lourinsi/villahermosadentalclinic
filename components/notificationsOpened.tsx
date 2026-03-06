@@ -111,8 +111,10 @@ export function NotificationsOpened({
       return undefined;
     })();
 
+    // if the appointment already has a final status we don't want the item to look clickable
+    const itemClasses = `group relative p-2 flex gap-3 hover:bg-gray-100 transition-colors rounded-lg ${isActionTaken ? '' : 'cursor-pointer'} ${!n.isRead ? 'bg-violet-50/40' : ''}`;
     return (
-      <div key={n.id} className={`group relative p-2 flex gap-3 hover:bg-gray-100 transition-colors rounded-lg cursor-pointer ${!n.isRead ? 'bg-violet-50/40' : ''}`}>
+      <div key={n.id} className={itemClasses}>
         <div className="relative flex-shrink-0">
           <Avatar className="h-12 w-12 border border-gray-100">
             {avatarSrc ? (
@@ -145,12 +147,14 @@ export function NotificationsOpened({
                   disabled={isActionTaken}
                   className={`h-7 flex-1 text-[10px] font-semibold rounded-md ${
                     n.metadata?.currentStatus === 'scheduled'
-                      ? "bg-emerald-600 hover:bg-emerald-700 text-white disabled:bg-emerald-200"
+                      ? "bg-emerald-600 hover:bg-emerald-700 text-white disabled:bg-emerald-600 disabled:text-white disabled:cursor-not-allowed"
                       : "bg-violet-600 hover:bg-violet-700 text-white disabled:bg-violet-200"
                   }`}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onUpdateAppointmentStatus(n.metadata!.appointmentId!, 'scheduled', n.id);
+                    if (!isActionTaken) {
+                      onUpdateAppointmentStatus(n.metadata!.appointmentId!, 'scheduled', n.id);
+                    }
                   }}
                 >
                   {n.metadata?.currentStatus === 'scheduled' ? 'Accepted' : 'Accept'}
@@ -159,10 +163,16 @@ export function NotificationsOpened({
                   size="sm" 
                   variant="secondary"
                   disabled={isActionTaken}
-                  className="h-7 flex-1 bg-gray-200 hover:bg-gray-300 text-gray-900 text-[10px] font-semibold rounded-md disabled:bg-gray-100 disabled:text-gray-400"
+                  className={`h-7 flex-1 text-[10px] font-semibold rounded-md ${
+                    n.metadata?.currentStatus === 'cancelled'
+                      ? "bg-red-600 hover:bg-red-700 text-white disabled:bg-red-600 disabled:text-white disabled:cursor-not-allowed"
+                      : "bg-gray-200 hover:bg-gray-300 text-gray-900 disabled:bg-gray-100 disabled:text-gray-400"
+                  }`}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onUpdateAppointmentStatus(n.metadata!.appointmentId!, 'cancelled', n.id);
+                    if (!isActionTaken) {
+                      onUpdateAppointmentStatus(n.metadata!.appointmentId!, 'cancelled', n.id);
+                    }
                   }}
                 >
                   {n.metadata?.currentStatus === 'cancelled' ? 'Declined' : 'Decline'}

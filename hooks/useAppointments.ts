@@ -17,7 +17,8 @@ export interface Appointment {
   duration?: number;
   notes: string;
   serviceType?: string;
-  status: "scheduled" | "pending" | "tentative" | "completed" | "cancelled" | "To Pay";
+  // 'confirmed' is used interchangeably with 'scheduled' in some workflows
+  status: "scheduled" | "confirmed" | "pending" | "tentative" | "completed" | "cancelled" | "To Pay";
   paymentStatus?: "paid" | "unpaid" | "overdue" | "half-paid";
   balance?: number;
   totalPaid?: number;
@@ -25,6 +26,7 @@ export interface Appointment {
   doctorProfile?: string;
   transactions?: RecentTransaction[];
   createdAt?: string;
+  updatedAt?: string;
 }
 
 const API_URL = "http://localhost:3001/api/appointments";

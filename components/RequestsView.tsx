@@ -19,7 +19,10 @@ import {
   Calendar as CalendarIcon,
   History,
   Filter,
-  RotateCcw
+  RotateCcw,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown
 } from "lucide-react";
 import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
@@ -58,12 +61,17 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   // Pending filters state
   const [pendingSearchTerm, setPendingSearchTerm] = useState("");
   const [pendingStatusFilter, setPendingStatusFilter] = useState("all");
+  const [pendingDoctorFilter, setPendingDoctorFilter] = useState("all");
   const [pendingDateFilter, setPendingDateFilter] = useState("");
+  const [pendingSortColumn, setPendingSortColumn] = useState<string | null>(null);
+  const [pendingSortDirection, setPendingSortDirection] = useState<"asc" | "desc">("asc");
 
   // History filters state
   const [historySearchTerm, setHistorySearchTerm] = useState("");
   const [historyStatusFilter, setHistoryStatusFilter] = useState("all");
   const [historyDateFilter, setHistoryDateFilter] = useState("");
+  const [historySortColumn, setHistorySortColumn] = useState<string | null>(null);
+  const [historySortDirection, setHistorySortDirection] = useState<"asc" | "desc">("asc");
   
   // Confirmation dialog state
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
@@ -86,6 +94,11 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       if (pendingStatusFilter !== "all" && apt.status !== pendingStatusFilter) {
         return false;
       }
+
+      // Doctor filter
+      if (pendingDoctorFilter !== "all" && apt.doctor !== pendingDoctorFilter) {
+        return false;
+      }
       
       // Date filter
       if (pendingDateFilter && apt.date !== pendingDateFilter) {
@@ -94,7 +107,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
 
       return true;
     });
-  }, [appointments, doctorFilter, pendingSearchTerm, pendingStatusFilter, pendingDateFilter]);
+  }, [appointments, doctorFilter, pendingSearchTerm, pendingStatusFilter, pendingDoctorFilter, pendingDateFilter]);
 
   const history = useMemo(() => {
     return appointments
@@ -190,6 +203,112 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     }
   };
 
+  const handlePendingSort = (column: string) => {
+    if (pendingSortColumn === column) {
+      setPendingSortDirection(pendingSortDirection === "asc" ? "desc" : "asc");
+    } else {
+      setPendingSortColumn(column);
+      setPendingSortDirection("asc");
+    }
+  };
+
+  const handleHistorySort = (column: string) => {
+    if (historySortColumn === column) {
+      setHistorySortDirection(historySortDirection === "asc" ? "desc" : "asc");
+    } else {
+      setHistorySortColumn(column);
+      setHistorySortDirection("asc");
+    }
+  };
+
+  const getSortIcon = (column: string, isPending: boolean) => {
+    const currentColumn = isPending ? pendingSortColumn : historySortColumn;
+    const currentDirection = isPending ? pendingSortDirection : historySortDirection;
+    
+    if (currentColumn === column) {
+      return currentDirection === "asc" ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />;
+    }
+    return <ArrowUpDown className="h-4 w-4 opacity-40" />;
+  };
+
+  const sortedRequests = useMemo(() => {
+    const sorted = [...requests];
+    if (pendingSortColumn) {
+      sorted.sort((a, b) => {
+        let aVal, bVal;
+        
+        switch (pendingSortColumn) {
+          case "date":
+            aVal = new Date(`${a.date}T${a.time}`).getTime();
+            bVal = new Date(`${b.date}T${b.time}`).getTime();
+            break;
+          case "patient":
+            aVal = a.patientName.toLowerCase();
+            bVal = b.patientName.toLowerCase();
+            break;
+          case "service":
+            aVal = getAppointmentTypeName(a.type, a.customType).toLowerCase();
+            bVal = getAppointmentTypeName(b.type, b.customType).toLowerCase();
+            break;
+          case "doctor":
+            aVal = a.doctor.toLowerCase();
+            bVal = b.doctor.toLowerCase();
+            break;
+          case "status":
+            aVal = a.status.toLowerCase();
+            bVal = b.status.toLowerCase();
+            break;
+          case "booked":
+            aVal = new Date(a.createdAt || 0).getTime();
+            bVal = new Date(b.createdAt || 0).getTime();
+            break;
+          case "updated":
+            aVal = new Date(a.updatedAt || 0).getTime();
+            bVal = new Date(b.updatedAt || 0).getTime();
+            break;
+          default:
+            return 0;
+        }
+        
+        if (aVal < bVal) return pendingSortDirection === "asc" ? -1 : 1;
+        if (aVal > bVal) return pendingSortDirection === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+    return sorted;
+  }, [requests, pendingSortColumn, pendingSortDirection]);
+
+  const sortedHistory = useMemo(() => {
+    const sorted = [...history];
+    if (historySortColumn) {
+      sorted.sort((a, b) => {
+        let aVal, bVal;
+        
+        switch (historySortColumn) {
+          case "patient":
+            aVal = a.patientName.toLowerCase();
+            bVal = b.patientName.toLowerCase();
+            break;
+          case "service":
+            aVal = getAppointmentTypeName(a.type, a.customType).toLowerCase();
+            bVal = getAppointmentTypeName(b.type, b.customType).toLowerCase();
+            break;
+          case "status":
+            aVal = a.status.toLowerCase();
+            bVal = b.status.toLowerCase();
+            break;
+          default:
+            return 0;
+        }
+        
+        if (aVal < bVal) return historySortDirection === "asc" ? -1 : 1;
+        if (aVal > bVal) return historySortDirection === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+    return sorted;
+  }, [history, historySortColumn, historySortDirection]);
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -240,15 +359,6 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                       onChange={(e) => setPendingSearchTerm(e.target.value)}
                     />
                   </div>
-                  <div className="relative">
-                    <CalendarIcon className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500 z-10" />
-                    <Input
-                      type="date"
-                      className="pl-9 w-[180px]"
-                      value={pendingDateFilter}
-                      onChange={(e) => setPendingDateFilter(e.target.value)}
-                    />
-                  </div>
                   <Select value={pendingStatusFilter} onValueChange={setPendingStatusFilter}>
                     <SelectTrigger className="w-[150px]">
                       <Filter className="h-4 w-4 mr-2 text-gray-500" />
@@ -261,12 +371,27 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                       <SelectItem value="To Pay">To Pay</SelectItem>
                     </SelectContent>
                   </Select>
+                  {!doctorFilter && (
+                    <Select value={pendingDoctorFilter} onValueChange={setPendingDoctorFilter}>
+                      <SelectTrigger className="w-[150px]">
+                        <Filter className="h-4 w-4 mr-2 text-gray-500" />
+                        <SelectValue placeholder="Doctor" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Doctors</SelectItem>
+                        {Array.from(new Set(appointments.map(apt => apt.doctor))).map(doctor => (
+                          <SelectItem key={doctor} value={doctor}>{doctor}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                   <Button 
                     variant="outline" 
                     size="icon" 
                     onClick={() => {
                       setPendingSearchTerm("");
                       setPendingStatusFilter("all");
+                      setPendingDoctorFilter("all");
                       setPendingDateFilter("");
                     }}
                     title="Reset Filters"
@@ -280,19 +405,58 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="pl-6">Date & Time</TableHead>
-                    <TableHead>Patient</TableHead>
-                    <TableHead>Service</TableHead>
-                    {!doctorFilter && <TableHead>Doctor</TableHead>}
-                    <TableHead>Status</TableHead>
+                    <TableHead className="cursor-pointer hover:bg-gray-100 pl-6" onClick={() => handlePendingSort("date")}>
+                      <div className="flex items-center gap-2">
+                        Date & Time
+                        {getSortIcon("date", true)}
+                      </div>
+                    </TableHead>
+                    <TableHead className="cursor-pointer hover:bg-gray-100" onClick={() => handlePendingSort("patient")}>
+                      <div className="flex items-center gap-2">
+                        Patient
+                        {getSortIcon("patient", true)}
+                      </div>
+                    </TableHead>
+                    <TableHead className="cursor-pointer hover:bg-gray-100" onClick={() => handlePendingSort("service")}>
+                      <div className="flex items-center gap-2">
+                        Service
+                        {getSortIcon("service", true)}
+                      </div>
+                    </TableHead>
+                    {!doctorFilter && (
+                      <TableHead className="cursor-pointer hover:bg-gray-100" onClick={() => handlePendingSort("doctor")}>
+                        <div className="flex items-center gap-2">
+                          Doctor
+                          {getSortIcon("doctor", true)}
+                        </div>
+                      </TableHead>
+                    )}
+                    <TableHead className="cursor-pointer hover:bg-gray-100" onClick={() => handlePendingSort("status")}>
+                      <div className="flex items-center gap-2">
+                        Status
+                        {getSortIcon("status", true)}
+                      </div>
+                    </TableHead>
                     <TableHead>Payment</TableHead>
+                    <TableHead className="cursor-pointer hover:bg-gray-100" onClick={() => handlePendingSort("booked")}>
+                      <div className="flex items-center gap-2">
+                        Booked on
+                        {getSortIcon("booked", true)}
+                      </div>
+                    </TableHead>
+                    <TableHead className="cursor-pointer hover:bg-gray-100" onClick={() => handlePendingSort("updated")}>
+                      <div className="flex items-center gap-2">
+                        Last updated
+                        {getSortIcon("updated", true)}
+                      </div>
+                    </TableHead>
                     <TableHead className="text-right pr-6">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={doctorFilter ? 6 : 7} className="text-center py-12 text-muted-foreground">
+                      <TableCell colSpan={doctorFilter ? 8 : 9} className="text-center py-12 text-muted-foreground">
                         <div className="flex flex-col items-center gap-2">
                           <div className="h-8 w-8 animate-spin rounded-full border-2 border-violet-600 border-t-transparent" />
                           Loading requests...
@@ -301,7 +465,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     </TableRow>
                   ) : requests.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={doctorFilter ? 6 : 7} className="text-center py-12 text-muted-foreground">
+                      <TableCell colSpan={doctorFilter ? 7 : 8} className="text-center py-12 text-muted-foreground">
                         <div className="flex flex-col items-center gap-2">
                           <Clock className="h-8 w-8 text-gray-300" />
                           No requests found matching your filters.
@@ -309,7 +473,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    requests.map((request) => (
+                    sortedRequests.map((request) => (
                       <TableRow key={request.id}>
                         <TableCell className="pl-6">
                           <div className="font-medium">
@@ -339,6 +503,20 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           ) : (
                             <span className="text-sm text-muted-foreground">Unpaid</span>
                           )}
+                        </TableCell>
+                        <TableCell>
+                          {request.createdAt ? new Date(request.createdAt).toLocaleDateString('en-US', { 
+                            year: 'numeric', 
+                            month: 'short', 
+                            day: 'numeric' 
+                          }) : "—"}
+                        </TableCell>
+                        <TableCell>
+                          {request.updatedAt ? new Date(request.updatedAt).toLocaleDateString('en-US', { 
+                            year: 'numeric', 
+                            month: 'short', 
+                            day: 'numeric' 
+                          }) : "—"}
                         </TableCell>
                         <TableCell className="text-right pr-6">
                           <div className="flex justify-end gap-2">

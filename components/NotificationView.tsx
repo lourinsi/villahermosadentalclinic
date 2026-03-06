@@ -121,8 +121,11 @@ export function NotificationView({
       return `https://api.dicebear.com/7.x/avataaars/svg?seed=${notification.metadata?.patientName || notification.title}`;
     })();
 
-    // Consider only completed/cancelled as final states; keep 'scheduled','half-paid','reserved' editable
-    const isActionTaken = ['cancelled', 'completed'].includes(status);
+    // Consider completed, cancelled, or already scheduled as final states; no actions permitted
+    const isActionTaken = ['cancelled', 'completed', 'scheduled'].includes(status);
+
+    // When an appointment is already finalized make the row non-clickable
+    const itemClasses = `group relative p-4 flex gap-3 transition-colors rounded-xl ${!notification.isRead ? 'bg-violet-50/40' : ''} ${isActionTaken ? '' : 'cursor-pointer hover:bg-gray-100'}`;
 
     // normalized sets for actionable statuses
     const acceptStatuses = new Set(['cancelled', 'pending', 'tentative', 'topay', 'reserved', 'halfpaid']);
@@ -131,7 +134,7 @@ export function NotificationView({
     return (
       <div 
         key={notification.id} 
-        className={`group relative p-4 flex gap-3 transition-colors hover:bg-gray-100 rounded-xl ${!notification.isRead ? 'bg-violet-50/40' : ''}`}
+        className={itemClasses}
       >
         <div className="relative flex-shrink-0">
           <Avatar className="h-14 w-14 border border-gray-100">
@@ -156,7 +159,7 @@ export function NotificationView({
           {notification.type === 'appointment' &&
            notification.metadata?.appointmentId &&
            portal !== 'patient' &&
-           (notification.metadata?.isRequest || !isActionTaken || onUpdateAppointmentStatus || onEditAppointment) && (
+           (notification.metadata?.isRequest || isActionTaken) && (
               <div className="mt-3 flex gap-2">
                 {onUpdateAppointmentStatus && (
                   <>
@@ -165,10 +168,14 @@ export function NotificationView({
                       disabled={isActionTaken}
                       className={`h-9 flex-1 font-semibold rounded-lg ${
                         status === 'scheduled'
-                          ? "bg-emerald-600 hover:bg-emerald-700 text-white disabled:bg-emerald-200"
+                          ? "bg-emerald-600 hover:bg-emerald-700 text-white disabled:bg-emerald-600 disabled:text-white disabled:cursor-not-allowed"
                           : "bg-violet-600 hover:bg-violet-700 text-white disabled:bg-violet-200"
                       }`}
-                      onClick={() => onUpdateAppointmentStatus(notification.metadata!.appointmentId!, 'scheduled', notification.id)}
+                      onClick={() => {
+                        if (!isActionTaken) {
+                          onUpdateAppointmentStatus(notification.metadata!.appointmentId!, 'scheduled', notification.id);
+                        }
+                      }}
                     >
                       {status === 'scheduled' ? 'Accepted' : 'Accept'}
                     </Button>
@@ -176,8 +183,16 @@ export function NotificationView({
                       size="sm" 
                       variant="secondary"
                       disabled={isActionTaken}
-                      className="h-9 flex-1 bg-gray-200 hover:bg-gray-300 text-gray-900 font-semibold rounded-lg disabled:bg-gray-100 disabled:text-gray-400"
-                      onClick={() => onUpdateAppointmentStatus(notification.metadata!.appointmentId!, 'cancelled', notification.id)}
+                      className={`h-9 flex-1 font-semibold rounded-lg ${
+                        status === 'cancelled'
+                          ? "bg-red-600 hover:bg-red-700 text-white disabled:bg-red-600 disabled:text-white disabled:cursor-not-allowed"
+                          : "bg-gray-200 hover:bg-gray-300 text-gray-900 disabled:bg-gray-100 disabled:text-gray-400"
+                      }`}
+                      onClick={() => {
+                        if (!isActionTaken) {
+                          onUpdateAppointmentStatus(notification.metadata!.appointmentId!, 'cancelled', notification.id);
+                        }
+                      }}
                     >
                       {status === 'cancelled' ? 'Declined' : 'Decline'}
                     </Button>

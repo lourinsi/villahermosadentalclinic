@@ -111,7 +111,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   
   const [isConfirmUnsavedChangesOpen, setIsConfirmUnsavedChangesOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const patientDetailsRef = useRef<{ save: () => Promise<boolean> } | null>(null);
+  const patientDetailsRef = useRef<{ save: () => Promise<boolean>; changedFields: Record<string, { old: any; new: any }> } | null>(null);
   const itemsPerPage = 10;
   const { openScheduleModal, openAddPatientModal, refreshPatients, refreshTrigger, appointments } = useAppointmentModal();
 
@@ -377,12 +377,11 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
               : "Manage patient information and appointments"}
           </p>
         </div>
-        {!doctorFilter && (
-          <Button variant="brand" onClick={handleAddPatient}>
-            <Plus className="h-4 w-4 mr-2" />
-            Add New Patient
-          </Button>
-        )}
+        {/* always allow adding a patient, even when filtered for a specific doctor */}
+        <Button variant="brand" onClick={handleAddPatient}>
+          <Plus className="h-4 w-4 mr-2" />
+          Add New Patient
+        </Button>
       </div>
 
       {/* Search and Filters */}
@@ -631,14 +630,37 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
       </Dialog>
 
       <AlertDialog open={isConfirmUnsavedChangesOpen} onOpenChange={setIsConfirmUnsavedChangesOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <AlertDialogHeader>
             <AlertDialogTitle>Unsaved Changes</AlertDialogTitle>
           </AlertDialogHeader>
-          <div className="py-4">
+          <div className="py-4 space-y-4">
             <p className="text-sm text-muted-foreground">
               You have unsaved changes. Do you want to save them before closing?
             </p>
+            
+            {/* Summary of changes */}
+            {Object.keys(patientDetailsRef.current?.changedFields || {}).length > 0 && (
+              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                <h4 className="text-sm font-semibold text-gray-900 mb-3">Summary of Changes:</h4>
+                <div className="space-y-2">
+                  {Object.entries(patientDetailsRef.current?.changedFields || {}).map(([field, { old, new: newVal }]) => (
+                    <div key={field} className="text-sm text-gray-700 flex items-start gap-3">
+                      <span className="font-medium min-w-fit">{field}:</span>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="line-through text-red-600">
+                          {String(old) || '(empty)'}
+                        </span>
+                        <span className="text-gray-400">→</span>
+                        <span className="font-medium text-green-600">
+                          {String(newVal) || '(empty)'}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
           <AlertDialogFooter>
             <Button variant="outline" onClick={handleDiscardAndClose}>
@@ -717,6 +739,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
 
 const PatientDetails = React.forwardRef<{
   save: () => Promise<boolean>;
+  changedFields: Record<string, { old: any; new: any }>;
 }, {
   patient: Patient;
   onDeletePatient: (p: Patient) => void;
@@ -767,6 +790,51 @@ const PatientDetails = React.forwardRef<{
   const [allTransactions, setAllTransactions] = useState<RecentTransaction[]>([]);
   const [mockAppointmentHistoryLocal, setMockAppointmentHistoryLocal] = useState<Appointment[]>([]);
   const [expandedTransactions, setExpandedTransactions] = useState<Set<string>>(new Set());
+
+  // Track the original loaded data (after server fetch) for accurate change detection
+  const [originalLoadedData, setOriginalLoadedData] = useState(formData);
+
+  // Compute changed fields for unsaved changes dialog
+  const changedFields = React.useMemo(() => {
+    const changes: Record<string, { old: any; new: any }> = {};
+    const fieldLabels: Record<string, string> = {
+      firstName: 'First Name',
+      lastName: 'Last Name',
+      email: 'Primary Email',
+      phone: 'Primary Phone',
+      alternateEmail: 'Alternate Email',
+      alternatePhone: 'Alternate Phone',
+      dateOfBirth: 'Date of Birth',
+      insurance: 'Insurance Provider',
+      balance: 'Balance',
+      status: 'Status',
+      createdAt: 'Created Date',
+      allergies: 'Allergies',
+      medicalHistory: 'Medical History',
+      treatmentPlan: 'Treatment Plan',
+      clinicalNotes: 'Clinical Notes',
+      address: 'Address',
+      city: 'City',
+      zipCode: 'ZIP Code',
+      emergencyContact: 'Emergency Contact',
+      emergencyPhone: 'Emergency Phone',
+      notes: 'Notes',
+    };
+
+    // Compare against the originally loaded data (from server), not the initial prop
+    Object.keys(fieldLabels).forEach((key) => {
+      const orig = originalLoadedData[key as keyof typeof originalLoadedData];
+      const current = formData[key as keyof typeof formData];
+      if (String(orig) !== String(current)) {
+        changes[fieldLabels[key]] = {
+          old: orig,
+          new: current,
+        };
+      }
+    });
+
+    return changes;
+  }, [formData, originalLoadedData]);
 
   // Local confirm dialog state for PatientDetails (prefixed to avoid collisions)
   const [pdIsConfirmOpen, setPdIsConfirmOpen] = useState(false);
@@ -912,6 +980,7 @@ const PatientDetails = React.forwardRef<{
 
   useImperativeHandle(ref, () => ({
     save: handleUpdatePatient,
+    changedFields,
   }));
 
   useEffect(() => {
@@ -933,7 +1002,7 @@ const PatientDetails = React.forwardRef<{
     // If patient has an id, fetch the full record from the server so we show all fields (not just the transformed list values)
     const loadFullPatient = async () => {
       if (!patient?.id) {
-        setFormData({
+        const initialData = {
           firstName: patient.firstName || patient.name?.split(' ')[0] || '',
           lastName: patient.lastName || patient.name?.split(' ').slice(1).join(' ') || '',
           email: patient.email || '',
@@ -956,7 +1025,9 @@ const PatientDetails = React.forwardRef<{
           emergencyPhone: patient.emergencyPhone || '',
           notes: patient.notes || '',
           dentalCharts: patient.dentalCharts || []
-        });
+        };
+        setFormData(initialData);
+        setOriginalLoadedData(initialData);
         return;
       }
 
@@ -965,7 +1036,7 @@ const PatientDetails = React.forwardRef<{
         const json = await res.json();
         if (json?.success && json.data) {
           const p = json.data;
-          setFormData({
+          const loadedData = {
             firstName: p.firstName || p.name?.split(' ')[0] || '',
             lastName: p.lastName || p.name?.split(' ').slice(1).join(' ') || '',
             email: p.email || '',
@@ -988,7 +1059,10 @@ const PatientDetails = React.forwardRef<{
             emergencyPhone: p.emergencyPhone || '',
             notes: p.notes || '',
             dentalCharts: p.dentalCharts || []
-          });
+          };
+          setFormData(loadedData);
+          // Update original loaded data to match what came from server
+          setOriginalLoadedData(loadedData);
         }
       } catch (err) {
         console.error("Failed to load full patient data:", err);
@@ -1170,6 +1244,8 @@ const PatientDetails = React.forwardRef<{
         toast.success("Patient updated successfully");
         refreshPatients();
         setIsModified(false);
+        // Update original data to current form data so no changes show until next edit
+        setOriginalLoadedData(formData);
         return true; // Indicate success
       } else {
         toast.error(result.message || "Failed to update patient");
