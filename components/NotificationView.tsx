@@ -51,6 +51,7 @@ export function NotificationView({
   onEditAppointment,
   portal = 'admin'
 }: NotificationViewProps) {
+  const { doctors } = useDoctors();
   const [filter, setFilter] = useState<'all' | 'unread' | 'appointment' | 'payment'>('all');
 
   const filteredNotifications = notifications
@@ -98,7 +99,6 @@ export function NotificationView({
   };
 
   const renderNotificationItem = (notification: Notification) => {
-    const { doctors } = useDoctors();
     // Normalize status to lowercase for consistent comparisons
     const statusRaw = (notification.metadata?.currentStatus || '').toString().toLowerCase();
     const status = statusRaw.replace(/[\s-]/g, ''); // e.g. 'half-paid' -> 'halfpaid', 'to pay' -> 'topay'

@@ -23,6 +23,7 @@ import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { toast } from "sonner";
 import { CheckCircle, DollarSign } from "lucide-react";
 import { Appointment } from "@/hooks/useAppointments";
+import { getAppointmentTypeName } from "../lib/appointment-types";
 
 export function RecordPaymentModal() {
   const {
@@ -130,8 +131,7 @@ export function RecordPaymentModal() {
                 <SelectContent>
                   {appointments.map((apt: Appointment) => (
                     <SelectItem key={apt.id} value={apt.id}>
-                      {apt.type} - {apt.date} (Balance: ₱
-                      {(
+                      {getAppointmentTypeName(apt.type, apt.customType)} - {apt.date}{apt.time ? ` ${apt.time}` : ""} (Balance: ₱{(
                         (apt.price || 0) - (apt.totalPaid || 0)
                       ).toFixed(2)})
                     </SelectItem>
@@ -147,7 +147,7 @@ export function RecordPaymentModal() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <div className="text-xs text-blue-700 font-medium mb-1">Appointment Type</div>
-                  <div className="text-sm font-semibold text-gray-900">{selectedApt?.type}</div>
+                  <div className="text-sm font-semibold text-gray-900">{selectedApt ? getAppointmentTypeName(selectedApt.type, selectedApt.customType) : ''}</div>
                 </div>
                 <div>
                   <div className="text-xs text-blue-700 font-medium mb-1">Appointment Date</div>

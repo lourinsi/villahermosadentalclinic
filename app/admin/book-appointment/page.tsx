@@ -260,9 +260,9 @@ const AdminBookAppointmentPage = () => {
 
     return (
       <div className="space-y-6">
-        {/* Calendar and Time Slots */}
-        <div className="grid grid-cols-1 md:grid-cols-2 bg-white rounded-xl overflow-hidden shadow-sm">
-          <div className="p-6 border-r border-gray-50">
+        {/* Calendar and Time Slots - improved styling */}
+        <div className="grid grid-cols-1 md:grid-cols-2 bg-transparent rounded-[2rem] overflow-hidden">
+          <div className="p-6 bg-white rounded-l-[1.5rem] border border-gray-50 shadow-sm">
             <DoctorCalendar
               selectedDate={selectedDate}
               onSelect={(date) => date && setSelectedDate(date)}
@@ -270,15 +270,15 @@ const AdminBookAppointmentPage = () => {
             />
           </div>
 
-          <div className="p-6 flex flex-col bg-gray-50/30 relative">
+          <div className="p-6 flex flex-col bg-white rounded-r-[1.5rem] border border-gray-50 shadow-sm">
             <div className="flex items-center justify-between mb-6">
-              <h3 className="font-bold text-gray-900 flex items-center gap-2">
+              <h3 className="font-extrabold text-lg text-gray-900 flex items-center gap-2 uppercase tracking-tight">
                 <Clock className="h-5 w-5 text-blue-600" />
                 {selectedDate.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
               </h3>
             </div>
 
-            <div className="flex-1 overflow-y-auto max-h-[450px] pr-2 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto max-h-[520px] pr-2 custom-scrollbar">
               {isPastDate ? (
                 <div className="h-full flex flex-col items-center justify-center py-20 text-center opacity-40">
                   <CalendarIcon className="h-12 w-12 text-gray-300 mb-4" />
@@ -297,23 +297,24 @@ const AdminBookAppointmentPage = () => {
                         }
                       }}
                       className={`
-                        group flex items-center justify-between p-3 rounded-xl border transition-all duration-200
+                        group flex items-center justify-between p-4 rounded-2xl border transition-all duration-200
                         ${slot.isAvailable
-                          ? "bg-white border-gray-100 hover:border-green-400 hover:shadow-md cursor-pointer"
-                          : "bg-gray-100 border-gray-200 opacity-60 cursor-not-allowed"}
+                          ? "bg-white border-gray-100 hover:border-emerald-400 hover:shadow-md cursor-pointer"
+                          : "bg-gray-50 border-gray-100 opacity-60 cursor-not-allowed"}
                       `}
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-4">
                         <div>
                           <p className={`font-bold text-sm ${slot.isAvailable ? "text-gray-900" : "text-gray-400"}`}>
                             {formatTimeTo12h(slot.time)}
                           </p>
                         </div>
+                        <div className="hidden md:block text-xs text-gray-500">{slot.isAvailable ? 'Available' : (slot.isTentative ? 'Reserved' : (slot.isBooked ? 'Booked' : 'Passed'))}</div>
                       </div>
 
                       <Badge
                         className={`
-                          font-bold px-2.5 py-0.5 text-[10px] uppercase
+                          font-bold px-3 py-1 text-[11px] uppercase rounded-full min-w-[64px] text-center
                           ${slot.isAvailable
                             ? "bg-emerald-600 text-white border-emerald-700"
                             : slot.isTentative
@@ -334,22 +335,22 @@ const AdminBookAppointmentPage = () => {
         </div>
 
         {/* Legend */}
-        <div className="flex items-center gap-6 mt-8 px-6 py-4 bg-white rounded-3xl shadow-sm border border-gray-100 w-fit">
+        <div className="flex items-center gap-6 mt-6 px-6 py-4 bg-white rounded-3xl shadow-sm border border-gray-100 w-fit">
           <div className="flex items-center gap-2">
             <div className="h-3 w-3 rounded-full bg-emerald-600" />
-            <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Open Slot</span>
+            <span className="text-[11px] font-black text-gray-500 uppercase tracking-wider">Open Slot</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="h-3 w-3 rounded-full bg-emerald-100 border border-emerald-200" />
-            <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Reserved Slot</span>
+            <span className="text-[11px] font-black text-gray-500 uppercase tracking-wider">Reserved Slot</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="h-3 w-3 rounded-full bg-emerald-700" />
-            <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Booked Slot</span>
+            <span className="text-[11px] font-black text-gray-500 uppercase tracking-wider">Booked Slot</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="h-3 w-3 rounded-full bg-gray-400" />
-            <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Passed Slot</span>
+            <span className="text-[11px] font-black text-gray-500 uppercase tracking-wider">Passed Slot</span>
           </div>
         </div>
       </div>
