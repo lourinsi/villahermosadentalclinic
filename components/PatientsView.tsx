@@ -36,7 +36,9 @@ import {
 } from "lucide-react";
 import { EditAppointmentModal } from "./EditAppointmentModal";
 import { EditPaymentModal } from "./EditPaymentModal";
+import ConfirmDialog from "./ConfirmDialog";
 import { Appointment } from "../hooks/useAppointments";
+import { RecentTransaction } from "../lib/finance-types";
 import { DentalChart } from "./DentalChart";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
@@ -81,6 +83,13 @@ interface PatientsViewProps {
   doctorFilter?: string; // When set, only show patients this doctor has seen
 }
 
+// Local history appointment shape (type can be string for display)
+interface HistoryAppointment extends Omit<Appointment, 'type' | 'date' | 'transactions'> {
+  type: string;
+  date: string;
+  transactions: RecentTransaction[];
+}
+
 export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -102,9 +111,16 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   
   const [isConfirmUnsavedChangesOpen, setIsConfirmUnsavedChangesOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const patientDetailsRef = useRef<{ save: () => Promise<boolean> } | null>(null);
+  const patientDetailsRef = useRef<{ save: () => Promise<boolean>; changedFields: Record<string, { old: any; new: any }> } | null>(null);
   const itemsPerPage = 10;
   const { openScheduleModal, openAddPatientModal, refreshPatients, refreshTrigger, appointments } = useAppointmentModal();
+
+  // Generic confirm dialog state (reusable across this component)
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const [confirmLoading, setConfirmLoading] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<null | (() => Promise<void>)>(null);
+  const [confirmTitle, setConfirmTitle] = useState<string>("");
+  const [confirmMessage, setConfirmMessage] = useState<string>("");
 
   // State to hold doctor's appointments (for filtering patients by doctor)
   const [doctorAppointments, setDoctorAppointments] = useState<Appointment[]>([]);
@@ -132,17 +148,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
     fetchDoctorAppointments();
   }, [doctorFilter, refreshTrigger]);
 
-  // Reset page when search or status changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm, statusFilter]);
-
-  // Fetch patients when page, search, status filter, or refresh trigger changes
-  useEffect(() => {
-    fetchPatients(currentPage);
-  }, [currentPage, searchTerm, statusFilter, refreshTrigger, appointments]);
-
-  const fetchPatients = async (page = 1) => {
+  const fetchPatients = React.useCallback(async (page = 1) => {
     // Add a timeout so the fetch can't hang indefinitely in the client
     const controller = new AbortController();
     const timeoutMs = 5000; // 5 seconds
@@ -219,10 +225,10 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
         setTotalPages(1);
         setTotalFiltered(0);
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error("Error fetching patients:", err);
       // If the request was aborted due to timeout, fall back to local mock data so the UI remains usable
-      if (err && err.name === 'AbortError') {
+      if (err instanceof Error && err.name === 'AbortError') {
         console.warn(`Patient fetch aborted after ${timeoutMs}ms; returning empty list.`);
         toast.error('Patient fetch timed out.');
         setPaginatedPatients([]);
@@ -240,7 +246,17 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
       clearTimeout(timeoutId);
       setIsLoading(false);
     }
-  };
+  }, [searchTerm, statusFilter, doctorFilter, doctorAppointments, appointments, itemsPerPage]);
+
+  // Reset page when search or status changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter]);
+
+  // Fetch patients when page, search, status filter, or refresh trigger changes
+  useEffect(() => {
+    fetchPatients(currentPage);
+  }, [currentPage, fetchPatients]);
 
   const getStatusBadge = (status: string | undefined) => {
     switch (status) {
@@ -361,12 +377,11 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
               : "Manage patient information and appointments"}
           </p>
         </div>
-        {!doctorFilter && (
-          <Button variant="brand" onClick={handleAddPatient}>
-            <Plus className="h-4 w-4 mr-2" />
-            Add New Patient
-          </Button>
-        )}
+        {/* always allow adding a patient, even when filtered for a specific doctor */}
+        <Button variant="brand" onClick={handleAddPatient}>
+          <Plus className="h-4 w-4 mr-2" />
+          Add New Patient
+        </Button>
       </div>
 
       {/* Search and Filters */}
@@ -615,14 +630,37 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
       </Dialog>
 
       <AlertDialog open={isConfirmUnsavedChangesOpen} onOpenChange={setIsConfirmUnsavedChangesOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <AlertDialogHeader>
             <AlertDialogTitle>Unsaved Changes</AlertDialogTitle>
           </AlertDialogHeader>
-          <div className="py-4">
+          <div className="py-4 space-y-4">
             <p className="text-sm text-muted-foreground">
               You have unsaved changes. Do you want to save them before closing?
             </p>
+            
+            {/* Summary of changes */}
+            {Object.keys(patientDetailsRef.current?.changedFields || {}).length > 0 && (
+              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                <h4 className="text-sm font-semibold text-gray-900 mb-3">Summary of Changes:</h4>
+                <div className="space-y-2">
+                  {Object.entries(patientDetailsRef.current?.changedFields || {}).map(([field, { old, new: newVal }]) => (
+                    <div key={field} className="text-sm text-gray-700 flex items-start gap-3">
+                      <span className="font-medium min-w-fit">{field}:</span>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="line-through text-red-600">
+                          {String(old) || '(empty)'}
+                        </span>
+                        <span className="text-gray-400">→</span>
+                        <span className="font-medium text-green-600">
+                          {String(newVal) || '(empty)'}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
           <AlertDialogFooter>
             <Button variant="outline" onClick={handleDiscardAndClose}>
@@ -701,6 +739,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
 
 const PatientDetails = React.forwardRef<{
   save: () => Promise<boolean>;
+  changedFields: Record<string, { old: any; new: any }>;
 }, {
   patient: Patient;
   onDeletePatient: (p: Patient) => void;
@@ -715,7 +754,7 @@ const PatientDetails = React.forwardRef<{
   doctorFilter
 }, ref) => {
   const { openEditModal, refreshPatients, appointments } = useAppointmentModal();
-  const { openPaymentModal, openEditPaymentModal } = usePaymentModal();
+  const { openPaymentModal, openEditPaymentModal, openPaymentFor } = usePaymentModal();
   const [formData, setFormData] = useState({
     firstName: patient.firstName || patient.name?.split(' ')[0] || '',
     lastName: patient.lastName || patient.name?.split(' ').slice(1).join(' ') || '',
@@ -748,9 +787,61 @@ const PatientDetails = React.forwardRef<{
   const [isLoadingFamily, setIsLoadingFamily] = useState(false);
 
   // Payment state and helpers (local to PatientDetails)
-  const [allTransactions, setAllTransactions] = useState<any[]>([]);
-  const [mockAppointmentHistoryLocal, setMockAppointmentHistoryLocal] = useState<any[]>([]);
+  const [allTransactions, setAllTransactions] = useState<RecentTransaction[]>([]);
+  const [mockAppointmentHistoryLocal, setMockAppointmentHistoryLocal] = useState<Appointment[]>([]);
   const [expandedTransactions, setExpandedTransactions] = useState<Set<string>>(new Set());
+
+  // Track the original loaded data (after server fetch) for accurate change detection
+  const [originalLoadedData, setOriginalLoadedData] = useState(formData);
+
+  // Compute changed fields for unsaved changes dialog
+  const changedFields = React.useMemo(() => {
+    const changes: Record<string, { old: any; new: any }> = {};
+    const fieldLabels: Record<string, string> = {
+      firstName: 'First Name',
+      lastName: 'Last Name',
+      email: 'Primary Email',
+      phone: 'Primary Phone',
+      alternateEmail: 'Alternate Email',
+      alternatePhone: 'Alternate Phone',
+      dateOfBirth: 'Date of Birth',
+      insurance: 'Insurance Provider',
+      balance: 'Balance',
+      status: 'Status',
+      createdAt: 'Created Date',
+      allergies: 'Allergies',
+      medicalHistory: 'Medical History',
+      treatmentPlan: 'Treatment Plan',
+      clinicalNotes: 'Clinical Notes',
+      address: 'Address',
+      city: 'City',
+      zipCode: 'ZIP Code',
+      emergencyContact: 'Emergency Contact',
+      emergencyPhone: 'Emergency Phone',
+      notes: 'Notes',
+    };
+
+    // Compare against the originally loaded data (from server), not the initial prop
+    Object.keys(fieldLabels).forEach((key) => {
+      const orig = originalLoadedData[key as keyof typeof originalLoadedData];
+      const current = formData[key as keyof typeof formData];
+      if (String(orig) !== String(current)) {
+        changes[fieldLabels[key]] = {
+          old: orig,
+          new: current,
+        };
+      }
+    });
+
+    return changes;
+  }, [formData, originalLoadedData]);
+
+  // Local confirm dialog state for PatientDetails (prefixed to avoid collisions)
+  const [pdIsConfirmOpen, setPdIsConfirmOpen] = useState(false);
+  const [pdConfirmLoading, setPdConfirmLoading] = useState(false);
+  const [pdConfirmAction, setPdConfirmAction] = useState<null | (() => Promise<void>)>(null);
+  const [pdConfirmTitle, setPdConfirmTitle] = useState<string>("");
+  const [pdConfirmMessage, setPdConfirmMessage] = useState<string>("");
 
   // New state for filters
   const [historyStatusFilter, setHistoryStatusFilter] = useState('all');
@@ -762,19 +853,29 @@ const PatientDetails = React.forwardRef<{
     return ['all', ...Array.from(doctors)];
   }, [mockAppointmentHistoryLocal]);
 
-  const uniqueProcedures = React.useMemo(() => {
-      const procedures = new Set(mockAppointmentHistoryLocal.map(apt => apt.type).filter(Boolean));
-      return ['all', ...Array.from(procedures)];
+  // Build a display-only history array (string `type`) derived from internal Appointment[]
+  const mappedHistory: HistoryAppointment[] = React.useMemo(() => {
+    return (mockAppointmentHistoryLocal || []).map((apt: Appointment) => ({
+      ...apt,
+      type: getAppointmentTypeName(apt.type as number, apt.customType) || String(apt.type || ''),
+      date: String(apt.date || ''),
+      transactions: apt.transactions || [],
+    } as HistoryAppointment));
   }, [mockAppointmentHistoryLocal]);
 
+  const uniqueProcedures = React.useMemo(() => {
+      const procedures = new Set(mappedHistory.map(apt => apt.type).filter(Boolean));
+      return ['all', ...Array.from(procedures) as string[]];
+  }, [mappedHistory]);
+
   const filteredHistory = React.useMemo(() => {
-    return mockAppointmentHistoryLocal.filter(apt => {
+    return mappedHistory.filter(apt => {
         if (historyStatusFilter !== 'all' && apt.paymentStatus !== historyStatusFilter) return false;
         if (historyDoctorFilter !== 'all' && apt.doctor !== historyDoctorFilter) return false;
-        if (historyProcedureFilter !== 'all' && apt.type !== historyProcedureFilter) return false;
+        if (historyProcedureFilter !== 'all' && String(apt.type) !== historyProcedureFilter) return false;
         return true;
     });
-  }, [mockAppointmentHistoryLocal, historyStatusFilter, historyDoctorFilter, historyProcedureFilter]);
+  }, [mappedHistory, historyStatusFilter, historyDoctorFilter, historyProcedureFilter]);
 
   // Filters for Payments tab
   const [paymentDoctorFilter, setPaymentDoctorFilter] = useState('all');
@@ -879,6 +980,7 @@ const PatientDetails = React.forwardRef<{
 
   useImperativeHandle(ref, () => ({
     save: handleUpdatePatient,
+    changedFields,
   }));
 
   useEffect(() => {
@@ -900,7 +1002,7 @@ const PatientDetails = React.forwardRef<{
     // If patient has an id, fetch the full record from the server so we show all fields (not just the transformed list values)
     const loadFullPatient = async () => {
       if (!patient?.id) {
-        setFormData({
+        const initialData = {
           firstName: patient.firstName || patient.name?.split(' ')[0] || '',
           lastName: patient.lastName || patient.name?.split(' ').slice(1).join(' ') || '',
           email: patient.email || '',
@@ -923,7 +1025,9 @@ const PatientDetails = React.forwardRef<{
           emergencyPhone: patient.emergencyPhone || '',
           notes: patient.notes || '',
           dentalCharts: patient.dentalCharts || []
-        });
+        };
+        setFormData(initialData);
+        setOriginalLoadedData(initialData);
         return;
       }
 
@@ -932,7 +1036,7 @@ const PatientDetails = React.forwardRef<{
         const json = await res.json();
         if (json?.success && json.data) {
           const p = json.data;
-          setFormData({
+          const loadedData = {
             firstName: p.firstName || p.name?.split(' ')[0] || '',
             lastName: p.lastName || p.name?.split(' ').slice(1).join(' ') || '',
             email: p.email || '',
@@ -955,7 +1059,10 @@ const PatientDetails = React.forwardRef<{
             emergencyPhone: p.emergencyPhone || '',
             notes: p.notes || '',
             dentalCharts: p.dentalCharts || []
-          });
+          };
+          setFormData(loadedData);
+          // Update original loaded data to match what came from server
+          setOriginalLoadedData(loadedData);
         }
       } catch (err) {
         console.error("Failed to load full patient data:", err);
@@ -1006,13 +1113,13 @@ const PatientDetails = React.forwardRef<{
 
     // Map patientAppointments into local appointment history shape used for payments
     useEffect(() => {
-      const mapped = patientAppointments.map((apt: Appointment, i: number) => {
+  const mapped: Appointment[] = patientAppointments.map((apt: Appointment, i: number) => {
         const id = apt.id || `apt-${i}`;
         const cost = (apt.price != null ? apt.price : 0);
-        const totalPaid = (apt as any).totalPaid != null ? (apt as any).totalPaid : 0;
-        const transactions = (apt as any).transactions ? (apt as any).transactions : [];
+        const totalPaid = apt.totalPaid != null ? apt.totalPaid : 0;
+        const transactions = apt.transactions ? apt.transactions : [];
         
-        let paymentStatus;
+        let paymentStatus: Appointment["paymentStatus"] | "over-paid";
         const oneWeekAgo = new Date();
         oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
         const aptDateStr = (apt.date || '').split(' ')[0];
@@ -1031,16 +1138,18 @@ const PatientDetails = React.forwardRef<{
         }
 
         return {
-          id,
-          date: apt.date + (apt.time ? ` ${apt.time}` : ''),
-          type: getAppointmentTypeName(apt.type, (apt as any).customType) || apt.type || 'Appointment',
-          doctor: apt.doctor || '',
-          notes: apt.notes || '',
-          cost,
-          totalPaid,
-          paymentStatus,
-          transactions: transactions as any[],
-        };
+            ...apt,
+            id,
+            date: apt.date + (apt.time ? ` ${apt.time}` : ''),
+            // keep internal type numeric if available
+            type: (typeof apt.type === 'number' ? apt.type : 0) as number,
+            doctor: apt.doctor || '',
+            notes: apt.notes || '',
+            price: cost,
+            totalPaid,
+            paymentStatus: paymentStatus as Appointment["paymentStatus"],
+            transactions: transactions,
+          } as Appointment;
       });
 
       setMockAppointmentHistoryLocal(mapped);
@@ -1053,14 +1162,14 @@ const PatientDetails = React.forwardRef<{
             if (json?.success && Array.isArray(json.data)) {
               const payments = json.data;
               // group payments by appointmentId and update appointment history
-              setMockAppointmentHistoryLocal((prev: any[]) => {
-                return prev.map((apt: any) => {
-                  const aptPayments = payments.filter((p: any) => p.appointmentId === apt.id);
+              setMockAppointmentHistoryLocal((prev: Appointment[]) => {
+                return prev.map((apt: Appointment) => {
+                  const aptPayments = payments.filter((p: RecentTransaction) => p.appointmentId === apt.id);
                   if (aptPayments.length > 0) {
-                    const totalPaid = aptPayments.reduce((s: number, p: any) => s + (p.amount || 0), 0);
+                    const totalPaid = aptPayments.reduce((s: number, p: RecentTransaction) => s + (p.amount || 0), 0);
                     const price = apt.price || 0;
                     
-                    let paymentStatus;
+                    let paymentStatus: Appointment["paymentStatus"] | "over-paid";
                     const oneWeekAgo = new Date();
                     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
                     const aptDateStr = (apt.date || '').split(' ')[0];
@@ -1082,8 +1191,8 @@ const PatientDetails = React.forwardRef<{
                       ...apt,
                       totalPaid,
                       transactions: aptPayments,
-                      paymentStatus,
-                    };
+                      paymentStatus: paymentStatus as Appointment["paymentStatus"],
+                    } as Appointment;
                   }
                   return apt;
                 });
@@ -1098,18 +1207,18 @@ const PatientDetails = React.forwardRef<{
     // transactions show immediately in the Payments tab without needing to add a new payment
     useEffect(() => {
       try {
-        const txns = (mockAppointmentHistoryLocal || []).flatMap((a: any) => (a.transactions || []).map((t: any) => ({
+        const txns = (mockAppointmentHistoryLocal || []).flatMap((a: Appointment) => (a.transactions || []).map((t: RecentTransaction) => ({
           ...t,
           appointmentId: a.id,
-          appointmentType: a.type,
+          appointmentType: String(a.type),
           appointmentDate: a.date,
           doctor: a.doctor,
         })));
 
         // dedupe by id
-        const deduped = Array.from(new Map(txns.map((t: any) => [t.id, t])).values());
+        const deduped = Array.from(new Map(txns.map((t: RecentTransaction) => [t.id, t])).values());
         // sort by date desc (newest first)
-        deduped.sort((x: any, y: any) => new Date(y.date).getTime() - new Date(x.date).getTime());
+        deduped.sort((x: RecentTransaction, y: RecentTransaction) => new Date(y.date).getTime() - new Date(x.date).getTime());
         setAllTransactions(deduped);
       } catch (e) {
         console.warn('[Payments] failed to populate transactions from history', e);
@@ -1135,6 +1244,8 @@ const PatientDetails = React.forwardRef<{
         toast.success("Patient updated successfully");
         refreshPatients();
         setIsModified(false);
+        // Update original data to current form data so no changes show until next edit
+        setOriginalLoadedData(formData);
         return true; // Indicate success
       } else {
         toast.error(result.message || "Failed to update patient");
@@ -1577,9 +1688,9 @@ const PatientDetails = React.forwardRef<{
                     </div>
                 ) : (
                   <div className="space-y-4">
-                    {filteredHistory.map((appointment: any, index: number) => {
-                      const sortedTransactions = Array.from(new Map((appointment.transactions || []).map((t: any) => [t.id, t])).values())
-                        .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                    {filteredHistory.map((appointment: HistoryAppointment, index: number) => {
+                      const sortedTransactions = Array.from(new Map((appointment.transactions || []).map((t: RecentTransaction) => [t.id, t])).values())
+                        .sort((a: RecentTransaction, b: RecentTransaction) => new Date(b.date).getTime() - new Date(a.date).getTime());
                       
                       const isExpanded = expandedTransactions.has(appointment.id);
                       const visibleTransactions = isExpanded ? sortedTransactions : sortedTransactions.slice(0, 1);
@@ -1593,7 +1704,7 @@ const PatientDetails = React.forwardRef<{
                                   <div className="font-medium text-base">{appointment.type}</div>
                                   <div className="text-muted-foreground">{appointment.date}</div>
                                 </div>
-                                {getPaymentStatusBadge(appointment.paymentStatus)}
+                                {getPaymentStatusBadge(String(appointment.paymentStatus || ''))}
                               </div>
                               <div className="text-sm">
                                 <div className="font-medium">{appointment.doctor}</div>
@@ -1630,7 +1741,8 @@ const PatientDetails = React.forwardRef<{
                                 variant="outline"
                                 onClick={() => {
                                   if (patient.id && patient.name) {
-                                    openPaymentModal(patient.id, patient.name, mockAppointmentHistoryLocal, appointment.id);
+                                    const original = patientAppointments.find((x: Appointment) => x.id === appointment.id);
+                                    if (original) openPaymentFor(original, patient.id, patient.name);
                                   }
                                 }}
                               >
@@ -1649,7 +1761,7 @@ const PatientDetails = React.forwardRef<{
                                 }
                               </div>
                               <div className="space-y-2">
-                                {visibleTransactions.map((txn: any) => (
+                                {visibleTransactions.map((txn: RecentTransaction) => (
                                   <div key={txn.id} className="flex items-center justify-between text-sm bg-gray-50 p-2 rounded">
                                     <div className="flex items-center space-x-2">
                                       {getPaymentMethodIcon(txn.method)}
@@ -1664,7 +1776,7 @@ const PatientDetails = React.forwardRef<{
                                         size="sm"
                                         className="h-8 w-8 p-0"
                                         onClick={() => {
-                                          openEditPaymentModal(txn.id, txn, patient.id, mockAppointmentHistoryLocal);
+                                          if (txn.id && patient.id) openEditPaymentModal(txn.id, txn as any, String(patient.id), mockAppointmentHistoryLocal as any);
                                         }}
                                       >
                                         <Edit className="h-4 w-4" />
@@ -1675,8 +1787,13 @@ const PatientDetails = React.forwardRef<{
                                         size="sm"
                                         className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
                                         onClick={() => {
-                                          if (confirm(`Are you sure you want to delete this payment (${txn.method} - $${txn.amount})?`)) {
-                                            handleDeletePayment(txn.id, appointment.id);
+                                          if (txn.id && appointment.id) {
+                                            setPdConfirmTitle("Delete Payment");
+                                            setPdConfirmMessage(`Are you sure you want to delete this payment (${txn.method} - $${txn.amount})?`);
+                                            setPdConfirmAction(() => async () => {
+                                              await handleDeletePayment(String(txn.id), String(appointment.id));
+                                            });
+                                            setPdIsConfirmOpen(true);
                                           }
                                         }}
                                       >
@@ -1705,10 +1822,11 @@ const PatientDetails = React.forwardRef<{
                 <div className="flex justify-between items-center flex-wrap gap-2">
                     <CardTitle>Payment History</CardTitle>
                     <div className="flex flex-col items-end gap-1">
-                        <Button 
+                            <Button 
                             size="sm"
                             onClick={() => {
                               if (patient.id && patient.name) {
+                                // Open payment modal for adding a new payment (no appointment selected)
                                 openPaymentModal(patient.id, patient.name, mockAppointmentHistoryLocal, null);
                               }
                             }}
@@ -1739,9 +1857,9 @@ const PatientDetails = React.forwardRef<{
                               <SelectValue placeholder="Filter by doctor" />
                           </SelectTrigger>
                           <SelectContent>
-                              {uniquePaymentDoctors.map(doctor => (
-                                  <SelectItem key={doctor} value={doctor}>{doctor === 'all' ? 'All Doctors' : doctor}</SelectItem>
-                              ))}
+                {uniquePaymentDoctors.map(doctor => (
+                  <SelectItem key={String(doctor)} value={String(doctor)}>{String(doctor) === 'all' ? 'All Doctors' : String(doctor)}</SelectItem>
+                ))}
                           </SelectContent>
                       </Select>
                     )}
@@ -1750,9 +1868,9 @@ const PatientDetails = React.forwardRef<{
                             <SelectValue placeholder="Filter by procedure" />
                         </SelectTrigger>
                         <SelectContent>
-                            {uniquePaymentProcedures.map(proc => (
-                                <SelectItem key={proc} value={proc}>{proc === 'all' ? 'All Procedures' : proc}</SelectItem>
-                            ))}
+              {uniquePaymentProcedures.map(proc => (
+                <SelectItem key={String(proc)} value={String(proc)}>{String(proc) === 'all' ? 'All Procedures' : String(proc)}</SelectItem>
+              ))}
                         </SelectContent>
                     </Select>
                 </div>
@@ -1767,7 +1885,7 @@ const PatientDetails = React.forwardRef<{
                         <div>
                           <p className="text-sm text-muted-foreground">Total Paid</p>
                           <p className="text-2xl font-semibold text-green-600">
-                            ${mockAppointmentHistoryLocal.reduce((sum: number, apt: any) => sum + (apt.totalPaid || 0), 0)}
+                            ${mockAppointmentHistoryLocal.reduce((sum: number, apt: Appointment) => sum + (apt.totalPaid || 0), 0)}
                           </p>
                         </div>
                         <CheckCircle className="h-8 w-8 text-green-600" />
@@ -1780,7 +1898,7 @@ const PatientDetails = React.forwardRef<{
                         <div>
                           <p className="text-sm text-muted-foreground">Outstanding</p>
                           <p className="text-2xl font-semibold text-red-600">
-                            ${mockAppointmentHistoryLocal.reduce((sum: number, apt: any) => sum + ((apt.price || 0) - (apt.totalPaid || 0)), 0)}
+                            ${mockAppointmentHistoryLocal.reduce((sum: number, apt: Appointment) => sum + ((apt.price || 0) - (apt.totalPaid || 0)), 0)}
                           </p>
                         </div>
                         <AlertTriangle className="h-8 w-8 text-red-600" />
@@ -1793,7 +1911,7 @@ const PatientDetails = React.forwardRef<{
                         <div>
                           <p className="text-sm text-muted-foreground">Total Billed</p>
                           <p className="text-2xl font-semibold">
-                            ${mockAppointmentHistoryLocal.reduce((sum: number, apt: any) => sum + (apt.price || 0), 0)}
+                            ${mockAppointmentHistoryLocal.reduce((sum: number, apt: Appointment) => sum + (apt.price || 0), 0)}
                           </p>
                         </div>
                         <DollarSign className="h-8 w-8 text-gray-600" />
@@ -1842,7 +1960,7 @@ const PatientDetails = React.forwardRef<{
                                 <DropdownMenuItem 
                                   onClick={() => {
                                     if (patient.id && patient.name) {
-                                      openEditPaymentModal(txn.id, txn, patient.id, mockAppointmentHistoryLocal);
+                                      if (txn.id && patient.id) openEditPaymentModal(String(txn.id), txn as any, String(patient.id), mockAppointmentHistoryLocal as Appointment[]);
                                     }
                                   }}
                                 >
@@ -1851,11 +1969,13 @@ const PatientDetails = React.forwardRef<{
                                 </DropdownMenuItem>
                                 <DropdownMenuItem 
                                   onClick={() => {
-                                    if (confirm("Are you sure you want to delete this payment?")) {
+                                    setPdConfirmTitle("Delete Payment");
+                                    setPdConfirmMessage("Are you sure you want to delete this payment?");
+                                    setPdConfirmAction(() => async () => {
                                       const updatedHistory = mockAppointmentHistoryLocal.map(apt => {
                                         if (apt.id === txn.appointmentId) {
-                                          const newTransactions = apt.transactions?.filter((t: any) => t.id !== txn.id) || [];
-                                          const newTotalPaid = newTransactions.reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
+                                          const newTransactions = apt.transactions?.filter((t: RecentTransaction) => t.id !== txn.id) || [];
+                                          const newTotalPaid = newTransactions.reduce((sum: number, t: RecentTransaction) => sum + (t.amount || 0), 0);
                                           return {
                                             ...apt,
                                             transactions: newTransactions,
@@ -1866,7 +1986,8 @@ const PatientDetails = React.forwardRef<{
                                       });
                                       setMockAppointmentHistoryLocal(updatedHistory);
                                       toast.success("Payment deleted successfully");
-                                    }
+                                    });
+                                    setPdIsConfirmOpen(true);
                                   }}
                                   className="text-red-600"
                                 >
@@ -1906,8 +2027,32 @@ const PatientDetails = React.forwardRef<{
         </TabsContent>
       </Tabs>
       {/* Record Payment Dialog is now a separate component */}
+      <ConfirmDialog
+        open={pdIsConfirmOpen}
+        onOpenChange={(open) => {
+          if (!open) setPdConfirmAction(null);
+          setPdIsConfirmOpen(open);
+        }}
+        title={pdConfirmTitle || "Confirm"}
+        message={pdConfirmMessage || "Are you sure?"}
+        loading={pdConfirmLoading}
+        onConfirm={async () => {
+          if (pdConfirmAction) {
+            try {
+              setPdConfirmLoading(true);
+              await pdConfirmAction();
+            } finally {
+              setPdConfirmLoading(false);
+              setPdConfirmAction(null);
+            }
+          }
+        }}
+        confirmLabel="Yes"
+        cancelLabel="No"
+      />
     </div>
   );
 });
+PatientDetails.displayName = "PatientDetails";
 
  

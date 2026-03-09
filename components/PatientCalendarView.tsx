@@ -27,14 +27,21 @@ import { formatTimeTo12h, TIME_SLOTS } from "../lib/time-slots";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { Calendar } from "./ui/calendar";
+import CalendarPopover from "./CalendarPopover";
 import { Label } from "./ui/label";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
 import { useAuth } from "@/hooks/useAuth.tsx";
+import { AllAppointmentsView } from "./AllAppointmentsView";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
+import ConfirmDialog from "./ConfirmDialog";
+import { Avatar, AvatarImage, AvatarFallback } from "./ui/avatar";
+import { useDoctors } from "@/hooks/useDoctors";
+import ViewMode from "./viewMode";
 
-type ViewMode = "month" | "week" | "day" | "custom";
+ 
+ 
 
 const appointmentColors: Record<string, { bg: string; text: string; border: string }> = {
   "Routine Cleaning": { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" },
@@ -59,57 +66,100 @@ export function PatientCalendarView() {
   const [activeRangeType, setActiveRangeType] = useState<"from" | "to">("from");
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<string>("scheduled");
+  // confirmation modal state for destructive actions
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState<string | undefined>(undefined);
+  const [confirmMessage, setConfirmMessage] = useState<string | undefined>(undefined);
+  const [confirmAction, setConfirmAction] = useState<(() => Promise<void>) | null>(null);
+
+  const [activeFilter, setActiveFilter] = useState<'scheduled' | 'cart'>('scheduled');
 
   const { openPatientBookingModal, appointments, isLoading, refreshAppointments, deleteAppointment, updateAppointment } = useAppointmentModal();
-  const { openPatientPaymentModal } = usePaymentModal();
+  const { openPatientPaymentFor } = usePaymentModal();
+  const { doctors, isLoadingDoctors } = useDoctors();
 
   const filteredAppointments = useMemo(() => {
-    if (statusFilter === "all") {
-      return appointments.filter(apt => apt.status !== "pending");
+    if (activeFilter === "cart") {
+      return appointments.filter(apt => apt.status === "pending" || apt.status === "tentative");
     }
-    return appointments;
-  }, [appointments, statusFilter]);
-
-  const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this pending appointment?")) return;
     
-    setIsProcessing(true);
-    try {
-      await deleteAppointment(id);
-      toast.success("Appointment deleted successfully");
-      setSelectedAppointment(null);
-      refreshAppointments(filters);
-    } catch (error) {
-      toast.error("Failed to delete appointment");
-    } finally {
-      setIsProcessing(false);
-    }
+    // "Scheduled" view shows confirmed, scheduled, and anything normally shown (not pending/cancelled)
+    return appointments.filter(apt => apt.status !== "pending" && apt.status !== "cancelled");
+  }, [appointments, activeFilter]);
+
+  const handleDelete = (id: string) => {
+    setConfirmTitle("Delete appointment");
+    setConfirmMessage("Are you sure you want to delete this pending appointment?");
+    setConfirmAction(() => async () => {
+      setIsProcessing(true);
+      try {
+        await deleteAppointment(id);
+        toast.success("Appointment deleted successfully");
+        setSelectedAppointment(null);
+        refreshAppointments(filters);
+      } catch (err) {
+        console.error(err);
+        toast.error("Failed to delete appointment");
+      } finally {
+        setIsProcessing(false);
+      }
+    });
+    setIsConfirmOpen(true);
   };
 
-  const handleRequestCancellation = async (appointment: Appointment) => {
-    if (!confirm("Would you like to request a cancellation for this confirmed appointment? The doctor will be notified.")) return;
+  const handleCancelReservation = (id: string) => {
+    setConfirmTitle("Cancel reservation");
+    setConfirmMessage("Cancel this reservation? This will free the slot immediately.");
+    setConfirmAction(() => async () => {
+      setIsProcessing(true);
+      try {
+        await deleteAppointment(id);
+        // Notify other components that an appointment changed/was removed
+        try {
+          window.dispatchEvent(new CustomEvent('appointments:updated', { detail: { appointmentId: id, newStatus: 'cancelled' } }));
+        } catch (e) {
+          // ignore dispatch errors
+        }
+        toast.success("Reservation cancelled");
+        setSelectedAppointment(null);
+        refreshAppointments(filters);
+      } catch (err) {
+        console.error(err);
+        toast.error("Failed to cancel reservation");
+      } finally {
+        setIsProcessing(false);
+      }
+    });
+    setIsConfirmOpen(true);
+  };
 
-    setIsProcessing(true);
-    try {
-      // For now, we'll update the notes or status to indicate a cancellation request
-      // Ideally, there should be a 'cancellation_requested' status or a notification system
-      await updateAppointment(appointment.id, { 
-        notes: appointment.notes + "\n[CANCELLATION REQUESTED BY PATIENT]",
-        status: "tentative" // Using tentative to indicate it's being reviewed
-      });
-      toast.success("Cancellation request sent to the doctor.");
-      setSelectedAppointment(null);
-      refreshAppointments(filters);
-    } catch (error) {
-      toast.error("Failed to send cancellation request");
-    } finally {
-      setIsProcessing(false);
-    }
+  const handleRequestCancellation = (appointment: Appointment) => {
+    setConfirmTitle("Request cancellation");
+    setConfirmMessage("Would you like to request a cancellation for this confirmed appointment? The doctor will be notified.");
+    setConfirmAction(() => async () => {
+      setIsProcessing(true);
+      try {
+        // For now, we'll update the notes or status to indicate a cancellation request
+        // Ideally, there should be a 'cancellation_requested' status or a notification system
+        await updateAppointment(appointment.id, {
+          notes: appointment.notes + "\n[CANCELLATION REQUESTED BY PATIENT]",
+          status: "tentative" // Using tentative to indicate it's being reviewed
+        });
+        toast.success("Cancellation request sent to the doctor.");
+        setSelectedAppointment(null);
+        refreshAppointments(filters);
+      } catch (err) {
+        console.error(err);
+        toast.error("Failed to send cancellation request");
+      } finally {
+        setIsProcessing(false);
+      }
+    });
+    setIsConfirmOpen(true);
   };
 
   const handlePay = (appointment: Appointment) => {
-    openPatientPaymentModal(appointments, appointment.id);
+  openPatientPaymentFor(appointment);
     setSelectedAppointment(null);
   };
   
@@ -161,7 +211,7 @@ export function PatientCalendarView() {
     if (viewMode === 'custom' && dateRange?.from && dateRange?.to) {
       fetchStartStr = formatDateToYYYYMMDD(dateRange.from);
       fetchEndStr = formatDateToYYYYMMDD(dateRange.to);
-    } else {
+  } else if (viewMode !== 'all') {
       // For day, week, month, use the range calculated by getViewRange
       // Actually, Admin portal uses a monthly range for day/week/month to avoid too many fetches
       const monthStart = new Date(start.getFullYear(), start.getMonth(), 1);
@@ -173,16 +223,47 @@ export function PatientCalendarView() {
 
     return { 
       parentId,
-      status: statusFilter === "all" ? undefined : statusFilter,
       startDate: fetchStartStr,
-      endDate: fetchEndStr
+      endDate: fetchEndStr,
+      includeUnpaid: activeFilter === "cart" ? true : undefined
     };
-  }, [parentId, statusFilter, viewMode, selectedDate, dateRange, getViewRange]);
+  }, [parentId, activeFilter, viewMode, selectedDate, dateRange, getViewRange]);
 
   useEffect(() => {
+    // Don't trigger a backend fetch when the custom picker is opened but a full
+    // range isn't selected yet. This prevents fetching unrelated dates when only
+    // the start date is set.
+    if (viewMode === 'custom' && !(dateRange?.from && dateRange?.to)) return;
+
     if (parentId) {
+      // Debug: log filters so we can confirm what ranges are being requested
+      // in the browser console when the custom range is applied.
+      // Remove or guard these logs in production.
+      try {
+        // eslint-disable-next-line no-console
+        console.debug("PatientCalendarView: refreshAppointments called with filters:", filters);
+      } catch (e) {}
       refreshAppointments(filters);
     }
+  // Narrow dependencies so changes to the actual start/end dates trigger refresh,
+  // but opening the picker (which may create a new DateRange object) does not.
+  }, [parentId, filters.parentId, filters.startDate, filters.endDate, filters.includeUnpaid, refreshAppointments, viewMode, dateRange?.from, dateRange?.to]);
+
+  useEffect(() => {
+    const onUpdated = (e: Event) => {
+      try {
+        const detail = (e as CustomEvent)?.detail || {};
+        const { appointmentId, newStatus, newPaymentStatus } = detail;
+        if (appointmentId) {
+          // optimistic update: update appointments array in place
+          // updateAppointment hook exists but we can optimistically update the cached appointments
+          // Since appointments come from useAppointmentModal, call refresh to get canonical state
+          refreshAppointments(filters);
+        }
+      } catch (err) {}
+    };
+    window.addEventListener('appointments:updated', onUpdated as EventListener);
+    return () => window.removeEventListener('appointments:updated', onUpdated as EventListener);
   }, [filters, refreshAppointments]);
 
   useEffect(() => {
@@ -205,6 +286,8 @@ export function PatientCalendarView() {
       return `${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
     } else if (viewMode === "month") {
       return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    } else if (viewMode === "all" || activeFilter === "cart") {
+      return activeFilter === "cart" ? "My Appointment Cart" : "All Appointments";
     } else if (viewMode === "custom") {
       if (dateRange?.from && dateRange?.to) {
         return `${dateRange.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${dateRange.to.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
@@ -321,7 +404,7 @@ export function PatientCalendarView() {
   };
 
   const calculateAppointmentStyle = (duration: number = 60) => {
-    const slotHeight = 80;
+  const slotHeight = 64;
     const slotsOccupied = duration / 30;
     return {
       height: `${slotHeight * slotsOccupied - 4}px`
@@ -372,7 +455,7 @@ export function PatientCalendarView() {
           const isPast = new Date(`${formatDateToYYYYMMDD(selectedDate)}T${timeSlot}`) < new Date();
 
           return (
-            <div key={timeSlot} className="flex items-start min-h-[80px] border-b border-gray-100 relative group">
+            <div key={timeSlot} className="flex items-start min-h-[64px] border-b border-gray-100 relative group">
               {!currentSlotIsCovered && !isPast && (
                 <div
                   className="absolute inset-y-2 left-32 right-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-10 hover:bg-violet-50/50 rounded-xl border-2 border-dashed border-transparent hover:border-violet-200/50 group/plus"
@@ -386,7 +469,7 @@ export function PatientCalendarView() {
                 {formatTime(timeSlot)}
               </div>
               
-              <div className="flex-1 relative min-h-[80px]">
+              <div className="flex-1 relative min-h-[64px]">
                 {appointmentsStartingAtSlot.map((appointment: Appointment) => {
                   const columnIndex = appointmentColumns.get(appointment.id) ?? 0;
                   const totalColumns = maxOverlappingAt.get(appointment.id) ?? 1;
@@ -411,17 +494,31 @@ export function PatientCalendarView() {
                       }}
                     >
                       <div className="flex flex-col h-full">
-                        <div className="font-semibold text-sm truncate pr-2 flex items-center gap-2">
-                          {appointment.patientName}
-                          {appointment.paymentStatus === 'unpaid' && (
-                            <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[8px] h-3 px-1 uppercase font-black">Unpaid</Badge>
-                          )}
-                        </div>
-                        <div className="text-xs opacity-90 truncate">
-                          {typeName} • {appointment.duration || 30}min
-                        </div>
-                        <div className="text-xs opacity-80 mt-1 truncate flex items-center gap-1">
-                          <Stethoscope className="h-3 w-3" /> Dr. {appointment.doctor}
+                        <div className="flex items-start gap-3">
+                          <div className="flex-shrink-0">
+                            <Avatar className="h-10 w-10 border border-gray-100">
+                              {(() => {
+                                const doc = doctors.find(d => String(d.name) === String(appointment.doctor) || String(d.id) === String(appointment.doctor));
+                                const src = doc?.profilePicture || (appointment as any).doctorProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.doctor}`;
+                                return <AvatarImage src={src} alt={appointment.doctor} />;
+                              })()}
+                              <AvatarFallback>{String(appointment.doctor || '').substring(0,2).toUpperCase()}</AvatarFallback>
+                            </Avatar>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-semibold text-sm truncate pr-2 flex items-center gap-2">
+                              {appointment.patientName}
+                              {appointment.paymentStatus === 'unpaid' && (
+                                <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[8px] h-3 px-1 uppercase font-black">Unpaid</Badge>
+                              )}
+                            </div>
+                            <div className="text-xs opacity-90 truncate">
+                              {typeName} • {appointment.duration || 30}min
+                            </div>
+                            <div className="text-xs opacity-80 mt-1 truncate flex items-center gap-2">
+                              <div className="text-[12px] font-medium">Dr. {appointment.doctor}</div>
+                            </div>
+                          </div>
                         </div>
                         <Badge variant="outline" className="text-[10px] bg-white/50 backdrop-blur-sm mt-auto self-start">
                           {appointment.status}
@@ -480,7 +577,7 @@ export function PatientCalendarView() {
 
           <div className="relative">
             {TIME_SLOTS.map((timeSlot) => (
-              <div key={timeSlot} className="flex min-h-[80px] border-b border-gray-50">
+              <div key={timeSlot} className="flex min-h-[64px] border-b border-gray-50">
                 <div className="w-20 flex-shrink-0 pt-2 pr-4 text-right text-sm font-medium text-muted-foreground sticky left-0 bg-white z-10">
                   {formatTime(timeSlot)}
                 </div>
@@ -501,7 +598,7 @@ export function PatientCalendarView() {
                   return (
                     <div 
                       key={idx} 
-                      className="flex-1 border-l border-gray-100 relative min-h-[80px] group"
+                      className="flex-1 border-l border-gray-100 relative min-h-[64px] group"
                     >
                         {!currentSlotIsCovered && (
                             <div
@@ -537,15 +634,29 @@ export function PatientCalendarView() {
                               }}
                             >
                               <div className="flex justify-between items-start">
-                                <div className="font-semibold truncate pr-1 flex items-center gap-1">
-                                  {appointment.patientName}
-                                  {appointment.paymentStatus === 'unpaid' && (
-                                    <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[7px] h-2.5 px-0.5 uppercase font-black">UNPAID</Badge>
-                                  )}
+                                <div className="flex items-start gap-2">
+                                  <div className="flex-shrink-0">
+                                    <Avatar className="h-8 w-8 border border-gray-100">
+                                      {(() => {
+                                        const doc = doctors.find(d => String(d.name) === String(appointment.doctor) || String(d.id) === String(appointment.doctor));
+                                        const src = doc?.profilePicture || (appointment as any).doctorProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.doctor}`;
+                                        return <AvatarImage src={src} alt={appointment.doctor} />;
+                                      })()}
+                                      <AvatarFallback>{String(appointment.doctor || '').substring(0,2).toUpperCase()}</AvatarFallback>
+                                    </Avatar>
+                                  </div>
+                                  <div className="font-semibold truncate pr-1 flex items-center gap-1 min-w-0">
+                                    {appointment.patientName}
+                                    {appointment.paymentStatus === 'unpaid' && (
+                                      <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[7px] h-2.5 px-0.5 uppercase font-black">UNPAID</Badge>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                               <div className="truncate opacity-90">{typeName}</div>
-                              <div className="truncate opacity-75 mt-0.5">{appointment.doctor}</div>
+                              <div className="truncate opacity-75 mt-0.5 flex items-center gap-2">
+                                <span className="text-sm font-medium">Dr. {appointment.doctor}</span>
+                              </div>
                             </div>
                           )
                         })}
@@ -563,52 +674,88 @@ export function PatientCalendarView() {
 
   const renderCustomView = () => {
     const sortedAppointments = [...filteredAppointments].sort((a, b) => parseBackendDateToLocal(a.date).getTime() - parseBackendDateToLocal(b.date).getTime());
-    
+    const days = dateRange && dateRange.from && dateRange.to ? Math.ceil((+dateRange.to - +dateRange.from) / (1000 * 60 * 60 * 24)) + 1 : undefined;
+
     return (
-      <div className="space-y-4 p-4">
-        {sortedAppointments.length === 0 ? (
-          <div className="text-center py-12 text-muted-foreground bg-gray-50 rounded-lg border-2 border-dashed">
-            <CalendarIcon className="h-12 w-12 mx-auto mb-4 opacity-20" />
-            <p>No appointments found for the selected range.</p>
+      <div>
+        <div className="p-6 border-b bg-white">
+          <div className="flex items-start justify-between">
+            <div>
+              <h2 className="text-2xl font-bold">{days ? `${days} days range` : 'Custom range'}</h2>
+              <p className="text-sm text-muted-foreground">{dateRange && dateRange.from && dateRange.to ? `${dateRange.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${dateRange.to.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}` : 'Select a start and end date'}</p>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="p-2 border rounded-lg">
+                <div className="text-xs text-muted-foreground uppercase">Start date</div>
+                <div className="font-medium">{dateRange?.from ? dateRange.from.toLocaleDateString() : '—'}</div>
+              </div>
+              <div className="p-2 border rounded-lg">
+                <div className="text-xs text-muted-foreground uppercase">End date</div>
+                <div className="font-medium">{dateRange?.to ? dateRange.to.toLocaleDateString() : '—'}</div>
+              </div>
+            </div>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {sortedAppointments.map((apt: Appointment) => {
-              const typeName = getAppointmentTypeName(apt.type, apt.customType);
-              const colors = getColorForType(typeName);
-              return (
-                <Card key={apt.id} className={`overflow-hidden hover:shadow-md transition-shadow cursor-pointer ${apt.paymentStatus === 'unpaid' ? 'bg-orange-50/20 border-dashed border-orange-200' : ''}`} onClick={() => { setSelectedAppointment(apt); }}>
-                  <div className={`h-1 ${colors.bg.replace('bg-', 'bg-').split(' ')[0]}`} />
-                  <CardContent className="p-4">
-                    <div className="flex justify-between items-start mb-2">
-                      <div className="font-bold text-lg flex items-center gap-2">
-                        {apt.patientName}
-                        {apt.paymentStatus === 'unpaid' && (
-                          <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[10px] uppercase font-black">Unpaid</Badge>
-                        )}
-                      </div>
-                      <Badge className={`${colors.bg} ${colors.text} border-none`}>{typeName}</Badge>
-                    </div>
-                    <div className="space-y-2 text-sm text-muted-foreground">
-                      <div className="flex items-center gap-2">
-                        <CalendarIcon className="h-4 w-4" />
-                        <span>{parseBackendDateToLocal(apt.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} at {apt.time}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Clock className="h-4 w-4" />
-                        <span>{apt.duration || 60} minutes</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Stethoscope className="h-4 w-4" />
-                        <span>Dr. {apt.doctor}</span>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
+        </div>
+
+        <div className="p-6 bg-gray-50">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="md:col-span-2">
+              {sortedAppointments.length === 0 ? (
+                <div className="text-center p-12 bg-white rounded border-2 border-dashed text-muted-foreground">No appointments in this range</div>
+              ) : (
+                <div className="space-y-4">
+                  {sortedAppointments.map((apt) => {
+                    const typeName = getAppointmentTypeName(apt.type, apt.customType);
+                    const colors = getColorForType(typeName);
+                    return (
+                      <Card key={apt.id} className={`overflow-hidden hover:shadow-md transition-shadow cursor-pointer ${apt.paymentStatus === 'unpaid' ? 'bg-orange-50/20 border-dashed border-orange-200' : ''}`} onClick={() => { setSelectedAppointment(apt); }}>
+                        <div className={`h-1 ${colors.bg.replace('bg-', 'bg-').split(' ')[0]}`} />
+                        <CardContent className="p-4">
+                          <div className="flex justify-between items-start mb-2">
+                            <div className="font-bold text-lg flex items-center gap-2">
+                              {apt.patientName}
+                              {apt.paymentStatus === 'unpaid' && (
+                                <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[10px] uppercase font-black">Unpaid</Badge>
+                              )}
+                            </div>
+                            <Badge className={`${colors.bg} ${colors.text} border-none`}>{typeName}</Badge>
+                          </div>
+                          <div className="space-y-2 text-sm text-muted-foreground">
+                            <div className="flex items-center gap-2">
+                              <CalendarIcon className="h-4 w-4" />
+                              <span>{parseBackendDateToLocal(apt.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} at {apt.time}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Clock className="h-4 w-4" />
+                              <span>{apt.duration || 60} minutes</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Stethoscope className="h-4 w-4" />
+                              <span>Dr. {apt.doctor}</span>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div>
+              <div className="p-4 bg-white rounded border shadow-sm">
+                <div className="text-sm font-semibold mb-2">Range controls</div>
+                <div className="space-y-2">
+                  <div className="text-xs text-muted-foreground">Select range using the calendar</div>
+                  <Calendar mode="range" selected={dateRange} onSelect={(r) => setDateRange(r as DateRange | undefined)} className="rounded-md" />
+                  <div className="flex items-center justify-between mt-3">
+                    <Button variant="ghost" onClick={() => setDateRange(undefined)}>Clear dates</Button>
+                    <Button onClick={() => { /* noop - keep range */ }} className="bg-violet-600 text-white">Apply</Button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-        )}
+        </div>
       </div>
     );
   };
@@ -668,10 +815,25 @@ export function PatientCalendarView() {
                   return (
                     <div
                       key={apt.id}
-                      className={`text-[10px] p-1 rounded truncate border-l-2 ${colors.bg} ${colors.text} ${colors.border} ${apt.paymentStatus === 'unpaid' ? 'opacity-75 border-dashed' : ''} flex items-center justify-between`}
+                      className={`text-[10px] p-1 rounded truncate border-l-2 ${colors.bg} ${colors.text} ${colors.border} ${apt.paymentStatus === 'unpaid' ? 'opacity-75 border-dashed' : ''} flex items-center justify-between gap-2`}
                       onClick={(e) => { e.stopPropagation(); setSelectedAppointment(apt); }}
                     >
-                      <span className="truncate">{apt.time} with Dr. {apt.doctor}</span>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="flex-shrink-0">
+                          <Avatar className="h-7 w-7 border border-gray-100">
+                            {(() => {
+                              const doc = doctors.find(d => String(d.name) === String(apt.doctor) || String(d.id) === String(apt.doctor));
+                              const src = doc?.profilePicture || (apt as any).doctorProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${apt.doctor}`;
+                              return <AvatarImage src={src} alt={apt.doctor} />;
+                            })()}
+                            <AvatarFallback>{String(apt.doctor || '').substring(0,2).toUpperCase()}</AvatarFallback>
+                          </Avatar>
+                        </div>
+                        <div className="truncate text-[11px]">
+                          <div className="font-medium truncate">{apt.time} • Dr. {apt.doctor}</div>
+                          <div className="text-[10px] opacity-80 truncate">{typeName}</div>
+                        </div>
+                      </div>
                       {apt.paymentStatus === 'unpaid' && (
                         <span className="ml-1 text-[7px] font-black text-orange-600 bg-orange-50 px-0.5 rounded border border-orange-100 uppercase">U</span>
                       )}
@@ -695,6 +857,9 @@ export function PatientCalendarView() {
   // For brevity, I'll focus on the month view and the main structure.
   // A full implementation would require adapting renderDayView and renderWeekView as well.
 
+  // compute statusStr for selected appointment to avoid TypeScript union mismatches
+  const statusStr = selectedAppointment ? String(selectedAppointment.status) : '';
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -712,11 +877,11 @@ export function PatientCalendarView() {
         <CardContent className="p-4">
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div className="flex items-center space-x-4">
-              <div className="flex items-center bg-gray-50 rounded-lg p-1 border">
-                <Button variant="ghost" size="sm" onClick={() => navigateDate('prev')} className="h-8 w-8 p-0">
+              <div className={`flex items-center bg-gray-50 rounded-lg p-1 border ${viewMode === 'all' ? 'opacity-50 pointer-events-none' : ''}`}>
+                <Button variant="ghost" size="sm" onClick={() => navigateDate('prev')} className="h-8 w-8 p-0" disabled={viewMode === 'all'}>
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => navigateDate('next')} className="h-8 w-8 p-0">
+                <Button variant="ghost" size="sm" onClick={() => navigateDate('next')} className="h-8 w-8 p-0" disabled={viewMode === 'all'}>
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
@@ -729,241 +894,41 @@ export function PatientCalendarView() {
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0 shadow-2xl border-none rounded-2xl" align="start">
-                  <div className={`bg-white rounded-2xl overflow-hidden ${viewMode === "custom" ? "min-w-[600px]" : "min-w-[320px]"}`}>
-                    {viewMode === "custom" ? (
-                      <>
-                        {/* Header: Range Summary and Inputs */}
-                        <div className="p-6 border-b flex items-start justify-between">
-                          <div className="space-y-1">
-                            <h3 className="text-2xl font-bold text-gray-900">
-                              {dateRange?.from && dateRange?.to ? (
-                                <>
-                                  {Math.ceil(Math.abs(dateRange.to.getTime() - dateRange.from.getTime()) / (1000 * 60 * 60 * 24)) + 1} days range
-                                </>
-                              ) : (
-                                "Select dates"
-                              )}
-                            </h3>
-                            <p className="text-sm text-gray-500 font-medium">
-                              {dateRange?.from ? (
-                                <>
-                                  {dateRange.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                                  {dateRange.to && ` - ${dateRange.to.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`}
-                                </>
-                              ) : (
-                                "Choose your appointment period"
-                              )}
-                            </p>
-                          </div>
-
-                          <div className="flex items-center gap-0 border rounded-xl overflow-hidden shadow-sm">
-                            <button 
-                              onClick={() => setActiveRangeType("from")}
-                              className={`px-4 py-2 border-r bg-white min-w-[140px] text-left transition-colors ${activeRangeType === "from" ? "ring-2 ring-inset ring-violet-600" : "hover:bg-gray-50"}`}
-                            >
-                              <Label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-0.5 cursor-pointer">Start Date</Label>
-                              <div className="text-sm font-semibold text-gray-700">
-                                {dateRange?.from ? dateRange.from.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }) : "MM/DD/YYYY"}
-                              </div>
-                            </button>
-                            <button 
-                              onClick={() => setActiveRangeType("to")}
-                              className={`px-4 py-2 bg-white min-w-[140px] text-left transition-colors ${activeRangeType === "to" ? "ring-2 ring-inset ring-violet-600" : "hover:bg-gray-50"}`}
-                            >
-                              <Label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-0.5 cursor-pointer">End Date</Label>
-                              <div className="text-sm font-semibold text-gray-700">
-                                {dateRange?.to ? dateRange.to.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }) : "MM/DD/YYYY"}
-                              </div>
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* View Mode Switcher */}
-                        <div className="px-6 py-3 bg-gray-50/50 border-b flex items-center gap-3">
-                          <span className="text-xs font-bold text-gray-400 uppercase tracking-widest mr-2">View:</span>
-                          <div className="flex items-center bg-white rounded-lg p-1 border shadow-sm">
-                            {(["day", "week", "month", "custom"] as const).map((mode) => (
-                              <Button
-                                key={mode}
-                                variant={viewMode === mode ? "brand" : "ghost"}
-                                size="sm"
-                                className={`h-8 px-4 capitalize font-bold text-xs ${viewMode === mode ? "" : "text-gray-500 hover:text-gray-900"}`}
-                                onClick={() => {
-                                  setViewMode(mode);
-                                }}
-                              >
-                                {mode}
-                              </Button>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* Calendar Content */}
-                        <div className="p-4 flex justify-center">
-                          <Calendar
-                            mode="range"
-                            selected={dateRange}
-                            onSelect={(_range: DateRange | undefined, selectedDay: Date) => {
-                              const selectedDate = selectedDay;
-                              
-                              if (activeRangeType === "from") {
-                                if (selectedDate) {
-                                  setDateRange({ from: selectedDate, to: dateRange?.to && selectedDate <= dateRange.to ? dateRange.to : undefined });
-                                  setActiveRangeType("to");
-                                }
-                              } else {
-                                if (selectedDate) {
-                                  if (dateRange?.from && selectedDate < dateRange.from) {
-                                    setDateRange({ from: selectedDate, to: undefined });
-                                    setActiveRangeType("to");
-                                  } else {
-                                    setDateRange({ from: dateRange?.from || selectedDate, to: selectedDate });
-                                  }
-                                }
-                              }
-                            }}
-                            numberOfMonths={2}
-                            className="border-none shadow-none"
-                            classNames={{
-                              months: "flex flex-row gap-8",
-                              month: "space-y-4",
-                              caption: "flex justify-center pt-1 relative items-center",
-                              caption_label: "text-sm font-bold text-gray-900",
-                              nav: "space-x-1 flex items-center",
-                              nav_button: "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100",
-                              nav_button_previous: "absolute left-1",
-                              nav_button_next: "absolute right-1",
-                              table: "w-full border-collapse space-y-1",
-                              head_row: "flex",
-                              head_cell: "text-gray-400 rounded-md w-9 font-bold text-[10px] uppercase",
-                              row: "flex w-full mt-2",
-                              cell: "h-9 w-9 text-center text-sm p-0 relative [&:has([aria-selected].day-range-end)]:rounded-r-full [&:has([aria-selected].day-range-start)]:rounded-l-full first:[&:has([aria-selected])]:rounded-l-full last:[&:has([aria-selected])]:rounded-r-full focus-within:relative focus-within:z-20",
-                              day: "h-9 w-9 p-0 font-bold aria-selected:opacity-100 rounded-full hover:bg-gray-100 transition-colors",
-                              day_range_start: "day-range-start bg-violet-600 text-white hover:bg-violet-600 hover:text-white focus:bg-violet-600 focus:text-white",
-                              day_range_end: "day-range-end bg-violet-600 text-white hover:bg-violet-600 hover:text-white focus:bg-violet-600 focus:text-white",
-                              day_selected: "bg-violet-600 text-white hover:bg-violet-600 hover:text-white focus:bg-violet-600 focus:text-white",
-                              day_today: "bg-gray-100 text-gray-900",
-                              day_outside: "text-gray-300 opacity-50",
-                              day_disabled: "text-gray-300 opacity-50",
-                              day_range_middle: "aria-selected:bg-violet-50 aria-selected:text-violet-900 rounded-none",
-                              day_hidden: "invisible",
-                            }}
-                          />
-                        </div>
-
-                        {/* Footer: Action Buttons */}
-                        <div className="p-4 border-t bg-gray-50/30 flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                             <Button 
-                              variant="ghost" 
-                              size="icon" 
-                              className="h-10 w-10 text-gray-400 hover:text-violet-600"
-                            >
-                              <Keyboard className="h-5 w-5" />
-                            </Button>
-                          </div>
-                          
-                          <div className="flex items-center gap-3">
-                            <Button 
-                              variant="ghost" 
-                              className="text-sm font-bold text-gray-900 hover:bg-gray-100 underline decoration-2 underline-offset-4"
-                              onClick={() => {
-                                setDateRange(undefined);
-                              }}
-                            >
-                              Clear dates
-                            </Button>
-                            <Button 
-                              className="bg-violet-600 hover:bg-violet-700 text-white px-6 py-2 rounded-xl font-bold transition-all shadow-md active:scale-95"
-                              onClick={() => setShowDatePicker(false)}
-                            >
-                              Close
-                            </Button>
-                          </div>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="p-4 space-y-4 bg-white rounded-xl">
-                        <div className="space-y-2">
-                          <Label className="text-xs font-bold uppercase tracking-wider text-gray-400">View Mode</Label>
-                          <div className="grid grid-cols-2 gap-2">
-                            {(["day", "week", "month", "custom"] as const).map((mode) => (
-                              <Button
-                                key={mode}
-                                variant={viewMode === mode ? "brand" : "outline"}
-                                size="sm"
-                                className="h-9 capitalize font-medium"
-                                onClick={() => {
-                                  setViewMode(mode);
-                                  if (mode !== "custom") setShowDatePicker(false);
-                                }}
-                              >
-                                {mode}
-                              </Button>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="border-t pt-4">
-                          <Label className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3 block">
-                            Select Date
-                          </Label>
-                          <Calendar
-                            mode="single"
-                            selected={selectedDate}
-                            onSelect={(date: Date | undefined) => {
-                              if (date) {
-                                setSelectedDate(date);
-                                setShowDatePicker(false);
-                              }
-                            }}
-                            className="rounded-md border shadow-sm"
-                            classNames={{
-                              today: "bg-violet-600 text-white rounded-full",
-                            }}
-                            components={{
-                              MonthCaption: ({ calendarMonth, displayIndex, ...props }: any) => (
-                                <div {...props}>
-                                  <span 
-                                    className="hover:text-violet-600 transition-colors cursor-pointer text-sm font-medium"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setSelectedDate(calendarMonth.date);
-                                      setViewMode("month");
-                                      setShowDatePicker(false);
-                                    }}
-                                  >
-                                    {calendarMonth.date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-                                  </span>
-                                </div>
-                              )
-                            }}
-                          />
-                        </div>
-                      </div>
-                    )}
+                  <div className="p-2">
+                    <CalendarPopover
+                      viewMode={viewMode}
+                      setViewMode={setViewMode}
+                      selectedDate={selectedDate}
+                      setSelectedDate={setSelectedDate}
+                      dateRange={dateRange}
+                      setDateRange={setDateRange}
+                      onClose={() => setShowDatePicker(false)}
+                    />
                   </div>
                 </PopoverContent>
               </Popover>
             </div>
 
-            <div className="flex items-center space-x-3">
-              <div className="flex items-center gap-2">
-                <Filter className="h-4 w-4 text-gray-400" />
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="w-[140px] h-10 shadow-sm">
-                      <SelectValue placeholder="Status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Statuses</SelectItem>
-                      <SelectItem value="pending">Pending</SelectItem>
-                      <SelectItem value="scheduled">Scheduled</SelectItem>
-                      <SelectItem value="confirmed">Confirmed</SelectItem>
-                      <SelectItem value="completed">Completed</SelectItem>
-                      <SelectItem value="cancelled">Cancelled</SelectItem>
-                    </SelectContent>
-                </Select>
-              </div>
+            <div className="flex items-center space-x-2 bg-gray-100 p-1 rounded-lg border border-gray-200">
+              <Button 
+                variant={activeFilter === 'scheduled' ? 'secondary' : 'ghost'} 
+                size="sm" 
+                onClick={() => { setActiveFilter('scheduled'); }}
+                className={`h-8 px-4 font-semibold rounded-md transition-all ${activeFilter === 'scheduled' ? 'bg-white shadow-sm text-violet-600' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                Scheduled
+              </Button>
+              <Button 
+                variant={activeFilter === 'cart' ? 'secondary' : 'ghost'} 
+                size="sm" 
+                onClick={() => {
+                  setActiveFilter('cart');
+                  // We don't change viewMode here, but we ensure the list view is shown
+                }}
+                className={`h-8 px-4 font-semibold rounded-md transition-all ${activeFilter === 'cart' ? 'bg-white shadow-sm text-violet-600' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                Cart
+              </Button>
             </div>
           </div>
         </CardContent>
@@ -976,14 +941,57 @@ export function PatientCalendarView() {
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-violet-600"></div>
               </div>
             ) : (
+              activeFilter === "cart" ? (
+                <div className="p-4 bg-white">
+                  <AllAppointmentsView 
+                    appointments={filteredAppointments} 
+                    isLoading={isLoading || isLoadingView}
+                    onPay={handlePay}
+                    onDelete={handleDelete}
+                    isCart={true}
+                  />
+                </div>
+              ) :
               viewMode === "day" ? renderDayView() : 
               viewMode === "week" ? renderWeekView() : 
               viewMode === "month" ? renderMonthView() : 
+              viewMode === "all" ? (
+                <div className="p-4 bg-white">
+                  <AllAppointmentsView 
+                    appointments={filteredAppointments} 
+                    isLoading={isLoading || isLoadingView}
+                    onPay={handlePay}
+                    onDelete={handleDelete}
+                    isCart={false}
+                  />
+                </div>
+              ) :
               renderCustomView()
             )}
         </CardContent>
       </Card>
       
+      <ConfirmDialog
+        open={isConfirmOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setConfirmAction(null);
+          }
+          setIsConfirmOpen(open);
+        }}
+        title={confirmTitle}
+        message={confirmMessage}
+        loading={isProcessing}
+        onConfirm={async () => {
+          if (confirmAction) {
+            await confirmAction();
+            setConfirmAction(null);
+          }
+        }}
+        confirmLabel="Confirm"
+        cancelLabel="Cancel"
+      />
+
       <Dialog open={!!selectedAppointment} onOpenChange={() => setSelectedAppointment(null)}>
         <DialogContent className="max-w-md">
             <DialogHeader>
@@ -1036,50 +1044,70 @@ export function PatientCalendarView() {
                     )}
 
                     <DialogFooter className="flex-col sm:flex-row gap-2 pt-4 border-t">
-                      {selectedAppointment.status === 'pending' && (
+                        {/* Cancel button for non-confirmed/non-scheduled and future appointments */}
+                        {(() => {
+                          const aptDateLocal = parseBackendDateToLocal(selectedAppointment.date);
+                          const endOfDayLocal = new Date(aptDateLocal);
+                          endOfDayLocal.setHours(23, 59, 59, 999);
+                          const isPastLocal = endOfDayLocal.getTime() < new Date().getTime();
+                          const showCancel = !["scheduled", "confirmed"].includes(statusStr) && !isPastLocal;
+
+                          if (showCancel) {
+                            return (
+                              <Button
+                                variant="destructive"
+                                className="w-full gap-2"
+                                onClick={() => {
+                                  if (selectedAppointment.status === 'pending') {
+                                    handleDelete(selectedAppointment.id);
+                                  } else {
+                                    handleCancelReservation(selectedAppointment.id);
+                                  }
+                                }}
+                                disabled={isProcessing}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                                Cancel Appointment
+                              </Button>
+                            );
+                          }
+                          return null;
+                        })()}
+
+                        {/* Request cancellation for scheduled/confirmed */
+                        (statusStr === 'scheduled' || statusStr === 'confirmed') && (
+                          <Button 
+                            variant="outline" 
+                            className="w-full gap-2 border-amber-200 text-amber-700 hover:bg-amber-50" 
+                            onClick={() => handleRequestCancellation(selectedAppointment)}
+                            disabled={isProcessing}
+                          >
+                            <AlertCircle className="h-4 w-4" />
+                            Request Cancellation
+                          </Button>
+                        )}
+
+                        {/* Pay Now when not paid and not cancelled */}
+                        {selectedAppointment.paymentStatus !== 'paid' && selectedAppointment.status !== 'cancelled' && (
+                          <Button 
+                            className="w-full bg-blue-600 hover:bg-blue-700 text-white gap-2" 
+                            onClick={() => handlePay(selectedAppointment)}
+                            disabled={isProcessing}
+                          >
+                            <CreditCard className="h-4 w-4" />
+                            Pay Now
+                          </Button>
+                        )}
+
                         <Button 
-                          variant="destructive" 
-                          className="w-full gap-2" 
-                          onClick={() => handleDelete(selectedAppointment.id)}
+                          variant="ghost" 
+                          onClick={() => setSelectedAppointment(null)}
+                          className="w-full"
                           disabled={isProcessing}
                         >
-                          <Trash2 className="h-4 w-4" />
-                          Delete Appointment
+                          Close
                         </Button>
-                      )}
-
-                      {(selectedAppointment.status === 'scheduled' || selectedAppointment.status === 'confirmed') && (
-                        <Button 
-                          variant="outline" 
-                          className="w-full gap-2 border-amber-200 text-amber-700 hover:bg-amber-50" 
-                          onClick={() => handleRequestCancellation(selectedAppointment)}
-                          disabled={isProcessing}
-                        >
-                          <AlertCircle className="h-4 w-4" />
-                          Request Cancellation
-                        </Button>
-                      )}
-
-                      {selectedAppointment.paymentStatus !== 'paid' && selectedAppointment.status !== 'cancelled' && (
-                        <Button 
-                          className="w-full bg-blue-600 hover:bg-blue-700 text-white gap-2" 
-                          onClick={() => handlePay(selectedAppointment)}
-                          disabled={isProcessing}
-                        >
-                          <CreditCard className="h-4 w-4" />
-                          Pay Now
-                        </Button>
-                      )}
-
-                      <Button 
-                        variant="ghost" 
-                        onClick={() => setSelectedAppointment(null)}
-                        className="w-full"
-                        disabled={isProcessing}
-                      >
-                        Close
-                      </Button>
-                    </DialogFooter>
+                      </DialogFooter>
                 </div>
             )}
         </DialogContent>

@@ -28,6 +28,8 @@ import { TIME_SLOTS, formatTimeTo12h, getServiceType } from "@/lib/time-slots";
 import { useDoctors } from "@/hooks/useDoctors";
 import Link from "next/link";
 
+import { Appointment } from "@/hooks/useAppointments";
+
 interface PublicBookingModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -54,7 +56,7 @@ export function PublicBookingModal({ isOpen, onClose }: PublicBookingModalProps)
     serviceType: "",
   });
 
-  const [dateAppointments, setDateAppointments] = useState<any[]>([]);
+  const [dateAppointments, setDateAppointments] = useState<Appointment[]>([]);
 
   useEffect(() => {
     const fetchDateAppointments = async () => {
@@ -611,7 +613,7 @@ export function PublicBookingModal({ isOpen, onClose }: PublicBookingModalProps)
               Appointment Request Submitted!
             </h3>
             <p className="text-gray-600">
-              Thank you for choosing Villahermosa Dental Clinic. We've received
+              Thank you for choosing Villahermosa Dental Clinic. We&apos;ve received
               your appointment request and will confirm it shortly.
             </p>
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-left">

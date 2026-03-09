@@ -16,8 +16,9 @@ import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { useDoctors } from "../hooks/useDoctors";
 import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
-import { APPOINTMENT_TYPES } from "../lib/appointment-types";
+import { APPOINTMENT_TYPES, getAppointmentPrice } from "../lib/appointment-types";
 import { formatDateToYYYYMMDD } from "../lib/utils";
+import { Appointment } from "@/hooks/useAppointments";
 
 
 
@@ -30,6 +31,7 @@ interface AppointmentFormData {
   type: number;
   customType?: string;
   price?: number;
+  discount?: number;
   doctor: string;
   notes: string;
   status: string;
@@ -56,13 +58,11 @@ export function CreateAppointmentModal() {
     newAppointmentTime,
     addAppointment, 
     refreshPatients, 
-    refreshAppointments,
-    appointments
+    refreshAppointments
   } = useAppointmentModal();
   const { user } = useAuth();
 
-  const [dateAppointments, setDateAppointments] = useState<any[]>([]);
-  const [isLoadingDateAppointments, setIsLoadingDateAppointments] = useState(false);
+  const [dateAppointments, setDateAppointments] = useState<Appointment[]>([]);
 
   const [formData, setFormData] = useState<AppointmentFormData>({
     patientName: "",
@@ -72,13 +72,19 @@ export function CreateAppointmentModal() {
     duration: 30,
     type: -1,
     customType: "",
-    price: 0,
+  price: 0,
+  discount: 0,
     doctor: user?.role === "doctor" ? user.username : "",
     notes: "",
     status: "scheduled",
     paymentStatus: "unpaid",
     balance: 0
   });
+
+  const recalcBalance = (price: number, discount?: number) => {
+    const d = discount || 0;
+    return Math.max(0, price - d);
+  };
 
   const [showNewPatient, setShowNewPatient] = useState(false);
   const [patients, setPatients] = useState<PatientSelectItem[]>([]);
@@ -173,7 +179,7 @@ export function CreateAppointmentModal() {
       setShowCustomTypeInput(false);
       reloadDoctors();
     }
-  }, [isCreateModalOpen, newAppointmentDate, newAppointmentTime, reloadDoctors]);
+  }, [isCreateModalOpen, newAppointmentDate, newAppointmentTime, reloadDoctors, user?.role, user?.username]);
 
   // Fetch all appointments for the selected date to check for clinic-wide conflicts
   // This bypasses view filters to ensure global conflict detection
@@ -183,7 +189,6 @@ export function CreateAppointmentModal() {
         setDateAppointments([]);
         return;
       }
-      setIsLoadingDateAppointments(true);
       try {
         const response = await fetch(`http://localhost:3001/api/appointments?startDate=${formData.date}&endDate=${formData.date}`);
         const result = await response.json();
@@ -192,8 +197,6 @@ export function CreateAppointmentModal() {
         }
       } catch (error) {
         console.error("Error fetching appointments for date:", error);
-      } finally {
-        setIsLoadingDateAppointments(false);
       }
     };
 
@@ -242,7 +245,7 @@ export function CreateAppointmentModal() {
         toast.error("Cannot schedule an appointment for a past date.");
         return;
       }
-    } catch (err) {
+    } catch {
       toast.error("Invalid date/time selected");
       return;
     }
@@ -287,7 +290,47 @@ export function CreateAppointmentModal() {
     }
 
     try {
-      await addAppointment({
+      // Conflict checks per rules:
+      // - Cannot double-book the same doctor at overlapping times
+      // - Cannot double-book the same patient at overlapping times
+      // - Overlaps with other doctors are allowed as long as the selected doctor is available
+      const [selHours, selMinutes] = formData.time.split(':').map(Number);
+      const newStart = selHours * 60 + selMinutes;
+      const newEnd = newStart + formData.duration;
+
+      const hasOverlapSameDoctor = dateAppointments.some(apt => {
+        if (apt.status === 'cancelled') return false;
+        if (String(apt.doctor) !== String(formData.doctor)) return false;
+        const [aptH, aptM] = apt.time.split(':').map(Number);
+        const aptStart = aptH * 60 + aptM;
+        const aptEnd = aptStart + (apt.duration || 30);
+        return (newStart < aptEnd) && (newEnd > aptStart);
+      });
+
+      const hasOverlapSamePatient = dateAppointments.some(apt => {
+        if (apt.status === 'cancelled') return false;
+        // match by patientId when available, otherwise patientName
+        const samePatient = (patientId && apt.patientId && String(apt.patientId) === String(patientId)) || (!patientId && String(apt.patientName) === String(patientName)) || (patientId && !apt.patientId && String(apt.patientName) === String(patientName));
+        if (!samePatient) return false;
+        const [aptH, aptM] = apt.time.split(':').map(Number);
+        const aptStart = aptH * 60 + aptM;
+        const aptEnd = aptStart + (apt.duration || 30);
+        return (newStart < aptEnd) && (newEnd > aptStart);
+      });
+
+      if (hasOverlapSameDoctor) {
+        toast.error("Selected doctor is not available at that time.");
+        setIsLoading(false);
+        return;
+      }
+
+      if (hasOverlapSamePatient) {
+        toast.error("Selected patient already has an overlapping appointment.");
+        setIsLoading(false);
+        return;
+      }
+
+  await addAppointment({
         patientName: patientName,
         patientId: patientId || patientName, // Fallback for safety
         date: formData.date,
@@ -298,7 +341,7 @@ export function CreateAppointmentModal() {
         price: formData.price,
         doctor: formData.doctor,
         notes: formData.notes,
-        status: formData.status as "scheduled" | "confirmed" | "pending" | "tentative" | "completed" | "cancelled",
+  status: formData.status as "scheduled" | "pending" | "tentative" | "completed" | "cancelled" | "To Pay",
         paymentStatus: formData.paymentStatus,
         balance: formData.balance
       });
@@ -327,17 +370,22 @@ export function CreateAppointmentModal() {
   }, [patients, formData.patientId]);
 
   const isSlotBusy = useCallback((time: string, duration: number) => {
+    // If no date selected or appointments not loaded, treat as available
     if (!formData.date || !dateAppointments) return false;
-    
+
+    // If no doctor selected yet, do not mark slots as busy — occupied state should depend on selected doctor
+    if (!formData.doctor) return false;
+
     const [hours, minutes] = time.split(':').map(Number);
     const newStart = hours * 60 + minutes;
     const newEnd = newStart + duration;
 
+    // Only consider appointments for the selected doctor when determining busy slots
     return dateAppointments.some(apt => {
-      // Basic check: not cancelled
       if (apt.status === 'cancelled') return false;
-      
-      const [aptHours, aptMinutes] = apt.time.split(':').map(Number);
+      if (String(apt.doctor) !== String(formData.doctor)) return false;
+
+      const [aptHours, aptMinutes] = String(apt.time).split(':').map(Number);
       const aptStart = aptHours * 60 + aptMinutes;
       const aptDuration = apt.duration || 30;
       const aptEnd = aptStart + aptDuration;
@@ -564,7 +612,8 @@ export function CreateAppointmentModal() {
                   value={formData.type.toString()}
                   onValueChange={(value) => {
                     const typeIndex = parseInt(value);
-                    setFormData(prev => ({ ...prev, type: typeIndex, customType: "" }));
+                      const price = getAppointmentPrice(typeIndex);
+                      setFormData(prev => ({ ...prev, type: typeIndex, customType: "", price, balance: recalcBalance(price, prev.discount) }));
                     setShowCustomTypeInput(typeIndex === APPOINTMENT_TYPES.length - 1);
                   }}
                 >
@@ -598,10 +647,28 @@ export function CreateAppointmentModal() {
                   id="price"
                   type="number"
                   value={formData.price !== undefined ? formData.price : ""}
-                  onChange={(e) => setFormData(prev => ({ ...prev, price: parseFloat(e.target.value) || 0 }))}
+                  onChange={(e) => {
+                    const p = parseFloat(e.target.value) || 0;
+                    setFormData(prev => ({ ...prev, price: p, balance: recalcBalance(p, prev.discount) }));
+                  }}
                   min="0"
                   step="0.01"
                   required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="discount">Discount ($)</Label>
+                <Input
+                  id="discount"
+                  type="number"
+                  value={formData.discount !== undefined ? formData.discount : 0}
+                  onChange={(e) => {
+                    const d = parseFloat(e.target.value) || 0;
+                    setFormData(prev => ({ ...prev, discount: d, balance: recalcBalance(prev.price || 0, d) }));
+                  }}
+                  min="0"
+                  step="0.01"
                 />
               </div>
 
@@ -651,6 +718,13 @@ export function CreateAppointmentModal() {
                     )}
                   </SelectContent>
                 </Select>
+                <div className="text-xs text-gray-500 mt-2">
+                  {formData.doctor ? (
+                    <span>Showing availability for: <span className="font-medium">{formData.doctor}</span></span>
+                  ) : (
+                    <span>Select a doctor to view availability</span>
+                  )}
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -664,7 +738,6 @@ export function CreateAppointmentModal() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="scheduled">Scheduled</SelectItem>
-                    <SelectItem value="confirmed">Confirmed</SelectItem>
                     <SelectItem value="pending">Pending</SelectItem>
                     <SelectItem value="tentative">Tentative</SelectItem>
                   </SelectContent>
@@ -675,7 +748,7 @@ export function CreateAppointmentModal() {
                 <Label htmlFor="paymentStatus">Payment Status</Label>
                 <Select
                   value={formData.paymentStatus}
-                  onValueChange={(value: any) => setFormData(prev => ({ ...prev, paymentStatus: value }))}
+                  onValueChange={(value: AppointmentFormData["paymentStatus"]) => setFormData(prev => ({ ...prev, paymentStatus: value }))}
                 >
                   <SelectTrigger id="paymentStatus">
                     <SelectValue placeholder="Select payment status" />

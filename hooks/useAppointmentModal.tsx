@@ -33,8 +33,8 @@ interface AppointmentModalContextType {
   refreshTrigger: number;
   appointments: Appointment[];
   isLoading: boolean;
-  addAppointment: (appointment: Omit<Appointment, "id" | "createdAt">) => Promise<any>;
-  updateAppointment: (id: string, updates: Partial<Appointment>) => Promise<any>;
+  addAppointment: (appointment: Omit<Appointment, "id" | "createdAt">) => Promise<Appointment>;
+  updateAppointment: (id: string, updates: Partial<Appointment>) => Promise<Appointment>;
   deleteAppointment: (id: string) => Promise<void>;
 }
 

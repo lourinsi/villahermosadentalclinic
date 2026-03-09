@@ -1,6 +1,6 @@
 import { AppointmentModalProvider } from "@/hooks/useAppointmentModal";
 import { PaymentModalProvider } from "@/hooks/usePaymentModal";
-import { AuthProvider } from "@/hooks/useAuth.tsx";
+import { AuthProvider } from "@/hooks/useAuth";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";

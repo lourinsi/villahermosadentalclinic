@@ -29,7 +29,7 @@ const AccountPage = () => {
             setError(result.message || "Failed to fetch patient data.");
             toast.error(result.message || "Failed to fetch patient data.");
           }
-        } catch (err) {
+        } catch {
           setError("An error occurred while fetching patient data.");
           toast.error("An error occurred while fetching patient data.");
         } finally {
@@ -48,7 +48,7 @@ const AccountPage = () => {
     if (!patient) return;
 
     // Create a new object for the update, excluding fields that should not be sent
-    const { id, password, createdAt, updatedAt, deleted, deletedAt, ...updateData } = patient;
+    const { id: _id, password: _password, createdAt: _createdAt, updatedAt: _updatedAt, deleted: _deleted, deletedAt: _deletedAt, ...updateData } = patient;
 
     try {
         const response = await fetch(`http://localhost:3001/api/patients/${patient.id}`, {
@@ -62,7 +62,7 @@ const AccountPage = () => {
         } else {
             toast.error(result.message || "Failed to update account details.");
         }
-    } catch (error) {
+    } catch {
         toast.error("An error occurred while updating account details.");
     }
   };
@@ -88,7 +88,7 @@ const AccountPage = () => {
             } else {
                 toast.error(result.message || "Failed to change password.");
             }
-        } catch (error) {
+        } catch {
             toast.error("An error occurred while changing password.");
         }
     };

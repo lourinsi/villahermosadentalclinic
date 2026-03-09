@@ -27,7 +27,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Check if user is already authenticated on mount
   useEffect(() => {
-    checkAuth();
+    (async () => {
+      await checkAuth();
+    })();
   }, []);
 
   const checkAuth = async () => {

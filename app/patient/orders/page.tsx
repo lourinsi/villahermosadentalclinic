@@ -31,7 +31,7 @@ const OrdersContent = () => {
     
     const { user, isLoading: authLoading } = useAuth();
     const { appointments, isLoading: appointmentsLoading } = useAppointments(undefined, { patientId: user?.patientId });
-    const { openPatientPaymentModal } = usePaymentModal();
+    const { openPatientPaymentFor } = usePaymentModal();
     const [sortedAppointments, setSortedAppointments] = useState<Appointment[]>([]);
     
     // Filter states
@@ -56,14 +56,37 @@ const OrdersContent = () => {
             if (appointmentIdParam) {
                 const apt = sorted.find(a => a.id === appointmentIdParam);
                 if (apt && apt.paymentStatus !== 'paid') {
-                    openPatientPaymentModal(appointments, apt.id);
+                    openPatientPaymentFor(apt);
                 }
             }
         }
-    }, [appointments, appointmentIdParam, openPatientPaymentModal]);
+    }, [appointments, appointmentIdParam, openPatientPaymentFor]);
+
+    useEffect(() => {
+        const onUpdated = (e: Event) => {
+            try {
+                const detail = (e as CustomEvent)?.detail || {};
+                const { appointmentId, newStatus, newPaymentStatus } = detail;
+                if (appointmentId) {
+                    // trigger a refresh to ensure canonical state
+                    // useAppointments hook is used above, so changing nothing here; rely on its polling/refresh
+                    // but we can also optimistically update local state
+                    setSortedAppointments(prev => prev.map(a => a.id === appointmentId ? { ...a, status: newStatus || a.status, paymentStatus: newPaymentStatus || a.paymentStatus } : a));
+                }
+            } catch (err) {}
+        };
+        window.addEventListener('appointments:updated', onUpdated as EventListener);
+        return () => window.removeEventListener('appointments:updated', onUpdated as EventListener);
+    }, []);
 
     const handleOpenPayment = (apt: Appointment) => {
-        openPatientPaymentModal(appointments, apt.id);
+        openPatientPaymentFor(apt);
+    };
+
+    const displayStatus = (s?: string) => {
+        if (!s) return "";
+        if (s.toLowerCase() === 'tentative') return 'Reserved';
+        return s.split(' ').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
     };
 
     const resetFilters = () => {
@@ -153,7 +176,7 @@ const OrdersContent = () => {
                         <SelectItem value="scheduled">Scheduled</SelectItem>
                         <SelectItem value="confirmed">Confirmed</SelectItem>
                         <SelectItem value="pending">Pending</SelectItem>
-                        <SelectItem value="tentative">Tentative</SelectItem>
+                        <SelectItem value="tentative">Reserved</SelectItem>
                         <SelectItem value="completed">Completed</SelectItem>
                         <SelectItem value="cancelled">Cancelled</SelectItem>
                     </SelectContent>
@@ -232,9 +255,9 @@ const OrdersContent = () => {
                                         <p className="text-sm text-muted-foreground">with Dr. {appointment.doctor}</p>
                                     </div>
                                     <div className="flex flex-col items-end gap-2">
-                                        <Badge variant={appointment.status === 'completed' ? 'default' : 'secondary'}>{appointment.status}</Badge>
+                                        <Badge variant={appointment.status === 'completed' ? 'default' : 'secondary'}>{displayStatus(appointment.status)}</Badge>
                                         {appointment.paymentStatus &&
-                                            <Badge variant={appointment.paymentStatus === 'paid' ? 'success' : 'destructive'} className={appointment.paymentStatus === 'paid' ? 'bg-green-100 text-green-800' : ''}>
+                                            <Badge variant={appointment.paymentStatus === 'paid' ? 'outline' : 'destructive'} className={appointment.paymentStatus === 'paid' ? 'bg-green-100 text-green-800' : ''}>
                                                 {appointment.paymentStatus.toUpperCase()}
                                             </Badge>
                                         }
@@ -261,7 +284,7 @@ const OrdersContent = () => {
                             </CardContent>
                             <CardFooter className="flex justify-end pt-2 border-t">
                                 {appointment.paymentStatus !== 'paid' && appointment.status !== 'cancelled' ? (
-                                    <Button onClick={() => handleOpenPayment(appointment)} className="bg-blue-600 hover:bg-blue-700 text-white gap-2">
+                                    <Button onClick={() => handleOpenPayment(appointment)} className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2">
                                         <CreditCard className="h-4 w-4" />
                                         Pay Now
                                     </Button>

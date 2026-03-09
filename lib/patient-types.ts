@@ -34,7 +34,7 @@ export interface Patient {
 export interface ApiResponse<T> {
   success: boolean;
   message: string;
-  meta?: any;
+  meta?: Record<string, unknown>;
   data?: T;
   error?: string;
 }

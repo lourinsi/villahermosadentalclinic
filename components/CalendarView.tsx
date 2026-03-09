@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { DateRange } from "react-day-picker";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
@@ -13,13 +13,11 @@ import {
   Search, 
   Calendar as CalendarIcon, 
   CalendarRange, 
-  Edit, 
   Trash2, 
   Clock,
   X,
   DollarSign,
-  ListFilter,
-  Keyboard
+  ListFilter
 } from "lucide-react";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { Appointment, AppointmentFilters } from "../hooks/useAppointments";
@@ -29,13 +27,14 @@ import { useDoctors } from "../hooks/useDoctors";
 import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
-import { Calendar } from "./ui/calendar";
-import { Label } from "./ui/label";
 import { APPOINTMENT_TYPES, getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
 import { AllAppointmentsView } from "./AllAppointmentsView";
+import { Avatar, AvatarImage, AvatarFallback } from "./ui/avatar";
+import CalendarPopover from "./CalendarPopover";
 
-type ViewMode = "month" | "week" | "day" | "custom" | "all";
+import ViewMode from "./viewMode";
+import { useRouter, useSearchParams } from 'next/navigation';
 
 const appointmentColors: Record<string, { bg: string; text: string; border: string }> = {
   "Routine Cleaning": { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" },
@@ -47,20 +46,20 @@ const appointmentColors: Record<string, { bg: string; text: string; border: stri
   "Other": { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200" },
 };
 
-const APPOINTMENT_STATUSES = ["all", "scheduled", "confirmed", "pending", "tentative", "completed", "cancelled"];
+const APPOINTMENT_STATUSES = ["all", "scheduled", "completed"];
 
 
-export function CalendarView() {
+export function CalendarView({ portal = 'admin' }: { portal?: 'admin' | 'doctor' | 'patient' }) {
   const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedDoctor, setSelectedDoctor] = useState("all");
   const [selectedType, setSelectedType] = useState("all");
-  const [selectedStatus, setSelectedStatus] = useState("all");
+  // Default to showing scheduled appointments only (remove cart/pending filters)
+  const [selectedStatus, setSelectedStatus] = useState("scheduled");
   const [isLoadingView, setIsLoadingView] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
-  const [activeRangeType, setActiveRangeType] = useState<"from" | "to">("from");
   
   const { 
     openCreateModal, 
@@ -74,16 +73,25 @@ export function CalendarView() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [appointmentToDelete, setAppointmentToDelete] = useState<string | null>(null);
   const { doctors, isLoadingDoctors } = useDoctors();
-  
-  // Filter appointments when "all" status is selected to exclude "pending"
-  const filteredAppointments = useMemo(() => {
-    if (selectedStatus === "all") {
-      return appointments.filter(apt => apt.status !== "pending");
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    const doctorId = searchParams.get("doctor");
+    if (doctorId) {
+      setSelectedDoctor(doctorId);
     }
-    return appointments;
+  }, [searchParams]);
+
+  // Normalize statuses and exclude cancelled appointments from the calendar
+  const filteredAppointments = useMemo(() => {
+    return appointments
+      .map((a) => ({ ...a, status: (a.status as string) === 'confirmed' ? 'scheduled' : a.status }))
+      .filter((a) => a.status !== 'cancelled')
+      .filter((a) => selectedStatus === 'all' ? true : a.status === selectedStatus);
   }, [appointments, selectedStatus]);
 
-  const getViewRange = (date: Date) => {
+  const getViewRange = useCallback((date: Date) => {
     const start = new Date(date);
     const end = new Date(date);
     start.setHours(0, 0, 0, 0);
@@ -120,32 +128,36 @@ export function CalendarView() {
     }
 
     return { start, end };
-  };
+  }, [viewMode, dateRange]);
 
   useEffect(() => {
+    // If we're in the custom view but the user hasn't selected both a start and end date,
+    // don't fetch yet. This prevents an immediate refresh when the custom picker is opened
+    // or when only the start date has been picked.
+    if (viewMode === 'custom' && !(dateRange?.from && dateRange?.to)) {
+      return;
+    }
+
     const { start, end } = getViewRange(selectedDate);
-    
-    let filters: AppointmentFilters = {};
+    const filters: AppointmentFilters = {};
 
     if (searchTerm) {
       filters.search = searchTerm;
     } else {
-      let fetchStartStr: string;
-      let fetchEndStr: string;
+      let fetchStartStr = "";
+      let fetchEndStr = "";
 
       if (viewMode === 'custom' && dateRange?.from && dateRange?.to) {
         fetchStartStr = formatDateToYYYYMMDD(dateRange.from);
         fetchEndStr = formatDateToYYYYMMDD(dateRange.to);
-      } else if (viewMode !== 'all') { // For day, week, month, use a monthly range
+      } else if (viewMode !== 'all') {
         const monthStart = new Date(start.getFullYear(), start.getMonth(), 1);
         const monthEnd = new Date(end.getFullYear(), end.getMonth() + 1, 0);
         monthEnd.setHours(23, 59, 59, 999);
         fetchStartStr = formatDateToYYYYMMDD(monthStart);
         fetchEndStr = formatDateToYYYYMMDD(monthEnd);
-      } else { // 'all' view has no date constraints unless custom range is set
-        fetchStartStr = "";
-        fetchEndStr = "";
       }
+
       filters.startDate = fetchStartStr;
       filters.endDate = fetchEndStr;
     }
@@ -159,8 +171,9 @@ export function CalendarView() {
     refreshAppointments(filters);
     const timer = setTimeout(() => setIsLoadingView(false), 500);
     return () => clearTimeout(timer);
-    
-  }, [viewMode, selectedDate, searchTerm, dateRange, selectedDoctor, selectedType, selectedStatus]);
+  // Only re-run when relevant values change. For custom view we only care about
+  // changes to the actual start/end dates (not the whole range object reference).
+  }, [viewMode, selectedDate, searchTerm, dateRange?.from, dateRange?.to, selectedDoctor, selectedType, selectedStatus, getViewRange, refreshAppointments]);
 
   const timeSlots = TIME_SLOTS;
 
@@ -182,6 +195,8 @@ export function CalendarView() {
       return `${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
     } else if (viewMode === "month") {
       return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    } else if (viewMode === "all") {
+      return "All Appointments";
     } else {
       if (dateRange?.from && dateRange?.to) {
         return `${dateRange.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${dateRange.to.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
@@ -314,7 +329,7 @@ export function CalendarView() {
   };
 
   const calculateAppointmentStyle = (duration: number = 60) => {
-    const slotHeight = 80; // pixels per 30-minute slot
+  const slotHeight = 64; // pixels per 30-minute slot (match patient view density)
     const slotsOccupied = duration / 30;
     return {
       height: `${slotHeight * slotsOccupied - 4}px`
@@ -354,12 +369,13 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
 
     return (
       <div className="space-y-0 relative">
-        {timeSlots.map((timeSlot) => {
+  {timeSlots.map((timeSlot) => {
           const appointmentsStartingAtSlot = dayAppointments.filter((apt: Appointment) => apt.time === timeSlot);
           const currentSlotIsCovered = isSlotCovered(timeSlot); // Check if the 30-min slot is covered
 
           return (
-            <div key={timeSlot} className="flex items-start min-h-[80px] border-b border-gray-100 relative group">
+            <div key={timeSlot} className="flex items-start min-h-[64px] border-b border-gray-100 relative group">
+              {/* Plus button for occupied slots - upper right */}
               {!currentSlotIsCovered && (
                 /* Wide position for empty slots: centered in the main area */
                 <div
@@ -372,10 +388,25 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
 
               {/* Time Label */}
               <div className="w-28 pl-4 pt-2 text-sm text-muted-foreground font-medium sticky left-0 bg-white z-10 pointer-events-none">
-                {formatTime(timeSlot)}
+                <div>{formatTime(timeSlot)}</div>
+                {/* Plus button for occupied slots - underneath time */}
+                {currentSlotIsCovered && (
+                  <div className="mt-2 opacity-0 group-hover:opacity-100 transition-all pointer-events-auto">
+                    <button
+                      className="bg-white p-1 rounded-md shadow-sm hover:bg-violet-50/50 hover:border-violet-200 border border-transparent cursor-pointer flex items-center justify-center"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openCreateModal(selectedDate, timeSlot);
+                      }}
+                      aria-label={`Add appointment at ${timeSlot}`}
+                    >
+                      <Plus className="h-4 w-4 text-violet-300 group-hover:text-violet-600" />
+                    </button>
+                  </div>
+                )}
               </div>
-              
-              <div className="flex-1 relative min-h-[80px]">
+
+              <div className="flex-1 relative min-h-[64px]">
                 {/* Appointments starting at this slot */}
                 {appointmentsStartingAtSlot.map((appointment: Appointment) => {
                   const columnIndex = appointmentColumns.get(appointment.id) ?? 0;
@@ -387,55 +418,48 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                   const left = `${(columnIndex * 100) / totalColumns}%`;
                   
                   return (
-                    <div 
+                    <div
                       key={appointment.id}
-                      className={`absolute top-0 ${colors?.bg} ${colors?.text} ${colors?.border} border-l-4 rounded-lg p-3 shadow-sm hover:shadow-md transition-all cursor-pointer z-20 overflow-hidden`}
+                      className={`absolute top-0 ${colors?.bg} ${colors?.text} ${colors?.border} border-l-4 rounded-lg p-3 shadow-sm hover:shadow-md transition-all cursor-pointer z-20 overflow-hidden ${
+                        appointment.status === "tentative" ? "border-dashed opacity-90" : 
+                        appointment.status === "To Pay" ? "border-double border-orange-400" : ""
+                      }`}
                       style={{
                         ...calculateAppointmentStyle(appointment.duration),
                         width: `calc(${width} - 4px)`,
                         left: `calc(${left} + 2px)`,
                       }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openEditModal(appointment);
-                          }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openEditModal(appointment, portal === 'patient');
+                      }}
                     >
                       <div className="flex flex-col h-full">
-                        <div className="flex items-start justify-between">
-                          <div className="font-semibold text-sm truncate pr-2">
-                            {appointment.patientName}
+                        <div className="flex items-start gap-3">
+                          <div className="flex-shrink-0">
+                            <Avatar className="h-10 w-10 border border-gray-100">
+                              {(() => {
+                                const doc = doctors.find(d => String(d.name) === String(appointment.doctor) || String(d.id) === String(appointment.doctor));
+                                const src = doc?.profilePicture || appointment.doctorProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.doctor}`;
+                                return <AvatarImage src={src} alt={appointment.doctor} />;
+                              })()}
+                              <AvatarFallback>{String(appointment.doctor || '').substring(0,2).toUpperCase()}</AvatarFallback>
+                            </Avatar>
                           </div>
-                          <div className="flex flex-shrink-0 space-x-1">
-                            <Button 
-                              variant="ghost" 
-                              size="sm" 
-                              className="h-6 w-6 p-0 hover:bg-black/5"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openEditModal(appointment);
-                              }}
-                            >
-                              <Edit className="h-3 w-3" />
-                            </Button>
-                            <Button 
-                              variant="ghost" 
-                              size="sm" 
-                              className="h-6 w-6 p-0 hover:bg-black/5"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setAppointmentToDelete(appointment.id);
-                                setIsDeleteDialogOpen(true);
-                              }}
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-semibold text-sm truncate pr-2 flex items-center gap-2">
+                              {appointment.patientName}
+                              {appointment.paymentStatus === 'unpaid' && (
+                                <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[8px] h-3 px-1 uppercase font-black">Unpaid</Badge>
+                              )}
+                            </div>
+                            <div className="text-xs opacity-90 truncate">
+                              {typeName} • {appointment.duration || 30}min
+                            </div>
+                            <div className="text-xs opacity-80 mt-1 truncate flex items-center gap-2">
+                              <div className="text-[12px] font-medium">Dr. {appointment.doctor}</div>
+                            </div>
                           </div>
-                        </div>
-                        <div className="text-xs opacity-90 truncate">
-                          {typeName} • {appointment.duration || 30}min
-                        </div>
-                        <div className="text-xs opacity-80 mt-1 truncate">
-                          {appointment.doctor}
                         </div>
                         {appointment.price != null && (
                           <div className="text-xs font-medium mt-auto pt-1">
@@ -522,17 +546,34 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                       key={idx} 
                       className="flex-1 border-l border-gray-100 relative min-h-[80px] group"
                     >
-                        {/* Plus button */}
+                        {/* Plus button for occupied slots - upper right */}
+                        {currentSlotIsCovered && (
+                            <div className="absolute right-1 top-1 opacity-0 group-hover:opacity-100 transition-all z-30">
+                                <button
+                                    className=" "
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        openCreateModal(day, timeSlot);
+                                    }}
+                                    aria-label={`Add appointment at ${timeSlot}`}
+                                >
+                                    <Plus className="h-4 w-4 text-violet-300 group-hover:text-violet-600" />
+                                </button>
+                            </div>
+                        )}
+
+                        {/* Centered plus button for empty slots */}
                         {!currentSlotIsCovered && (
                             <div
-                            className="absolute inset-1 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-10 hover:bg-violet-50/50 rounded border border-dashed border-transparent hover:border-violet-200/50"
-                            onClick={() => openCreateModal(day, timeSlot)}
+                                className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-10 hover:bg-violet-50/50 flex items-center justify-center"
+                                onClick={() => openCreateModal(day, timeSlot)}
                             >
-                            <Plus className="h-5 w-5 text-violet-300" />
+                                <Plus className="h-5 w-5 text-violet-300" />
                             </div>
                         )}
 
                       <div className="relative w-full h-full">
+
                         {appointmentsForSlot.map((appointment: Appointment) => {
                           const columnIndex = appointmentColumns.get(appointment.id) ?? 0;
                           const totalColumns = maxOverlappingAt.get(appointment.id) ?? 1;
@@ -545,7 +586,10 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                           return (
                             <div 
                               key={appointment.id}
-                              className={`absolute top-0 ${colors?.bg} ${colors?.text} ${colors?.border} border-l-4 rounded-lg p-2 shadow-sm hover:shadow-md transition-all cursor-pointer z-20 overflow-hidden text-xs`}
+                              className={`absolute top-0 ${colors?.bg} ${colors?.text} ${colors?.border} border-l-4 rounded-lg p-2 shadow-sm hover:shadow-md transition-all cursor-pointer z-20 overflow-hidden text-xs ${
+                                appointment.status === "tentative" ? "border-dashed opacity-90" : 
+                                appointment.status === "To Pay" ? "border-double border-orange-400" : ""
+                              }`}
                               style={{
                                 ...calculateAppointmentStyle(appointment.duration),
                                 width: `calc(${width} - 4px)`,
@@ -553,11 +597,31 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                               }}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                openEditModal(appointment);
+                                openEditModal(appointment, portal === 'patient');
                               }}
                             >
                               <div className="flex justify-between items-start">
-                                <div className="font-semibold truncate pr-1">{appointment.patientName}</div>
+                                <div className="flex items-center gap-2 truncate pr-1">
+                                  <div className="flex-shrink-0">
+                                    <Avatar className="h-7 w-7 border border-gray-100">
+                                      {(() => {
+                                        const doc = doctors.find(d => String(d.name) === String(appointment.doctor) || String(d.id) === String(appointment.doctor));
+                                        const src = doc?.profilePicture || (appointment as any).doctorProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.doctor}`;
+                                        return <AvatarImage src={src} alt={appointment.doctor} />;
+                                      })()}
+                                      <AvatarFallback>{String(appointment.doctor || '').substring(0,2).toUpperCase()}</AvatarFallback>
+                                    </Avatar>
+                                  </div>
+                                  <div className="font-semibold truncate flex items-center gap-1">
+                                    {appointment.patientName}
+                                    {appointment.status === "tentative" && (
+                                      <Badge variant="outline" className="text-[7px] h-2.5 px-0.5 bg-yellow-100 border-yellow-300 text-yellow-700 leading-none">R</Badge>
+                                    )}
+                                    {appointment.status === "To Pay" && (
+                                      <Badge variant="outline" className="text-[7px] h-2.5 px-0.5 bg-orange-100 border-orange-300 text-orange-700 leading-none">P</Badge>
+                                    )}
+                                  </div>
+                                </div>
                               </div>
                               <div className="truncate opacity-90">{typeName}</div>
                               <div className="truncate opacity-75 mt-0.5">{appointment.doctor}</div>
@@ -618,7 +682,8 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
               className={`min-h-[120px] p-2 border-r border-b border-gray-200 transition-colors cursor-pointer ${
                 item.currentMonth ? 'bg-white hover:bg-gray-50' : 'bg-gray-50/50 text-gray-400'
               }`}
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation();
                 setSelectedDate(item.date);
                 setViewMode("day");
               }}
@@ -639,12 +704,21 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                 {sortedDayAppointments.slice(0, 3).map((apt: Appointment) => {
                   const typeName = getAppointmentTypeName(apt.type, apt.customType);
                   const colors = getColorForType(typeName);
+                  const avatarSrc = (apt as any).patientProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(String(apt.patientName || apt.patientId || 'patient'))}`;
                   return (
                     <div
                       key={apt.id}
-                      className={`text-[10px] p-1 rounded truncate border-l-2 ${colors.bg} ${colors.text} ${colors.border}`}
+                      className={`text-[10px] p-1 rounded truncate border-l-2 ${colors.bg} ${colors.text} ${colors.border} ${apt.status === "tentative" ? "border-dashed opacity-80" : apt.status === "To Pay" ? "border-orange-400" : ""} flex items-center gap-2`}
                     >
-                      {apt.time} {apt.patientName} {apt.price != null && ` ($${apt.price.toFixed(2)})`}
+                      <Avatar className="h-5 w-5 border border-gray-100 flex-shrink-0">
+                        <AvatarImage src={avatarSrc} alt={apt.patientName} />
+                        <AvatarFallback>{String((apt.patientName || String(apt.patientId || '')).substring(0,2)).toUpperCase()}</AvatarFallback>
+                      </Avatar>
+                      <div className="truncate">
+                        {apt.time} {apt.patientName}
+                        {apt.status === "tentative" && " (R)"}
+                        {apt.status === "To Pay" && " (P)"}
+                      </div>
                     </div>
                   )
                 })}
@@ -663,7 +737,16 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
 
   const renderCustomView = () => {
     // Client-side filtering is removed, appointments are pre-filtered
-    const sortedAppointments = [...filteredAppointments].sort((a, b) => parseBackendDateToLocal(a.date).getTime() - parseBackendDateToLocal(b.date).getTime());
+    const sortedAppointments = [...filteredAppointments].filter((a) => {
+      if (searchTerm) return true; // If searching, show all matching search results
+      if (!dateRange?.from || !dateRange?.to) return false;
+      const d = parseBackendDateToLocal(a.date);
+      // Strip time for pure date comparison
+      const checkDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      const fromDate = new Date(dateRange.from.getFullYear(), dateRange.from.getMonth(), dateRange.from.getDate());
+      const toDate = new Date(dateRange.to.getFullYear(), dateRange.to.getMonth(), dateRange.to.getDate());
+      return checkDate >= fromDate && checkDate <= toDate;
+    }).sort((a, b) => parseBackendDateToLocal(a.date).getTime() - parseBackendDateToLocal(b.date).getTime());
     
     return (
       <div className="space-y-4 p-4">
@@ -741,10 +824,17 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
               </button>
             )}
           </div>
-          <Button variant="brand" onClick={() => openCreateModal(selectedDate)} className="h-10">
-            <Plus className="h-4 w-4 mr-2" />
-            New Appointment
-          </Button>
+          {portal === 'patient' ? (
+            <Button variant="brand" onClick={() => router.push('/patient/doctors')} className="h-10">
+              <Plus className="h-4 w-4 mr-2" />
+              Find Doctors
+            </Button>
+          ) : (
+            <Button variant="brand" onClick={() => openCreateModal(selectedDate)} className="h-10">
+              <Plus className="h-4 w-4 mr-2" />
+              New Appointment
+            </Button>
+          )}
         </div>
       </div>
 
@@ -752,11 +842,11 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
         <CardContent className="p-4">
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div className="flex items-center space-x-4">
-              <div className="flex items-center bg-gray-50 rounded-lg p-1 border">
-                <Button variant="ghost" size="sm" onClick={() => navigateDate('prev')} className="h-8 w-8 p-0">
+              <div className={`flex items-center bg-gray-50 rounded-lg p-1 border ${viewMode === 'all' ? 'opacity-50 pointer-events-none' : ''}`}>
+                <Button variant="ghost" size="sm" onClick={() => navigateDate('prev')} className="h-8 w-8 p-0" disabled={viewMode === 'all'}>
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => navigateDate('next')} className="h-8 w-8 p-0">
+                <Button variant="ghost" size="sm" onClick={() => navigateDate('next')} className="h-8 w-8 p-0" disabled={viewMode === 'all'}>
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
@@ -769,250 +859,45 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0 shadow-2xl border-none rounded-2xl" align="start">
-                  <div className={`bg-white rounded-2xl overflow-hidden ${viewMode === "custom" ? "min-w-[600px]" : "min-w-[320px]"}`}>
-                    {viewMode === "custom" ? (
-                      <>
-                        {/* Header: Range Summary and Inputs */}
-                        <div className="p-6 border-b flex items-start justify-between">
-                          <div className="space-y-1">
-                            <h3 className="text-2xl font-bold text-gray-900">
-                              {dateRange?.from && dateRange?.to ? (
-                                <>
-                                  {Math.ceil(Math.abs(dateRange.to.getTime() - dateRange.from.getTime()) / (1000 * 60 * 60 * 24)) + 1} days range
-                                </>
-                              ) : (
-                                "Select dates"
-                              )}
-                            </h3>
-                            <p className="text-sm text-gray-500 font-medium">
-                              {dateRange?.from ? (
-                                <>
-                                  {dateRange.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                                  {dateRange.to && ` - ${dateRange.to.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`}
-                                </>
-                              ) : (
-                                "Choose your appointment period"
-                              )}
-                            </p>
-                          </div>
-
-                          <div className="flex items-center gap-0 border rounded-xl overflow-hidden shadow-sm">
-                            <button 
-                              onClick={() => setActiveRangeType("from")}
-                              className={`px-4 py-2 border-r bg-white min-w-[140px] text-left transition-colors ${activeRangeType === "from" ? "ring-2 ring-inset ring-violet-600" : "hover:bg-gray-50"}`}
-                            >
-                              <Label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-0.5 cursor-pointer">Start Date</Label>
-                              <div className="text-sm font-semibold text-gray-700">
-                                {dateRange?.from ? dateRange.from.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }) : "MM/DD/YYYY"}
-                              </div>
-                            </button>
-                            <button 
-                              onClick={() => setActiveRangeType("to")}
-                              className={`px-4 py-2 bg-white min-w-[140px] text-left transition-colors ${activeRangeType === "to" ? "ring-2 ring-inset ring-violet-600" : "hover:bg-gray-50"}`}
-                            >
-                              <Label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block mb-0.5 cursor-pointer">End Date</Label>
-                              <div className="text-sm font-semibold text-gray-700">
-                                {dateRange?.to ? dateRange.to.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }) : "MM/DD/YYYY"}
-                              </div>
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* View Mode Switcher */}
-                        <div className="px-6 py-3 bg-gray-50/50 border-b flex items-center gap-3">
-                          <span className="text-xs font-bold text-gray-400 uppercase tracking-widest mr-2">View:</span>
-                          <div className="flex items-center bg-white rounded-lg p-1 border shadow-sm">
-                            {(["day", "week", "month", "custom", "all"] as const).map((mode) => (
-                              <Button
-                                key={mode}
-                                variant={viewMode === mode ? "brand" : "ghost"}
-                                size="sm"
-                                className={`h-8 px-4 capitalize font-bold text-xs ${viewMode === mode ? "" : "text-gray-500 hover:text-gray-900"}`}
-                                onClick={() => {
-                                  setSearchTerm("");
-                                  setViewMode(mode);
-                                  if (mode !== "custom") setShowDatePicker(false);
-                                }}
-                              >
-                                {mode}
-                              </Button>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* Calendar Content */}
-                        <div className="p-4 flex justify-center">
-                          <Calendar
-                            mode="range"
-                            selected={dateRange}
-                            onSelect={(_range: DateRange | undefined, selectedDay: Date) => {
-                              setSearchTerm("");
-                              // When using mode="range", the library handles the range logic.
-                              // We use activeRangeType to override/direct which part of the range is being set.
-                              const selectedDate = selectedDay;
-                              
-                              if (activeRangeType === "from") {
-                                if (selectedDate) {
-                                  setDateRange({ from: selectedDate, to: dateRange?.to && selectedDate <= dateRange.to ? dateRange.to : undefined });
-                                  setActiveRangeType("to");
-                                }
-                              } else {
-                                if (selectedDate) {
-                                  if (dateRange?.from && selectedDate < dateRange.from) {
-                                    // If user picks an end date before start date, treat it as new start date
-                                    setDateRange({ from: selectedDate, to: undefined });
-                                    setActiveRangeType("to");
-                                  } else {
-                                    setDateRange({ from: dateRange?.from || selectedDate, to: selectedDate });
-                                  }
-                                }
-                              }
-                            }}
-                            numberOfMonths={2}
-                            className="border-none shadow-none"
-                            classNames={{
-                              months: "flex flex-row gap-8",
-                              month: "space-y-4",
-                              caption: "flex justify-center pt-1 relative items-center",
-                              caption_label: "text-sm font-bold text-gray-900",
-                              nav: "space-x-1 flex items-center",
-                              nav_button: "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100",
-                              nav_button_previous: "absolute left-1",
-                              nav_button_next: "absolute right-1",
-                              table: "w-full border-collapse space-y-1",
-                              head_row: "flex",
-                              head_cell: "text-gray-400 rounded-md w-9 font-bold text-[10px] uppercase",
-                              row: "flex w-full mt-2",
-                              cell: "h-9 w-9 text-center text-sm p-0 relative [&:has([aria-selected].day-range-end)]:rounded-r-full [&:has([aria-selected].day-range-start)]:rounded-l-full first:[&:has([aria-selected])]:rounded-l-full last:[&:has([aria-selected])]:rounded-r-full focus-within:relative focus-within:z-20",
-                              day: "h-9 w-9 p-0 font-bold aria-selected:opacity-100 rounded-full hover:bg-gray-100 transition-colors",
-                              day_range_start: "day-range-start bg-violet-600 text-white hover:bg-violet-600 hover:text-white focus:bg-violet-600 focus:text-white",
-                              day_range_end: "day-range-end bg-violet-600 text-white hover:bg-violet-600 hover:text-white focus:bg-violet-600 focus:text-white",
-                              day_selected: "bg-violet-600 text-white hover:bg-violet-600 hover:text-white focus:bg-violet-600 focus:text-white",
-                              day_today: "bg-gray-100 text-gray-900",
-                              day_outside: "text-gray-300 opacity-50",
-                              day_disabled: "text-gray-300 opacity-50",
-                              day_range_middle: "aria-selected:bg-violet-50 aria-selected:text-violet-900 rounded-none",
-                              day_hidden: "invisible",
-                            }}
-                          />
-                        </div>
-
-                        {/* Footer: Action Buttons */}
-                        <div className="p-4 border-t bg-gray-50/30 flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                             <Button 
-                              variant="ghost" 
-                              size="icon" 
-                              className="h-10 w-10 text-gray-400 hover:text-violet-600"
-                            >
-                              <Keyboard className="h-5 w-5" />
-                            </Button>
-                          </div>
-                          
-                          <div className="flex items-center gap-3">
-                            <Button 
-                              variant="ghost" 
-                              className="text-sm font-bold text-gray-900 hover:bg-gray-100 underline decoration-2 underline-offset-4"
-                              onClick={() => {
-                                setDateRange(undefined);
-                                setSearchTerm("");
-                              }}
-                            >
-                              Clear dates
-                            </Button>
-                            <Button 
-                              className="bg-violet-600 hover:bg-violet-700 text-white px-6 py-2 rounded-xl font-bold transition-all shadow-md active:scale-95"
-                              onClick={() => setShowDatePicker(false)}
-                            >
-                              Close
-                            </Button>
-                          </div>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="p-4 space-y-4 bg-white rounded-xl">
-                        <div className="space-y-2">
-                          <Label className="text-xs font-bold uppercase tracking-wider text-gray-400">View Mode</Label>
-                          <div className="grid grid-cols-2 gap-2">
-                            {(["day", "week", "month", "custom", "all"] as const).map((mode) => (
-                              <Button
-                                key={mode}
-                                variant={viewMode === mode ? "brand" : "outline"}
-                                size="sm"
-                                className="h-9 capitalize font-medium"
-                                onClick={() => {
-                                  setSearchTerm("");
-                                  setViewMode(mode);
-                                  if (mode !== "custom") setShowDatePicker(false);
-                                }}
-                              >
-                                {mode}
-                              </Button>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="border-t pt-4">
-                          <Label className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3 block">
-                            Select Date
-                          </Label>
-                          <Calendar
-                            mode="single"
-                            selected={selectedDate}
-                            onSelect={(date: Date | undefined) => {
-                              if (date) {
-                                setSearchTerm("");
-                                setSelectedDate(date);
-                                setViewMode(viewMode);
-                                setShowDatePicker(false);
-                              }
-                            }}
-                            className="rounded-md border shadow-sm"
-                            classNames={{
-                              today: "bg-violet-600 text-white rounded-full",
-                            }}
-                            components={{
-                              MonthCaption: ({ calendarMonth, displayIndex, ...props }: any) => (
-                                <div {...props}>
-                                  <span 
-                                    className="hover:text-violet-600 transition-colors cursor-pointer text-sm font-medium"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setSearchTerm("");
-                                      setSelectedDate(calendarMonth.date);
-                                      setViewMode("month");
-                                      setShowDatePicker(false);
-                                    }}
-                                  >
-                                    {calendarMonth.date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-                                  </span>
-                                </div>
-                              )
-                            }}
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  <CalendarPopover 
+                    viewMode={viewMode}
+                    setViewMode={(mode: any) => {
+                      setSearchTerm("");
+                      setViewMode(mode);
+                    }}
+                    selectedDate={selectedDate}
+                    setSelectedDate={(date) => {
+                      setSearchTerm("");
+                      setSelectedDate(date);
+                    }}
+                    dateRange={dateRange}
+                    setDateRange={(range) => {
+                      setSearchTerm("");
+                      setDateRange(range);
+                    }}
+                    onClose={() => setShowDatePicker(false)}
+                  />
                 </PopoverContent>
               </Popover>
             </div>
             
             <div className="flex items-center space-x-3">
-              <div className="flex items-center gap-2">
-                <Users className="h-4 w-4 text-gray-400" />
-                <Select value={selectedDoctor} onValueChange={setSelectedDoctor}>
-                  <SelectTrigger className="w-[180px] h-10 shadow-sm">
-                    <SelectValue placeholder={isLoadingDoctors ? "Loading..." : "Filter by doctor"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Doctors</SelectItem>
-                    {doctors.map((doctor) => (
-                      <SelectItem key={doctor.id} value={doctor.name}>{doctor.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {portal !== 'patient' && (
+                <div className="flex items-center gap-2">
+                  <Users className="h-4 w-4 text-gray-400" />
+                  <Select value={selectedDoctor} onValueChange={setSelectedDoctor}>
+                    <SelectTrigger className="w-[180px] h-10 shadow-sm">
+                      <SelectValue placeholder={isLoadingDoctors ? "Loading..." : "Filter by doctor"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Doctors</SelectItem>
+                      {doctors.map((doctor) => (
+                        <SelectItem key={doctor.id} value={doctor.name}>{doctor.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <div className="flex items-center gap-2">
                 <ListFilter className="h-4 w-4 text-gray-400" />
                 <Select value={selectedType} onValueChange={setSelectedType}>
@@ -1084,7 +969,14 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                     {viewMode === "day" && renderDayView()}
                     {viewMode === "week" && renderWeekView()}
                     {viewMode === "month" && renderMonthView()}
-                    {viewMode === "custom" && renderCustomView()}
+                    {viewMode === "custom" && (
+                      (dateRange?.from && dateRange?.to) ? renderCustomView() : (
+                        <div className="p-8 text-center text-muted-foreground">
+                          <div className="text-lg font-bold mb-2">Select a start and end date</div>
+                          <div className="text-sm">Choose both a start and end date from the date picker (calendar icon) to view appointments for a custom range.</div>
+                        </div>
+                      )
+                    )}
                     {viewMode === "all" && (
                       <div className="p-4">
                         <AllAppointmentsView appointments={filteredAppointments} isLoading={isLoadingView} />

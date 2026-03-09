@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
-import { Users, Calendar, Clock, CheckCircle, AlertCircle } from "lucide-react";
+import { Users, Calendar, Clock, CheckCircle, AlertCircle, Plus } from "lucide-react";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { Badge } from "./ui/badge";
 import { Appointment } from "../hooks/useAppointments";
@@ -12,7 +12,7 @@ import { parseBackendDateToLocal } from "../lib/utils";
 import { useAuth } from "@/hooks/useAuth.tsx";
 
 export function DoctorDashboard() {
-  const { openCreateModal, appointments, refreshTrigger, openEditModal } = useAppointmentModal();
+  const { openCreateModal, openAddPatientModal, appointments, openEditModal } = useAppointmentModal();
   const { user } = useAuth();
   const [viewMode, setViewMode] = useState<"day" | "week" | "month">("day");
   const [isLoadingView, setIsLoadingView] = useState(false);
@@ -80,7 +80,7 @@ export function DoctorDashboard() {
 
   // Count pending appointments
   const pendingAppointmentsCount = useMemo(() => {
-    return appointmentsByDate.filter(apt => apt.status === "pending").length;
+    return appointmentsByDate.filter(apt => apt.status === "pending" || apt.status === "tentative" || apt.status === "To Pay").length;
   }, [appointmentsByDate]);
 
   // Count completed appointments
@@ -106,9 +106,9 @@ export function DoctorDashboard() {
       bgColor: "bg-green-50"
     },
     {
-      title: "Pending",
+      title: "Tentative Patients",
       value: pendingAppointmentsCount.toString(),
-      description: "Awaiting confirmation",
+      description: "Awaiting approval",
       icon: AlertCircle,
       color: "text-amber-600",
       bgColor: "bg-amber-50"
@@ -142,7 +142,7 @@ export function DoctorDashboard() {
     <div className="p-6 space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-gray-900">Welcome, Dr. {doctorName}</h1>
-        <p className="text-muted-foreground">Here's your schedule overview for {viewMode === "day" ? "today" : viewMode === "week" ? "this week" : "this month"}.</p>
+        <p className="text-muted-foreground">Here&apos;s your schedule overview for {viewMode === "day" ? "today" : viewMode === "week" ? "this week" : "this month"}.</p>
       </div>
 
       {/* Stats Cards */}
@@ -273,6 +273,20 @@ export function DoctorDashboard() {
                 <div>
                   <div className="font-medium">View Full Calendar</div>
                   <div className="text-sm text-muted-foreground">See your complete schedule</div>
+                </div>
+              </div>
+            </Button>
+
+            <Button
+              variant="outline"
+              className="w-full p-4 text-left h-auto transform transition-all duration-200 hover:scale-105 hover:shadow-lg hover:bg-pink-50 active:scale-95"
+              onClick={() => openAddPatientModal()}
+            >
+              <div className="flex items-center space-x-3">
+                <Plus className="h-6 w-6 text-pink-600" />
+                <div>
+                  <div className="font-medium">Add Patient</div>
+                  <div className="text-sm text-muted-foreground">Create a new patient record</div>
                 </div>
               </div>
             </Button>

@@ -1,11 +1,12 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./ui/dropdown-menu";
-import { Eraser, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Plus, Undo2, Trash2, MoreVertical } from "lucide-react";
+import { Eraser, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Plus, Trash2, MoreVertical } from "lucide-react";
 import { toast } from "sonner";
 import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
+import ConfirmDialog from "./ConfirmDialog";
 
 // NOTE: Dental chart state - stores which sections of which teeth are colored
 type ToothSection = "top" | "bottom" | "left" | "right" | "center";
@@ -34,6 +35,18 @@ interface DentalChartProps {
 }
 
 export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
+  const isChartEmpty = useCallback((state: Record<number, ToothState>): boolean => {
+    for (const tooth in state) {
+      const toothState = state[tooth];
+      for (const section of Object.keys(toothState) as ToothSection[]) {
+        if (toothState[section] !== "none") {
+          return false;
+        }
+      }
+    }
+    return true;
+  }, []);
+
   const [localRecords, setLocalRecords] = useState<ChartRecord[]>([]);
 
   useEffect(() => {
@@ -50,7 +63,7 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
         isEmpty: record.isEmpty ?? isChartEmpty(JSON.parse(record.data || '{}'))
       })));
     }
-  }, [records]);
+  }, [records, isChartEmpty]);
   
   const [currentIndex, setCurrentIndex] = useState(0);
   
@@ -65,6 +78,9 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
   const [currentDate, setCurrentDate] = useState("");
   const [isConfirmDeleteChartOpen, setIsConfirmDeleteChartOpen] = useState(false);
   const [isConfirmDeleteEmptyChartsOpen, setIsConfirmDeleteEmptyChartsOpen] = useState(false);
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const [confirmLoading, setConfirmLoading] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
 
   // Load teeth state when index or records change
   useEffect(() => {
@@ -75,7 +91,7 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
         setTeethState(parsedData);
         setOriginalTeethState(parsedData);
         setCurrentDate(currentRecord.date);
-      } catch (e) {
+      } catch {
         setTeethState({});
         setOriginalTeethState({});
         setCurrentDate(formatDateToYYYYMMDD(new Date())); // Fallback if record data is bad
@@ -114,7 +130,7 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
 
     // Call the callback to update the parent's state
     onSaveRecords(updatedRecords);
-  }, [teethState]);
+  }, [teethState, currentIndex, localRecords, onSaveRecords, originalTeethState, isChartEmpty]);
 
   const getToothState = (toothNumber: number): ToothState => {
     return teethState[toothNumber] || {
@@ -124,18 +140,6 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
       right: "none",
       center: "none"
     };
-  };
-
-  const isChartEmpty = (state: Record<number, ToothState>): boolean => {
-    for (const tooth in state) {
-      const toothState = state[tooth];
-      for (const section of Object.keys(toothState) as ToothSection[]) {
-        if (toothState[section] !== "none") {
-          return false;
-        }
-      }
-    }
-    return true;
   };
 
   const handleSectionClick = (toothNumber: number, section: ToothSection) => {
@@ -160,9 +164,8 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
   };
 
   const handleClear = () => {
-    if (confirm("Are you sure you want to clear all markings for this chart?")) {
-      setTeethState({});
-    }
+  setConfirmAction(() => () => setTeethState({}));
+  setIsConfirmOpen(true);
   };
 
 
@@ -285,6 +288,35 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
 
     setIsConfirmDeleteEmptyChartsOpen(false); // Close the modal
   };
+
+  // Render confirm dialog(s)
+  const renderConfirmDialogs = () => (
+    <>
+      <ConfirmDialog
+        open={isConfirmOpen}
+        onOpenChange={(open) => {
+          if (!open) setConfirmAction(null);
+          setIsConfirmOpen(open);
+        }}
+        title="Confirm"
+        message="Are you sure?"
+        loading={confirmLoading}
+        onConfirm={async () => {
+          if (confirmAction) {
+            try {
+              setConfirmLoading(true);
+              await confirmAction();
+            } finally {
+              setConfirmLoading(false);
+              setConfirmAction(null);
+            }
+          }
+        }}
+        confirmLabel="Yes"
+        cancelLabel="No"
+      />
+    </>
+  );
 
   const canGoPrevious = currentIndex > 0;
   const canGoNext = currentIndex < localRecords.length - 1;

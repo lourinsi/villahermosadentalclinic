@@ -21,7 +21,8 @@ import { Textarea } from "./ui/textarea";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { toast } from "sonner";
-import { CheckCircle, DollarSign, Edit } from "lucide-react";
+import { DollarSign, Edit } from "lucide-react";
+import { Appointment } from "@/hooks/useAppointments";
 
 export function EditPaymentModal() {
   const {
@@ -40,9 +41,7 @@ export function EditPaymentModal() {
   const [transactionId, setTransactionId] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
   const [selectedAppointment, setSelectedAppointment] = useState<string | null>(null);
-  const [appointments, setAppointments] = useState<any[]>([]);
-  const [isFetchingAppointments, setIsFetchingAppointments] = useState(false);
-  const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isFetchingPaymentMethods, setIsFetchingPaymentMethods] = useState(false);
 
   useEffect(() => {
@@ -96,7 +95,6 @@ export function EditPaymentModal() {
         // Fetch appointments if not provided by context
         const fetchAppointments = async () => {
           try {
-            setIsFetchingAppointments(true);
             const res = await fetch(`http://localhost:3001/api/appointments?patientId=${targetPatientId}`);
             const json = await res.json();
             if (json.success) {
@@ -104,8 +102,6 @@ export function EditPaymentModal() {
             }
           } catch (err) {
             console.error("Error fetching appointments for patient", err);
-          } finally {
-            setIsFetchingAppointments(false);
           }
         };
         fetchAppointments();
@@ -122,7 +118,7 @@ export function EditPaymentModal() {
           const res = await fetch(`http://localhost:3001/api/payment-methods`);
           const json = await res.json();
           if (json.success) {
-            setPaymentMethods(json.data);
+            // paymentMethods state removed as it was unused
           }
         } catch (err) {
           console.error("Error fetching payment methods", err);
@@ -202,23 +198,23 @@ export function EditPaymentModal() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <div className="text-xs text-blue-700 font-medium mb-1">Appointment Type</div>
-                  <div className="text-sm font-semibold text-gray-900">{appointments.find((a: any) => a.id === selectedAppointment)?.type}</div>
+                  <div className="text-sm font-semibold text-gray-900">{appointments.find((a: Appointment) => a.id === selectedAppointment)?.type}</div>
                 </div>
                 <div>
                   <div className="text-xs text-blue-700 font-medium mb-1">Appointment Date</div>
-                  <div className="text-sm font-semibold text-gray-900">{appointments.find((a: any) => a.id === selectedAppointment)?.date}</div>
+                  <div className="text-sm font-semibold text-gray-900">{appointments.find((a: Appointment) => a.id === selectedAppointment)?.date}</div>
                 </div>
                 <div>
                   <div className="text-xs text-blue-700 font-medium mb-1">Current Amount</div>
                   <div className="text-sm font-semibold text-gray-900">
-                    ${paymentData.amount ? parseFloat(String(paymentData.amount)).toFixed(2) : "0.00"}
+                    ${paymentData?.amount ? parseFloat(String(paymentData.amount)).toFixed(2) : "0.00"}
                   </div>
                 </div>
                 <div>
                   <div className="text-xs text-blue-700 font-medium mb-1">Outstanding Balance</div>
                   <div className="text-sm font-bold text-red-600">${(
-                    (appointments.find((a: any) => a.id === selectedAppointment)?.price || 0) - 
-                    (appointments.find((a: any) => a.id === selectedAppointment)?.totalPaid || 0)
+                    (appointments.find((a: Appointment) => a.id === selectedAppointment)?.price || 0) - 
+                    (appointments.find((a: Appointment) => a.id === selectedAppointment)?.totalPaid || 0)
                   ).toFixed(2)}</div>
                 </div>
               </div>

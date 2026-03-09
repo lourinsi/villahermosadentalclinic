@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { formatTimeTo12h } from "@/lib/time-slots";
+import { Appointment } from "@/hooks/useAppointments";
 
 const FamilyPage = () => {
   const { user, isLoading: authLoading } = useAuth();
@@ -29,7 +30,7 @@ const FamilyPage = () => {
   const [selectedMember, setSelectedMember] = useState<Patient | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isViewingAppointments, setIsViewingAppointments] = useState(false);
-  const [memberAppointments, setMemberAppointments] = useState<any[]>([]);
+  const [memberAppointments, setMemberAppointments] = useState<Appointment[]>([]);
   const [isLoadingAppointments, setIsLoadingAppointments] = useState(false);
 
   const [newMember, setNewMember] = useState({
@@ -61,7 +62,7 @@ const FamilyPage = () => {
         } else {
           toast.error(result.message || "Failed to fetch family members.");
         }
-      } catch (err) {
+      } catch {
         toast.error("An error occurred while fetching family members.");
       } finally {
         setIsLoading(false);
@@ -115,7 +116,7 @@ const FamilyPage = () => {
       } else {
         toast.error(result.message || "Failed to add family member.");
       }
-    } catch (error) {
+    } catch {
       toast.error("An error occurred while adding family member.");
     } finally {
       setIsAdding(false);
@@ -157,7 +158,7 @@ const FamilyPage = () => {
       } else {
         toast.error(result.message || "Failed to update family member.");
       }
-    } catch (error) {
+    } catch {
       toast.error("An error occurred while updating family member.");
     }
   };

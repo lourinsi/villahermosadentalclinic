@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { CheckCircle2, Calendar as CalendarIcon, Clock, Stethoscope, ChevronRight, ChevronLeft, Video, UserCheck } from "lucide-react";
@@ -20,6 +21,7 @@ import { Patient } from "@/lib/patient-types";
 import { Appointment } from "@/hooks/useAppointments";
 
 export function PatientBookingModal() {
+  const router = useRouter();
   const {
     isPatientBookingModalOpen,
     closePatientBookingModal,
@@ -32,16 +34,16 @@ export function PatientBookingModal() {
     appointments
   } = useAppointmentModal();
 
-  const { openPatientPaymentModal } = usePaymentModal();
+  const { openPatientPaymentFor } = usePaymentModal();
   const { user, isAuthenticated } = useAuth();
   const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors();
   
   const [familyMembers, setFamilyMembers] = useState<Patient[]>([]);
   const [isLoadingFamily, setIsLoadingFamily] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [dateError, setDateError] = useState("");
   const [showSuccessPrompt, setShowSuccessPrompt] = useState(false);
   const [bookedAppointmentId, setBookedAppointmentId] = useState<string | null>(null);
+  const [bookedAppointment, setBookedAppointment] = useState<Appointment | null>(null);
   const [dateAppointments, setDateAppointments] = useState<Appointment[]>([]);
   const [isLoadingDateAppointments, setIsLoadingDateAppointments] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
@@ -82,28 +84,56 @@ export function PatientBookingModal() {
   }, [isAuthenticated, user, isPatientBookingModalOpen]);
 
   // Fetch all appointments for the selected date (anonymized) to check for clinic-wide conflicts
+  const fetchDateAppointments = useCallback(async () => {
+    if (!formData.date || !isPatientBookingModalOpen) {
+      setDateAppointments([]);
+      return;
+    }
+    setIsLoadingDateAppointments(true);
+    try {
+      const response = await fetch(`http://localhost:3001/api/appointments?startDate=${formData.date}&endDate=${formData.date}&anonymize=true`);
+      const result = await response.json();
+      if (result.success) {
+        setDateAppointments(result.data || []);
+      }
+    } catch (error) {
+      console.error("Error fetching appointments for date:", error);
+    } finally {
+      setIsLoadingDateAppointments(false);
+    }
+  }, [formData.date, isPatientBookingModalOpen]);
+
   useEffect(() => {
-    const fetchDateAppointments = async () => {
-      if (!formData.date || !isPatientBookingModalOpen) {
-        setDateAppointments([]);
-        return;
-      }
-      setIsLoadingDateAppointments(true);
-      try {
-        const response = await fetch(`http://localhost:3001/api/appointments?startDate=${formData.date}&endDate=${formData.date}&anonymize=true`);
-        const result = await response.json();
-        if (result.success) {
-          setDateAppointments(result.data || []);
-        }
-      } catch (error) {
-        console.error("Error fetching appointments for date:", error);
-      } finally {
-        setIsLoadingDateAppointments(false);
-      }
+    fetchDateAppointments();
+
+    const onUpdated = () => {
+      // refetch when appointments are updated elsewhere (e.g., payment completed)
+      fetchDateAppointments();
     };
 
-    fetchDateAppointments();
-  }, [formData.date, isPatientBookingModalOpen]);
+    const wrapped = (e: Event) => {
+      try {
+        const detail = (e as CustomEvent)?.detail || {};
+        const { appointmentId, newStatus, newPaymentStatus } = detail;
+        if (appointmentId) {
+          // optimistically update local dateAppointments and bookedAppointment
+          setDateAppointments(prev => prev.map(apt => apt.id === appointmentId ? { ...apt, status: newStatus || apt.status, paymentStatus: newPaymentStatus || apt.paymentStatus } : apt));
+          if (bookedAppointmentId === appointmentId) {
+            setBookedAppointment(prev => prev ? { ...prev, status: newStatus || prev.status, paymentStatus: newPaymentStatus || prev.paymentStatus } : prev);
+          }
+        }
+      } catch (err) {
+        // ignore
+      }
+      // Always refetch to ensure canonical server state
+      onUpdated();
+    };
+
+    window.addEventListener('appointments:updated', wrapped as EventListener);
+    return () => {
+      window.removeEventListener('appointments:updated', wrapped as EventListener);
+    };
+  }, [fetchDateAppointments]);
 
   // Update formData when modal opens or props change
   useEffect(() => {
@@ -185,11 +215,6 @@ export function PatientBookingModal() {
       return;
     }
 
-    if (dateError) {
-      toast.error(dateError);
-      return;
-    }
-
     // Past date/time validation
     const appointmentDateTime = new Date(`${formData.date}T${formData.time}`);
     const now = new Date();
@@ -249,8 +274,9 @@ export function PatientBookingModal() {
         status: "pending" as const
       };
       
-      const newApt = await addAppointment(appointmentData);
-      setBookedAppointmentId(newApt.id);
+  const newApt = await addAppointment(appointmentData);
+  setBookedAppointmentId(newApt.id);
+  setBookedAppointment(newApt);
       setShowSuccessPrompt(true);
       refreshAppointments();
     } catch (err) {
@@ -265,15 +291,26 @@ export function PatientBookingModal() {
     setShowSuccessPrompt(false);
     closePatientBookingModal();
     if (bookedAppointmentId && user) {
-      // Use the patient-facing payment modal
-      openPatientPaymentModal(appointments, bookedAppointmentId);
+      // Use the patient-facing payment modal. Prefer passing the freshly created appointment
+      // to avoid timing issues if the global appointments list hasn't refreshed yet.
+      if (bookedAppointment) {
+        openPatientPaymentFor(bookedAppointment);
+      } else {
+        // Fallback: try to find the appointment in the current appointments list
+        const found = appointments.find(a => a.id === bookedAppointmentId);
+        if (found) {
+          openPatientPaymentFor(found);
+        } else {
+          toast.error("Unable to open payment modal: appointment not found yet. Please try again.");
+        }
+      }
     }
   };
 
   const handlePayLater = () => {
     setShowSuccessPrompt(false);
     closePatientBookingModal();
-    toast.info("You can pay for your appointment later in the Orders page.");
+    toast.info("Your appointment has been added to your Cart. You can pay for it later to confirm.");
   };
 
   return (
@@ -543,7 +580,7 @@ export function PatientBookingModal() {
           <div className="space-y-2">
             <DialogTitle className="text-xl">Appointment Booked!</DialogTitle>
             <DialogDescription>
-              Your appointment has been successfully scheduled and is currently pending. 
+              Your appointment has been added to your <strong>Cart</strong> and is currently pending. 
               Would you like to pay for it now to secure your slot?
             </DialogDescription>
           </div>

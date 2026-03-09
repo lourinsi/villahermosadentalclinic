@@ -7,11 +7,12 @@ import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { toast } from "sonner";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { FinanceRecord } from "@/lib/finance-types";
 
 interface AddTransactionModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onTransactionAdded?: (transaction: any) => void;
+  onTransactionAdded?: (transaction: FinanceRecord) => void;
 }
 
 export function AddTransactionModal({ 

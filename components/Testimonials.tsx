@@ -35,7 +35,7 @@ export function Testimonials() {
             What Our Patients Say
           </h2>
           <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-            Don't just take our word for it. Here's what our patients have to say 
+            Don&apos;t just take our word for it. Here&apos;s what our patients have to say 
             about their experience with SmileCare Dental.
           </p>
         </div>
@@ -54,7 +54,7 @@ export function Testimonials() {
                 </div>
                 
                 <p className="text-gray-700 leading-relaxed">
-                  "{testimonial.content}"
+                  &quot;{testimonial.content}&quot;
                 </p>
                 
                 <div className="flex items-center space-x-3 pt-4">

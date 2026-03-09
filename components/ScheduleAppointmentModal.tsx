@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -14,6 +14,8 @@ import { useDoctors } from "../hooks/useDoctors";
 import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
 import { formatDateToYYYYMMDD } from "../lib/utils";
 import { APPOINTMENT_TYPES } from "../lib/appointment-types";
+import { Appointment } from "@/hooks/useAppointments";
+import { DoctorCalendar } from "./DoctorCalendar";
 
 export function ScheduleAppointmentModal() {
   const {
@@ -28,7 +30,7 @@ export function ScheduleAppointmentModal() {
   } = useAppointmentModal();
   const { user } = useAuth();
 
-  const [dateAppointments, setDateAppointments] = useState<any[]>([]);
+  const [dateAppointments, setDateAppointments] = useState<Appointment[]>([]);
   const [isLoadingDateAppointments, setIsLoadingDateAppointments] = useState(false);
 
   const [patients, setPatients] = useState<Array<{ id: string; name: string }>>([]);
@@ -48,6 +50,10 @@ export function ScheduleAppointmentModal() {
     patientId: String(newAppointmentPatientId || "")
   });
 
+  // New state: show a compact slot picker first for doctors
+  const [showSlotPicker, setShowSlotPicker] = useState<boolean>(false);
+  const [selectedSlot, setSelectedSlot] = useState<string>("");
+
   // Update formData when patientName or patientId props change
   useEffect(() => {
     if (newAppointmentPatientName || newAppointmentPatientId) {
@@ -61,29 +67,19 @@ export function ScheduleAppointmentModal() {
   }, [newAppointmentPatientName, newAppointmentPatientId, isScheduleModalOpen]);
 
   useEffect(() => {
-    const fetchPatients = async () => {
-      try {
-        const res = await fetch("http://localhost:3001/api/patients");
-        const json = await res.json();
-        if (json?.success && Array.isArray(json.data)) {
-          const list = json.data.map((p: any) => ({ id: String(p.id), name: `${p.firstName} ${p.lastName}` }));
-          setPatients(list);
-        }
-      } catch (err) {
-        console.error("Failed to load patients:", err);
-      }
-    };
-
-    fetchPatients();
-  }, [refreshTrigger]);
-
-  useEffect(() => {
     if (isScheduleModalOpen) {
       reloadDoctors();
       
       // Update doctor if logged in as doctor and not already set
       if (user?.role === "doctor" && !formData.doctor) {
         setFormData(prev => ({ ...prev, doctor: user.username }));
+      }
+
+      // If the user is a doctor or admin, show the slot picker first
+      if (user?.role === "doctor" || user?.role === "admin") {
+        setShowSlotPicker(true);
+      } else {
+        setShowSlotPicker(false);
       }
     }
   }, [isScheduleModalOpen, reloadDoctors, user, formData.doctor]);
@@ -228,6 +224,97 @@ export function ScheduleAppointmentModal() {
           </DialogTitle>
         </DialogHeader>
         
+        {/* If doctor or admin, first show a compact date + available slots picker. Once a slot is chosen, show the full form. */}
+        {(user?.role === "doctor" || user?.role === "admin") && showSlotPicker ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-transparent">
+              <div className="p-4 bg-white rounded-l-[1rem] border border-gray-50 shadow-sm">
+                <DoctorCalendar
+                  selectedDate={formData.date ? new Date(formData.date) : new Date()}
+                  onSelect={(date) => date && setFormData(prev => ({ ...prev, date: formatDateToYYYYMMDD(date) }))}
+                  disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
+                />
+              </div>
+
+              <div className="p-4 bg-white rounded-r-[1rem] border border-gray-50 shadow-sm">
+                {/* <div className="mb-3">
+                  <div className="font-semibold">{formData.date || new Date().toLocaleDateString('en-CA')}</div>
+                </div> */}
+
+                <div className="max-h-64 overflow-auto space-y-2">
+                  {TIME_SLOTS.map(slot => {
+                    const busy = formData.date ? isSlotBusy(slot, parseInt(formData.duration)) : false;
+
+                    // Determine if the slot is in the past relative to selected date
+                    const dateStr = formData.date || formatDateToYYYYMMDD(new Date());
+                    const todayStr = formatDateToYYYYMMDD(new Date());
+                    const isPastDate = dateStr < todayStr;
+
+                    let isPastTime = false;
+                    if (!isPastDate && dateStr === todayStr) {
+                      const [sh, sm] = slot.split(":").map(Number);
+                      const now = new Date();
+                      const nowMinutes = now.getHours() * 60 + now.getMinutes();
+                      const slotMinutes = sh * 60 + sm;
+                      isPastTime = slotMinutes <= nowMinutes;
+                    }
+
+                    const isPast = isPastDate || isPastTime;
+
+                    // Check appointments for this date to know if it's booked or tentative
+                    const isBooked = dateAppointments.some(apt => apt.time === slot && apt.status !== 'cancelled' && apt.paymentStatus !== 'unpaid');
+                    const isTentative = dateAppointments.some(apt => apt.time === slot && (apt.status === 'tentative' || apt.status === 'pending'));
+
+                    const disabled = isPast || busy || isBooked || isTentative;
+
+                    const statusLabel = isPast ? 'Passed' : (isBooked ? 'Booked' : (isTentative ? 'Reserved' : (busy ? 'Occupied' : 'Open')));
+
+                    const btnClass = isPast
+                      ? 'bg-gray-50 border-gray-100 opacity-60 cursor-not-allowed text-gray-400'
+                      : isBooked
+                      ? 'bg-red-50 border-red-100 opacity-90 cursor-not-allowed text-gray-700'
+                      : isTentative
+                      ? 'bg-amber-50 border-amber-100 cursor-not-allowed text-amber-700'
+                      : busy
+                      ? 'bg-gray-50 border-gray-100 opacity-60 cursor-not-allowed text-gray-700'
+                      : 'bg-white hover:shadow-sm border border-gray-100';
+
+                    return (
+                      <button
+                        key={slot}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => {
+                          if (!disabled) {
+                            setFormData(prev => ({ ...prev, time: slot }));
+                            setSelectedSlot(slot);
+                            setShowSlotPicker(false);
+                          }
+                        }}
+                        className={`w-full text-left p-3 rounded-xl border ${btnClass}`}>
+                        <div className="flex items-center justify-between">
+                          <div className={`${isPast ? 'text-gray-400' : 'font-medium text-gray-900'}`}>{formatTimeTo12h(slot)}</div>
+                          <div className={`text-xs font-semibold ${statusLabel === 'Open' ? 'text-emerald-600' : statusLabel === 'Passed' ? 'text-gray-400' : statusLabel === 'Booked' ? 'text-red-600' : statusLabel === 'Reserved' ? 'text-amber-700' : 'text-gray-500'}`}>
+                            {statusLabel}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="flex justify-end space-x-2 pt-4">
+                  <Button variant="cancel" type="button" onClick={() => { closeScheduleModal(); setShowSlotPicker(false); }}>
+                    Cancel
+                  </Button>
+                  <Button type="button" onClick={() => setShowSlotPicker(false)} disabled={!selectedSlot && !formData.time}>
+                    Continue
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Patient Selection (only show if no patient is pre-selected) */}
           {!newAppointmentPatientName && (
@@ -404,8 +491,9 @@ export function ScheduleAppointmentModal() {
               {isLoading ? "Scheduling..." : "Schedule Appointment"}
             </Button>
           </div>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
+         </form>
+        )}
+       </DialogContent>
+     </Dialog>
+   );
+ }
