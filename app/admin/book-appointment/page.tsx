@@ -28,6 +28,8 @@ import { Badge } from "@/components/ui/badge";
 import ViewMode from "@/components/viewMode";
 import { toast } from "sonner";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
+import { Input } from "@/components/ui/input";
+import { APPOINTMENT_PRICES } from "@/lib/appointment-types";
 
 const AdminBookAppointmentPage = () => {
   const searchParams = useSearchParams();
@@ -52,10 +54,15 @@ const AdminBookAppointmentPage = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedTime, setSelectedTime] = useState("");
   const [appointmentType, setAppointmentType] = useState("");
+  const [duration, setDuration] = useState("30");
+  const [discount, setDiscount] = useState("0");
   const [notes, setNotes] = useState("");
   const [showSuccessPrompt, setShowSuccessPrompt] = useState(false);
   const [bookedAppointmentId, setBookedAppointmentId] = useState<string | null>(null);
   const [bookedAppointment, setBookedAppointment] = useState<any>(null);
+
+  const basePrice = APPOINTMENT_PRICES[appointmentType] || 0;
+  const finalPrice = Math.max(0, basePrice - (Number(discount) || 0));
 
   const selectedDoctorObj = useMemo(() => {
     return doctors.find(d => String(d.id) === String(selectedDoctor));
@@ -450,6 +457,16 @@ const AdminBookAppointmentPage = () => {
                 <ChevronRight className="h-4 w-4" />
               </Button>
             </div>
+
+            {/* New Appointment button for admins -> redirect to admin find-doctors */}
+            <div className="ml-4">
+              <Button
+                onClick={() => router.push("/admin/find-doctors")}
+                className="h-9 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white"
+              >
+                New Appointment
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -595,6 +612,40 @@ const AdminBookAppointmentPage = () => {
                       <SelectItem value="Other">Other</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-sm font-bold text-gray-700">Duration (mins)</Label>
+                    <Input
+                      type="number"
+                      value={duration}
+                      onChange={(e) => setDuration(e.target.value)}
+                      placeholder="30"
+                      className="h-11 rounded-lg border-gray-200"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm font-bold text-gray-700">Discount</Label>
+                    <Input
+                      type="number"
+                      value={discount}
+                      onChange={(e) => setDiscount(e.target.value)}
+                      placeholder="0"
+                      className="h-11 rounded-lg border-gray-200"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-sm font-bold text-gray-700">Total Price</Label>
+                  <Input
+                    type="text"
+                    value={`₱${finalPrice.toLocaleString()}`}
+                    readOnly
+                    className="h-11 rounded-lg border-gray-200 bg-gray-50 font-bold text-blue-700"
+                  />
+                  <p className="text-[10px] text-gray-400">Base price: ₱{basePrice.toLocaleString()}</p>
                 </div>
               </div>
 

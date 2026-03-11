@@ -138,6 +138,17 @@ export function PatientBookingModal() {
   // Update formData when modal opens or props change
   useEffect(() => {
     if (isPatientBookingModalOpen) {
+      // redirect immediately for admin or patient users instead of opening modal
+      if (user?.role === "admin") {
+        closePatientBookingModal();
+        router.push("/admin/find-doctors");
+        return;
+      }
+      if (user?.role === "patient") {
+        closePatientBookingModal();
+        router.push("/doctors");
+        return;
+      }
       reloadDoctors();
       
       // Initial form state
@@ -402,7 +413,7 @@ export function PatientBookingModal() {
                 ) : availableDoctorsForStep1.length === 0 ? (
                   <div className="text-center py-12 bg-gray-50 rounded-xl border-2 border-dashed">
                     <p className="text-gray-500 font-medium">No doctors are available at this specific time.</p>
-                    <Button variant="link" onClick={() => router.push('/patient/doctors')} className="text-blue-600 mt-2">
+                    <Button variant="link" onClick={() => router.push('/doctors')} className="text-blue-600 mt-2">
                       View all availability
                     </Button>
                   </div>
