@@ -85,13 +85,22 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
 
   const closeScheduleModal = useCallback(() => setScheduleModalOpen(false), []);
 
-  const openPatientBookingModal = useCallback((date?: Date, time?: string, doctorName?: string, serviceType?: string) => {
-    setNewAppointmentDate(date);
-    setNewAppointmentTime(time);
-    setNewAppointmentDoctorName(doctorName);
-    setNewAppointmentServiceType(serviceType);
-    setPatientBookingModalOpen(true);
-  }, []);
+  // openPatientBookingModal should open the create appointment modal for patients
+  // without performing any redirects. It sets the tentative date/time/doctor
+  // then opens the modal.
+  const openPatientBookingModal = (date?: Date | null, time?: string, doctor?: string) => {
+    try {
+      if (date !== undefined) setNewAppointmentDate(date ?? undefined);
+      if (time !== undefined) setNewAppointmentTime(time ?? "");
+      if (doctor !== undefined) setNewAppointmentDoctorName(doctor ?? "");
+
+      // DO NOT redirect patients — just open the modal
+      setCreateModalOpen(true);
+    } catch (err) {
+      // fallback: ensure modal still opens
+      setCreateModalOpen(true);
+    }
+  };
 
   const closePatientBookingModal = useCallback(() => setPatientBookingModalOpen(false), []);
 

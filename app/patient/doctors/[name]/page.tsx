@@ -22,6 +22,7 @@ import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Appointment } from "@/hooks/useAppointments";
 import ViewMode from "@/components/viewMode";
+import BookingModal from "@/components/BookingModal";
 
 export default function DoctorAvailabilityPage() {
   const params = useParams();
@@ -29,12 +30,16 @@ export default function DoctorAvailabilityPage() {
   const doctorName = decodeURIComponent(params.name as string);
   
   const { doctors, isLoadingDoctors } = useDoctors();
-  const { openPatientBookingModal } = useAppointmentModal();
+  const { addAppointment } = useAppointmentModal();
   
   const [viewMode, setViewMode] = useState<ViewMode>("day");
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isLoadingAvailability, setIsLoadingAvailability] = useState(false);
+  // local modal state for triggering reusable BookingModal
+  const [bookingModalOpen, setBookingModalOpen] = useState(false);
+  const [bookingDefaultTime, setBookingDefaultTime] = useState<string | undefined>(undefined);
+  const [bookingDefaultDate, setBookingDefaultDate] = useState<Date | undefined>(undefined);
 
   const doctor = useMemo(() => {
     return doctors.find(d => d.name === doctorName);
@@ -176,19 +181,22 @@ export default function DoctorAvailabilityPage() {
             ) : (
               <div className="grid grid-cols-1 gap-3">
                 {slots.map((slot) => (
-                  <div 
+                  <button
                     key={slot.time}
-                    className={`
-                      group flex items-center justify-between p-3 rounded-xl border transition-all duration-200
-                      ${slot.isAvailable 
-                        ? "bg-white border-gray-100 hover:border-green-400 hover:shadow-md cursor-pointer" 
-                        : "bg-gray-100 border-gray-200 opacity-60 cursor-not-allowed"}
-                    `}
+                    disabled={!slot.isAvailable}
                     onClick={() => {
                       if (slot.isAvailable) {
-                        openPatientBookingModal(selectedDate, slot.time, doctorName);
+                        setBookingDefaultTime(slot.time);
+                        setBookingDefaultDate(selectedDate);
+                        setBookingModalOpen(true);
                       }
                     }}
+                    className={`
+                      group flex items-center justify-between p-4 rounded-2xl border transition-all duration-200
+                      ${slot.isAvailable
+                        ? "bg-white border-gray-100 hover:border-emerald-400 hover:shadow-md cursor-pointer"
+                        : "bg-gray-50 border-gray-100 opacity-60 cursor-not-allowed"}
+                    `}
                   >
                     <div className="flex items-center gap-3">
                       <div>
@@ -212,7 +220,7 @@ export default function DoctorAvailabilityPage() {
                     >
                       {slot.isAvailable ? "Open" : (slot.isTentative ? "Reserved" : (slot.isBooked ? "Booked" : "Passed"))}
                     </Badge>
-                  </div>
+                  </button>
                 ))}
               </div>
             )}
@@ -255,7 +263,12 @@ export default function DoctorAvailabilityPage() {
                     <button
                       key={slot.time}
                       disabled={!slot.isAvailable}
-                      onClick={() => slot.isAvailable && openPatientBookingModal(day, slot.time, doctorName)}
+                      onClick={() => {
+                        if (!slot.isAvailable) return;
+                        setBookingDefaultTime(slot.time);
+                        setBookingDefaultDate(day);
+                        setBookingModalOpen(true);
+                      }}
                       className={`w-full group ${!slot.isAvailable ? 'cursor-not-allowed opacity-70' : ''}`}
                     >
                       <div className={`
@@ -331,7 +344,12 @@ export default function DoctorAvailabilityPage() {
                   <button
                     key={slot.time}
                     disabled={!slot.isAvailable}
-                    onClick={() => slot.isAvailable && openPatientBookingModal(day, slot.time, doctorName)}
+                    onClick={() => {
+                      if (!slot.isAvailable) return;
+                      setBookingDefaultTime(slot.time);
+                      setBookingDefaultDate(day);
+                      setBookingModalOpen(true);
+                    }}
                     className={`w-full text-left ${!slot.isAvailable ? 'cursor-not-allowed opacity-70' : ''}`}
                   >
                     <div className={`
@@ -551,6 +569,19 @@ export default function DoctorAvailabilityPage() {
           </div>
         </div>
       </div>
+
+      {/* Reusable Booking Modal */}
+      <BookingModal
+        open={bookingModalOpen}
+        onOpenChange={setBookingModalOpen}
+        defaultDate={bookingDefaultDate}
+        defaultTime={bookingDefaultTime}
+        doctorName={doctor?.name}
+        onBooked={() => {
+          // refresh appointments after booking
+          window.dispatchEvent(new CustomEvent('appointments:updated', { detail: { from: 'patient-page' } }));
+        }}
+      />
 
       <style jsx global>{`
         .custom-scrollbar::-webkit-scrollbar {

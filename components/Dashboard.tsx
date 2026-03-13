@@ -33,7 +33,7 @@ export function Dashboard() {
   useEffect(() => {
     const fetchPatientCount = async () => {
       try {
-        const response = await fetch("http://localhost:3001/api/patients?page=1&limit=1");
+        const response = await fetch("http://localhost:3001/api/patients?page=1&limit=1", { credentials: 'include' });
         const result = await response.json();
         if (result.success) {
           const total = result.meta?.total ?? (Array.isArray(result.data) ? result.data.length : 0);

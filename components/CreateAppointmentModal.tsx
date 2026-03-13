@@ -175,13 +175,9 @@ export function CreateAppointmentModal() {
         prevOpenRef.current = isCreateModalOpen;
         return;
       }
-      if (user?.role === "patient") {
-        console.log("CreateAppointmentModal: redirecting patient to /doctors");
-        closeCreateModal();
-        router.push("/doctors");
-        prevOpenRef.current = isCreateModalOpen;
-        return;
-      }
+
+      // NOTE: Patients should be allowed to open the create appointment modal
+      // from the doctor booking pages. Do not redirect patients here.
 
       let dateStr = "";
       if (newAppointmentDate) {
@@ -409,6 +405,21 @@ export function CreateAppointmentModal() {
     });
   }, [formData.date, formData.doctor, dateAppointments]);
 
+  // mark a time slot as passed if its datetime is earlier than now (local time)
+  const isSlotPassed = useCallback((time: string) => {
+    if (!formData.date) return false;
+    try {
+      const [y, m, d] = formData.date.split('-').map(Number);
+      const [h, mi] = time.split(':').map(Number);
+      const slotDate = new Date();
+      slotDate.setFullYear(y, (m || 1) - 1, d || 1);
+      slotDate.setHours(h, mi, 0, 0);
+      return slotDate < new Date();
+    } catch (err) {
+      return false;
+    }
+  }, [formData.date]);
+
   // update: step indicator now has 4 steps (select, patient, payment, review)
   const renderStepIndicator = () => (
     <div className="flex items-center justify-between mb-8 px-1">
@@ -477,25 +488,27 @@ export function CreateAppointmentModal() {
               <div className="flex-1 overflow-y-auto space-y-2 max-h-64">
                 {TIME_SLOTS.map((slot) => {
                   const busy = isSlotBusy(slot, formData.duration);
+                  const passed = isSlotPassed(slot);
+                  const disabledSlot = busy || passed;
                   const isSelected = formData.time === slot;
                   return (
                     <button
                       key={slot}
                       type="button"
-                      disabled={busy}
+                      disabled={disabledSlot}
                       onClick={() => setFormData(prev => ({ ...prev, time: slot }))}
                       className={`
                         w-full px-4 py-3 rounded-lg text-sm font-medium transition-all border
                         ${isSelected
                           ? "bg-blue-600 text-white border-blue-600 shadow-md"
-                          : busy
+                          : disabledSlot
                           ? "bg-gray-100 text-gray-400 border-gray-100 cursor-not-allowed opacity-50"
                           : "bg-white text-gray-700 border-gray-200 hover:border-blue-400 hover:shadow-sm"}
                       `}
                     >
                       <div className="flex items-center justify-between">
                         <span>{formatTimeTo12h(slot)}</span>
-                        {busy && <span className="text-xs">(Booked)</span>}
+                        {busy ? <span className="text-xs">(Booked)</span> : passed ? <span className="text-xs">(Passed)</span> : null}
                       </div>
                     </button>
                   );
@@ -706,43 +719,58 @@ export function CreateAppointmentModal() {
       </h3>
 
       <div className="bg-white rounded-lg border p-4 space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <Label>Amount Due ($)</Label>
-            <Input readOnly value={String(((formData.balance ?? (formData.price ?? 0) - (formData.discount ?? 0)) || 0).toFixed(2))} />
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+           <div>
+             <Label>Amount Due ($)</Label>
+             <Input readOnly value={String(((formData.balance ?? (formData.price ?? 0) - (formData.discount ?? 0)) || 0).toFixed(2))} />
+           </div>
 
-          <div>
-            <Label>Payment Method</Label>
-            <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(String(v))}>
-              <SelectTrigger className="h-11"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Cash">Cash</SelectItem>
-                <SelectItem value="Card">Card</SelectItem>
-                <SelectItem value="Pay at Clinic">Pay at Clinic</SelectItem>
-                <SelectItem value="GCash">GCash</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+           <div>
+             <Label>Payment Method</Label>
+             <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(String(v))}>
+               <SelectTrigger className="h-11"><SelectValue /></SelectTrigger>
+               <SelectContent>
+                 <SelectItem value="Cash">Cash</SelectItem>
+                 <SelectItem value="Card">Card</SelectItem>
+                 <SelectItem value="Pay at Clinic">Pay at Clinic</SelectItem>
+                 <SelectItem value="GCash">GCash</SelectItem>
+               </SelectContent>
+             </Select>
+           </div>
 
-          <div>
-            <Label>Amount to Pay Now ($)</Label>
-            <Input type="number" min={0} step="0.01" value={paymentAmount} onChange={(e) => setPaymentAmount(Number(e.target.value || 0))} />
-          </div>
-        </div>
+           <div>
+             <Label>Status</Label>
+             <Select value={formData.status} onValueChange={(v) => setFormData(prev => ({ ...prev, status: String(v) }))}>
+               <SelectTrigger className="h-11"><SelectValue /></SelectTrigger>
+               <SelectContent>
+                 <SelectItem value="scheduled">Scheduled</SelectItem>
+                 <SelectItem value="pending">Pending</SelectItem>
+                 <SelectItem value="tentative">Tentative</SelectItem>
+                 <SelectItem value="completed">Completed</SelectItem>
+                 <SelectItem value="cancelled">Cancelled</SelectItem>
+                 <SelectItem value="To Pay">To Pay</SelectItem>
+               </SelectContent>
+             </Select>
+           </div>
 
-        <div>
-          <Label>Transaction ID (optional)</Label>
-          <Input placeholder="Txn ID or reference" value={paymentTransactionId} onChange={(e) => setPaymentTransactionId(e.target.value)} />
-        </div>
+           <div>
+             <Label>Amount to Pay Now ($)</Label>
+             <Input type="number" min={0} step="0.01" value={paymentAmount} onChange={(e) => setPaymentAmount(Number(e.target.value || 0))} />
+           </div>
+         </div>
 
-        <div>
-          <Label>Notes</Label>
-          <Textarea placeholder="Payment notes (optional)" value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} />
-        </div>
-      </div>
-    </div>
-  );
+         <div>
+           <Label>Transaction ID (optional)</Label>
+           <Input placeholder="Txn ID or reference" value={paymentTransactionId} onChange={(e) => setPaymentTransactionId(e.target.value)} />
+         </div>
+
+         <div>
+           <Label>Notes</Label>
+           <Textarea placeholder="Payment notes (optional)" value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} />
+         </div>
+       </div>
+     </div>
+   );
 
   // Step 4 => Summary + finalize
   const renderStep4 = () => (

@@ -1,202 +1,63 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
+import React, { useState, useEffect, useMemo } from 'react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { Avatar, AvatarImage, AvatarFallback } from "./ui/avatar";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { toast } from "sonner";
 import { Appointment } from "../hooks/useAppointments";
-import { useDoctors } from "../hooks/useDoctors";
-import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
-import { APPOINTMENT_TYPES, getAppointmentPrice } from "../lib/appointment-types";
-import { usePaymentModal } from "@/hooks/usePaymentModal";
+import { Calendar as CalendarIcon, CreditCard, Banknote } from "lucide-react";
+import { formatTimeTo12h } from "../lib/time-slots";
 
-type EditAppointmentModalProps = any;
+// Map numeric type IDs to appointment type strings
+const APPOINTMENT_TYPE_MAP: { [key: number]: string } = {
+  0: "Other",
+  1: "Routine Cleaning",
+  2: "Checkup",
+  3: "Filling",
+  4: "Root Canal",
+  5: "Extraction",
+  6: "Whitening",
+};
 
-interface PatientOption {
-  id: string;
-  name: string;
-  email?: string;
-  phone?: string;
-}
-
-export function EditAppointmentModal(props: EditAppointmentModalProps) {
+export function EditAppointmentModal() {
   const { 
     isEditModalOpen, 
     closeEditModal, 
-    selectedAppointment: appointment, // Rename selectedAppointment to appointment for consistency
+    selectedAppointment: appointment,
     updateAppointment, 
     deleteAppointment, 
     refreshAppointments,
-    isPatientFieldReadOnly
   } = useAppointmentModal();
-  const { openPaymentModal } = usePaymentModal();
-  const [dateAppointments, setDateAppointments] = useState<Appointment[]>([]);
 
-  const [form, setForm] = useState<Partial<Appointment>>({});
+  const [editModalStep, setEditModalStep] = useState<"details" | "payment">("details");
+  const [editFormData, setEditFormData] = useState<any>(null);
+  const [editPaymentMethod, setEditPaymentMethod] = useState<string>("GCash");
+  const [editAmountToPay, setEditAmountToPay] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [showCustomTypeInput, setShowCustomTypeInput] = useState(false);
-  const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors();
 
-  const [allPatients, setAllPatients] = useState<PatientOption[]>([]);
-  const [selectedPatientOption, setSelectedPatientOption] = useState<string>(""); // Stores patient ID or "new-patient"
-  const [isCreatingNewPatient, setIsCreatingNewPatient] = useState(false);
-  const [newPatientFormData, setNewPatientFormData] = useState({
-    firstName: "",
-    lastName: "",
-    email: "",
-    phone: "",
-  });
-  const [isLoadingPatients, setIsLoadingPatients] = useState(false);
-  
-  // New state for pagination
-  const [patientPage, setPatientPage] = useState(1);
-  const [hasMorePatients, setHasMorePatients] = useState(true);
-
-  const fetchPatients = useCallback(async (page: number) => {
-    setIsLoadingPatients(true);
-    try {
-      const res = await fetch(`http://localhost:3001/api/patients?page=${page}&limit=20`);
-      const json = await res.json();
-      if (json?.success && Array.isArray(json.data)) {
-        const list: PatientOption[] = json.data.map((p: { id: string | number; firstName: string; lastName: string; email?: string; phone?: string }) => ({ id: String(p.id), name: `${p.firstName} ${p.lastName}`, email: p.email, phone: p.phone }));
-        
-        setAllPatients(prev => {
-          const existingIds = new Set(prev.map(p => p.id));
-          const newItems = list.filter(p => !existingIds.has(p.id));
-          return page === 1 ? list : [...prev, ...newItems];
-        });
-
-        if (json.meta) {
-          setHasMorePatients(json.meta.page < json.meta.totalPages);
-        } else {
-          setHasMorePatients(false);
-        }
-      }
-    } catch (err) {
-      console.error("Failed to load patients:", err);
-      toast.error("Failed to load patients.");
-    } finally {
-      setIsLoadingPatients(false);
-    }
-  }, []);
-
-  // Infinite scroll observer
-  const observer = useRef<IntersectionObserver | null>(null);
-  const lastPatientElementRef = useCallback((node: HTMLDivElement) => {
-    if (isLoadingPatients) return;
-    if (observer.current) observer.current.disconnect();
-    observer.current = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting && hasMorePatients) {
-        setPatientPage(prevPage => prevPage + 1);
-      }
-    });
-    if (node) observer.current.observe(node);
-  }, [isLoadingPatients, hasMorePatients]);
-
-  useEffect(() => {
-    if (patientPage > 1) {
-      fetchPatients(patientPage);
-    }
-  }, [patientPage, fetchPatients]);
-
-
-  useEffect(() => {
-    if (isEditModalOpen) {
-      reloadDoctors();
-    }
-  }, [isEditModalOpen, reloadDoctors]);
-
+  // Initialize form data when appointment changes
   useEffect(() => {
     if (isEditModalOpen && appointment) {
-      setForm({ ...appointment });
-      // Set initial selected patient option
-      if (appointment.patientId && appointment.patientName) {
-        setAllPatients([{ id: appointment.patientId, name: appointment.patientName, email: appointment.email, phone: appointment.phone }]);
-        setSelectedPatientOption(appointment.patientId);
-        setIsCreatingNewPatient(false);
-      } else {
-        setSelectedPatientOption(""); // No patient selected
-      }
-
-      if (appointment.type === APPOINTMENT_TYPES.length - 1) {
-        setShowCustomTypeInput(true);
-      } else {
-        setShowCustomTypeInput(false);
-      }
+      const appointmentType = appointment.customType || APPOINTMENT_TYPE_MAP[appointment.type] || "Other";
+      setEditFormData({
+        type: appointmentType,
+        duration: appointment.duration,
+        status: appointment.status,
+        notes: appointment.notes,
+      });
+      setEditPaymentMethod("GCash");
+      setEditAmountToPay("");
     } else {
-      // Reset form and state when no appointment is provided (e.g., modal is closed)
-      setForm({});
-      setSelectedPatientOption("");
-      setIsCreatingNewPatient(false);
-      setNewPatientFormData({ firstName: "", lastName: "", email: "", phone: "" });
-      setShowCustomTypeInput(false); // Also reset this when no appointment
+      setEditFormData(null);
+      setEditModalStep("details");
     }
-    
-    // Reset pagination when appointment changes
-    setPatientPage(1);
-    setHasMorePatients(true);
-
   }, [appointment, isEditModalOpen]);
-
-  // Fetch all appointments for the selected date to check for clinic-wide conflicts
-  // This bypasses view filters to ensure global conflict detection
-  useEffect(() => {
-    const fetchDateAppointments = async () => {
-      if (!form.date || !isEditModalOpen) {
-        setDateAppointments([]);
-        return;
-      }
-      try {
-        const response = await fetch(`http://localhost:3001/api/appointments?startDate=${form.date}&endDate=${form.date}`);
-        const result = await response.json();
-        if (result.success) {
-          setDateAppointments(result.data || []);
-        }
-      } catch (error) {
-        console.error("Error fetching appointments for date:", error);
-      }
-    };
-
-    fetchDateAppointments();
-  }, [form.date, isEditModalOpen]);
-
-  const sortedPatients = useMemo(() => {
-    if (!selectedPatientOption) return allPatients;
-
-    const selectedPatient = allPatients.find(p => p.id === selectedPatientOption);
-    if (!selectedPatient) return allPatients;
-    
-    const filteredPatients = allPatients.filter(p => p.id !== selectedPatientOption);
-    return [selectedPatient, ...filteredPatients];
-  }, [allPatients, selectedPatientOption]);
-
-
-  const isSlotBusy = useCallback((time: string, duration: number) => {
-    if (!form.date || !dateAppointments) return false;
-    
-    const [hours, minutes] = time.split(':').map(Number);
-    const newStart = hours * 60 + minutes;
-    const newEnd = newStart + duration;
-
-    return dateAppointments.some(apt => {
-      // Exclude current appointment and cancelled ones
-      if (apt.id === appointment?.id || apt.status === 'cancelled') return false;
-      
-      const [aptHours, aptMinutes] = apt.time.split(':').map(Number);
-      const aptStart = aptHours * 60 + aptMinutes;
-      const aptDuration = apt.duration || 30;
-      const aptEnd = aptStart + aptDuration;
-
-      return (newStart < aptEnd) && (newEnd > aptStart);
-    });
-  }, [form.date, dateAppointments, appointment?.id]);
 
   const handleSave = async () => {
     if (!appointment?.id) {
@@ -204,137 +65,25 @@ export function EditAppointmentModal(props: EditAppointmentModalProps) {
       return;
     }
 
-    // If this modal is opened in patient-readonly mode we allow updating date, time and notes only
-    if (isPatientFieldReadOnly) {
-      // Basic validation for patient edits: date and time are required
-      if (!form.date || !form.time) {
-        toast.error("Please select a valid date and time.");
-        return;
-      }
-
-      setIsLoading(true);
-      try {
-        const updatedFields: Partial<Appointment> = {
-          date: form.date,
-          time: form.time,
-          notes: form.notes,
-        };
-
-        if (form.duration) updatedFields.duration = form.duration;
-
-        await updateAppointment(appointment.id, updatedFields as Partial<Appointment>);
-        toast.success("Appointment updated");
-        refreshAppointments();
-        closeEditModal();
-      } catch (err) {
-        console.error("Error updating appointment (patient):", err);
-        toast.error("Failed to update appointment");
-      } finally {
-        setIsLoading(false);
-      }
-      return;
-    }
-
-    if (form.type == null || form.type < 0) {
+    if (!editFormData.type) {
       toast.error("Please select an appointment type.");
       return;
     }
-    
-    if (form.type === APPOINTMENT_TYPES.length - 1 && !form.customType) {
-      toast.error("Please specify the appointment type for 'Other'.");
-      return;
-    }
 
-    // Patient validation and creation logic
-    let finalPatientId = form.patientId;
-    let finalPatientName = form.patientName;
-
-    if (isCreatingNewPatient) {
-      if (!newPatientFormData.firstName || !newPatientFormData.lastName || !newPatientFormData.email || !newPatientFormData.phone) {
-        toast.error("Please fill all required fields for the new patient.");
-        return;
-      }
-      setIsLoading(true);
-      try {
-        const newPatient = {
-          firstName: newPatientFormData.firstName,
-          lastName: newPatientFormData.lastName,
-          email: newPatientFormData.email,
-          phone: newPatientFormData.phone,
-          // Add other required fields for patient creation, even if empty
-          dateOfBirth: "", address: "", city: "", zipCode: "", insurance: "",
-          emergencyContact: "", emergencyPhone: "", medicalHistory: "", allergies: "", notes: "",
-          dentalCharts: [],
-          createdAt: new Date().toISOString()
-        };
-        const response = await fetch("http://localhost:3001/api/patients", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(newPatient),
-        });
-        const result = await response.json();
-        if (result.success && result.data) {
-          finalPatientId = result.data.id;
-          finalPatientName = `${result.data.firstName} ${result.data.lastName}`;
-          const finalEmail = result.data.email;
-          const finalPhone = result.data.phone;
-          
-          toast.success("New patient created successfully!");
-          refreshAppointments(); // Refresh to ensure patient list is up to date
-
-          // Update updatedForm with new patient details
-          const updatedForm = {
-            ...form,
-            patientId: finalPatientId,
-            patientName: finalPatientName,
-            email: finalEmail,
-            phone: finalPhone,
-          };
-          await updateAppointment(appointment.id, updatedForm as Partial<Appointment>);
-          toast.success("Appointment updated");
-          refreshAppointments();
-          closeEditModal();
-          return;
-        } else {
-          toast.error(result.message || "Failed to create new patient.");
-          return;
-        }
-      } catch (error) {
-        console.error("Error creating new patient:", error);
-        toast.error("Error creating new patient.");
-        return;
-      } finally {
-        setIsLoading(false);
-      }
-    } else {
-      // If not creating new patient, ensure a patient is selected
-      if (!finalPatientId || !finalPatientName) {
-        toast.error("Please select a patient or create a new one.");
-        return;
-      }
-    }
-
-    if (!form.date || !form.time || !form.doctor || form.price === undefined || form.price < 0) {
-      toast.error("Please fill all required fields and ensure price is valid.");
+    if (!appointment.date || !appointment.time) {
+      toast.error("Please fill all required fields.");
       return;
     }
 
     setIsLoading(true);
     try {
       const updatedForm = {
-        ...form,
-        patientId: finalPatientId,
-        patientName: finalPatientName,
+        type: appointment.type,
+        customType: editFormData.type,
+        duration: editFormData.duration,
+        status: editFormData.status,
+        notes: editFormData.notes,
       };
-
-      // Detailed client-side logging for debugging: show old vs new
-      console.log("=== UPDATING APPOINTMENT ===", appointment.id);
-      console.log("[CLIENT APPOINTMENT UPDATE] oldAppointment=", appointment);
-      try {
-        console.log("[CLIENT APPOINTMENT UPDATE] updatedForm=", JSON.stringify(updatedForm, null, 2));
-      } catch (e) {
-        console.log("[CLIENT APPOINTMENT UPDATE] updatedForm (raw)=", updatedForm);
-      }
 
       await updateAppointment(appointment.id, updatedForm as Partial<Appointment>);
       toast.success("Appointment updated");
@@ -342,22 +91,16 @@ export function EditAppointmentModal(props: EditAppointmentModalProps) {
       closeEditModal();
     } catch (err) {
       console.error("Error updating appointment:", err);
-      const errorMessage = err instanceof Error ? err.message : "Failed to update appointment";
-      toast.error(errorMessage);
+      toast.error("Failed to update appointment");
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleDelete = () => {
-    setIsDeleteDialogOpen(true);
-  };
-
-  const confirmDelete = async () => {
+  const handleDelete = async () => {
     if (!appointment?.id) return;
     setIsLoading(true);
     try {
-      console.log("=== DELETING APPOINTMENT ===", appointment.id);
       await deleteAppointment(appointment.id);
       toast.success("Appointment deleted");
       refreshAppointments();
@@ -371,400 +114,327 @@ export function EditAppointmentModal(props: EditAppointmentModalProps) {
     }
   };
 
-  // call the payment modal hook unconditionally to preserve hooks order
-  const pmAny: any = usePaymentModal() as any || {};
-  const paymentOpener = pmAny?.openPaymentModal || pmAny?.open || pmAny?.openPayment || (() => {});
-
-  // computed balance should be derived from price - discount - totalPaid
-  const computedBalance = useMemo(() => {
-    if (!appointment) return 0;
-    const price = Number(appointment.price || 0);
-    const discount = Number(appointment.discount || 0);
-    const paid = Number(appointment.totalPaid || 0);
-    const bal = price - discount - paid;
-    return bal > 0 ? bal : 0;
-  }, [appointment?.price, appointment?.discount, appointment?.totalPaid]);
+  if (!appointment || !editFormData) return null;
 
   return (
     <>
-    <Dialog open={isEditModalOpen} onOpenChange={closeEditModal}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Edit Appointment</DialogTitle>
-        </DialogHeader>
+      <Dialog open={isEditModalOpen} onOpenChange={(open) => {
+        if (!open) {
+          closeEditModal();
+          setEditModalStep("details");
+        }
+      }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <div className="flex items-center justify-between mb-4">
+              <DialogTitle className="flex items-center gap-2 text-2xl">
+                <CalendarIcon className="h-6 w-6 text-blue-600" />
+                Edit Appointment
+              </DialogTitle>
+              <div className="flex gap-2">
+                <div className={`px-4 py-1.5 rounded-full text-xs font-bold ${editModalStep === "details" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-600"}`}>
+                  Step 1: Details
+                </div>
+                <div className={`px-4 py-1.5 rounded-full text-xs font-bold ${editModalStep === "payment" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-600"}`}>
+                  Step 2: Payment
+                </div>
+              </div>
+            </div>
+            <DialogDescription>
+              {editModalStep === "details" 
+                ? "Modify appointment details" 
+                : "Review and manage payment"}
+            </DialogDescription>
+          </DialogHeader>
 
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label>Patient</Label>
-            {isPatientFieldReadOnly && form.patientName ? (
-              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 space-y-4">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <Avatar className="h-10 w-10">
-                      {(() => {
-                        const doc = doctors.find(d => String(d.name) === String(form.doctor) || String(d.id) === String(form.doctor));
-                        const src = doc?.profilePicture || form.doctorProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${form.doctor ?? form.patientName}`;
-                        return <AvatarImage src={src} alt={String(form.doctor || form.patientName || '')} />;
-                      })()}
-                      <AvatarFallback>{String(form.patientName || '').substring(0,2).toUpperCase()}</AvatarFallback>
-                    </Avatar>
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold truncate">{form.patientName}</div>
-                      <div className="text-xs text-muted-foreground truncate">{form.doctor}</div>
+          {editModalStep === "details" ? (
+            <>
+              <div className="space-y-6">
+                <div className="space-y-4">
+                  <h3 className="text-sm font-bold text-gray-900 uppercase tracking-tight">Appointment Details</h3>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label className="text-xs font-semibold text-gray-600">Patient Name</Label>
+                      <Input 
+                        type="text"
+                        value={appointment.patientName}
+                        readOnly
+                        className="bg-gray-100 border-gray-200"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-semibold text-gray-600">Doctor</Label>
+                      <Input 
+                        type="text"
+                        value={appointment.doctor}
+                        readOnly
+                        className="bg-gray-100 border-gray-200"
+                      />
                     </div>
                   </div>
-                  <div className="text-right">
-                    <div className="text-sm text-muted-foreground">Price</div>
-                    {(() => {
-                      const price = Number(form.price ?? 0);
-                      const discount = Number((form.discount as number) || 0);
-                      const discounted = Math.max(0, price - discount);
-                      return (
-                        <div>
-                          <div className="text-lg font-bold">₱{discounted.toFixed(2)}</div>
-                          {discount > 0 && (
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              <span className="line-through">₱{price.toFixed(2)}</span>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label className="text-xs font-semibold text-gray-600">Type</Label>
+                      <Select value={editFormData?.type || ""} onValueChange={(val) => setEditFormData({ ...editFormData, type: val })}>
+                        <SelectTrigger className="h-11 rounded-lg border-gray-200">
+                          <SelectValue placeholder="Select type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Routine Cleaning">Routine Cleaning</SelectItem>
+                          <SelectItem value="Checkup">Checkup</SelectItem>
+                          <SelectItem value="Filling">Filling</SelectItem>
+                          <SelectItem value="Root Canal">Root Canal</SelectItem>
+                          <SelectItem value="Extraction">Extraction</SelectItem>
+                          <SelectItem value="Whitening">Whitening</SelectItem>
+                          <SelectItem value="Other">Other</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-semibold text-gray-600">Duration (mins)</Label>
+                      <Select value={String(editFormData.duration)} onValueChange={(val) => setEditFormData({ ...editFormData, duration: Number(val) })}>
+                        <SelectTrigger className="h-11 rounded-lg border-gray-200">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="15">15 mins</SelectItem>
+                          <SelectItem value="30">30 mins</SelectItem>
+                          <SelectItem value="45">45 mins</SelectItem>
+                          <SelectItem value="60">1 hour</SelectItem>
+                          <SelectItem value="90">1.5 hours</SelectItem>
+                          <SelectItem value="120">2 hours</SelectItem>
+                          <SelectItem value="150">2.5 hours</SelectItem>
+                          <SelectItem value="180">3 hours</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label className="text-xs font-semibold text-gray-600">Date</Label>
+                      <div className="h-11 rounded-lg border border-gray-200 bg-gray-100 flex items-center px-3 text-sm font-medium">
+                        {appointment.date}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-semibold text-gray-600">Time</Label>
+                      <div className="h-11 rounded-lg border border-gray-200 bg-gray-100 flex items-center px-3 text-sm font-medium">
+                        {formatTimeTo12h(appointment.time)}
+                      </div>
+                    </div>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-4 pt-4 border-t border-gray-100">
-                  <div>
-                    <div className="text-xs text-muted-foreground">Duration</div>
-                    <div className="text-sm font-medium">{form.duration ? `${form.duration} mins` : '-'}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground">Status</div>
-                    <div className="text-sm font-medium capitalize">{form.status || '-'}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground">Balance</div>
-                    <div className="text-sm font-medium text-red-600">₱{Number(form.balance ?? 0).toFixed(2)}</div>
-                  </div>
-                </div>
-              </div>
-            ) : (
-            <Select
-              value={selectedPatientOption}
-              onValueChange={(value) => {
-                setSelectedPatientOption(value);
-                if (value === "new-patient") {
-                  setIsCreatingNewPatient(true);
-                  // Clear existing patient details from form
-                  setForm(prev => ({ ...prev, patientId: undefined, patientName: undefined, email: undefined, phone: undefined }));
-                } else {
-                  setIsCreatingNewPatient(false);
-                  const selected = allPatients.find(p => p.id === value);
-                  if (selected) {
-                    setForm(prev => ({ ...prev, patientId: selected.id, patientName: selected.name, email: selected.email, phone: selected.phone }));
-                  }
-                }
-              }}
-              onOpenChange={(open) => {
-                if (open) {
-                  // Only fetch if the list is just the one pre-filled patient
-                  if (allPatients.length <= 1) {
-                    fetchPatients(1);
-                  }
-                }
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select patient or create new" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="new-patient" className="font-semibold text-blue-600">
-                  + Create New Patient
-                </SelectItem>
-                {sortedPatients.map((p, index) => {
-                  if (sortedPatients.length === index + 1) {
-                    return <div ref={lastPatientElementRef} key={p.id}><SelectItem value={p.id}>{p.name}</SelectItem></div>;
-                  }
-                  return <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>;
-                })}
-                {isLoadingPatients && (
-                  <div className="p-2 text-center text-sm text-gray-500">Loading more...</div>
-                )}
-                {!isLoadingPatients && sortedPatients.length === 0 && (
-                  <div className="p-2 text-center text-sm text-gray-500">No patients found.</div>
-                )}
-              </SelectContent>
-            </Select>
-            )}
-          </div>
-
-          {isCreatingNewPatient && (
-            <>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>First Name</Label>
-                  <Input
-                    value={newPatientFormData.firstName}
-                    onChange={(e) => setNewPatientFormData(prev => ({ ...prev, firstName: e.target.value }))}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Last Name</Label>
-                  <Input
-                    value={newPatientFormData.lastName}
-                    onChange={(e) => setNewPatientFormData(prev => ({ ...prev, lastName: e.target.value }))}
-                    required
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Email</Label>
-                <Input
-                  type="email"
-                  value={newPatientFormData.email}
-                  onChange={(e) => setNewPatientFormData(prev => ({ ...prev, email: e.target.value }))}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Phone</Label>
-                <Input
-                  type="tel"
-                  value={newPatientFormData.phone}
-                  onChange={(e) => setNewPatientFormData(prev => ({ ...prev, phone: e.target.value }))}
-                  required
-                />
-              </div>
-            </>
-          )}
-
-          <div className="grid grid-cols-2 gap-4">
-            {/* Date and Time should be editable for patients; other fields remain read-only to avoid redundancy. */}
-            <div className="space-y-2">
-              <Label>Date</Label>
-              <Input type="date" value={form.date || ''} onChange={(e) => setForm(prev => ({ ...prev, date: e.target.value }))} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="time">Time</Label>
-              <Select 
-                value={form.time ? TIME_SLOTS.indexOf(form.time).toString() : "-1"} 
-                onValueChange={(v) => {
-                  const index = parseInt(v);
-                  if (index >= 0) {
-                    setForm(prev => ({ ...prev, time: TIME_SLOTS[index] }));
-                  }
-                }}
-              >
-                <SelectTrigger id="time">
-                  <SelectValue placeholder="Select time" />
-                </SelectTrigger>
-                <SelectContent>
-                  {TIME_SLOTS.map((slot, index) => {
-                    const busy = isSlotBusy(slot, form.duration || 60);
-                    return (
-                      <SelectItem key={slot} value={index.toString()} disabled={busy}>
-                        {formatTimeTo12h(slot)} {busy && "(Occupied)"}
-                      </SelectItem>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2 col-span-2">
-              <Label>Type</Label>
-              <Select 
-                value={form.type != null ? form.type.toString() : "-1"} 
-                onValueChange={(v) => {
-                  const typeIndex = parseInt(v);
-                  const price = getAppointmentPrice(typeIndex);
-                  setForm(prev => ({ ...prev, type: typeIndex, customType: "", price }));
-                  setShowCustomTypeInput(typeIndex === APPOINTMENT_TYPES.length - 1);
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Type" />
-                </SelectTrigger>
-                <SelectContent>
-                  {APPOINTMENT_TYPES.map((type, index) => (
-                    <SelectItem key={index} value={index.toString()}>{type}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {showCustomTypeInput && !isPatientFieldReadOnly && (
-              <div className="space-y-2 col-span-2">
-                <Label htmlFor="customType">Please Specify</Label>
-                <Input
-                    id="customType"
-                    placeholder="e.g., 'Denture Fitting', 'Braces Adjustment'"
-                    value={form.customType || ""}
-                    onChange={(e) => setForm(prev => ({...prev, customType: e.target.value}))}
-                    required
-                />
-              </div>
-            )}
-
-            {!isPatientFieldReadOnly && (
-              <>
-                <div className="space-y-2">
-                  <Label htmlFor="price">Price ($)</Label>
-                  <Input
-                    id="price"
-                    type="number"
-                    value={form.price !== undefined ? form.price : ""}
-                    onChange={(e) => {
-                      const p = parseFloat(e.target.value) || 0;
-                      setForm(prev => ({ ...prev, price: p, balance: Math.max(0, p - ((prev.discount as number) || 0) - (prev.totalPaid || 0)) }));
-                    }}
-                    min="0"
-                    step="0.01"
-                    required
-                  />
-
-                  <Label htmlFor="discount">Discount ($)</Label>
-                  <Input
-                    id="discount"
-                    type="number"
-                    value={(form.discount as number) || 0}
-                    onChange={(e) => {
-                      const d = parseFloat(e.target.value) || 0;
-                      setForm(prev => ({ ...prev, discount: d, balance: Math.max(0, (prev.price || 0) - d - (prev.totalPaid || 0)) }));
-                    }}
-                    min="0"
-                    step="0.01"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Duration (minutes)</Label>
-                  <Select 
-                    value={String(form.duration || 60)} 
-                    onValueChange={(v) => setForm(prev => ({ ...prev, duration: parseInt(v) }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Duration" />
+                <div className="space-y-2 border-t pt-4">
+                  <Label className="text-sm font-bold text-gray-700">Appointment Status</Label>
+                  <Select value={editFormData.status} onValueChange={(val) => setEditFormData({ ...editFormData, status: val })}>
+                    <SelectTrigger className="h-11 rounded-lg border-gray-200">
+                      <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {[30, 60, 90, 120].map((mins) => {
-                        const busy = form.time ? isSlotBusy(form.time, mins) : false;
-                        return (
-                          <SelectItem key={mins} value={String(mins)} disabled={busy}>
-                            {mins >= 60 ? `${mins / 60} hour${mins / 60 > 1 ? 's' : ''}` : `${mins} mins`} {busy && "(Conflict)"}
-                          </SelectItem>
-                        );
-                      })}
+                      <SelectItem value="scheduled">Scheduled</SelectItem>
+                      <SelectItem value="tentative">Tentative</SelectItem>
+                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="confirmed">Confirmed</SelectItem>
+                      <SelectItem value="cancelled">Cancelled</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-              </>
-            )}
-          </div>
 
-          {!isPatientFieldReadOnly && (
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Doctor</Label>
-                <Select
-                  value={String(form.doctor || '')}
-                  onValueChange={(v) => setForm(prev => ({ ...prev, doctor: v }))}
-                  disabled={isLoadingDoctors}
+                <div className="space-y-2">
+                  <Label className="text-sm font-bold text-gray-700">Notes (Optional)</Label>
+                  <Textarea
+                    placeholder="Any additional notes..."
+                    value={editFormData.notes || ""}
+                    onChange={(e) => setEditFormData({ ...editFormData, notes: e.target.value })}
+                    className="resize-none rounded-lg border-gray-200"
+                    rows={4}
+                  />
+                </div>
+              </div>
+
+              <DialogFooter className="flex gap-3 pt-6 border-t">
+                <Button
+                  variant="outline"
+                  onClick={() => closeEditModal()}
+                  disabled={isLoading}
+                  className="h-11 px-6 rounded-lg"
                 >
-                  <SelectTrigger>
-                    <SelectValue placeholder={isLoadingDoctors ? "Loading doctors..." : doctors.length === 0 ? "No doctors available" : "Doctor"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {isLoadingDoctors ? (
-                      <div className="p-2 text-sm text-gray-500">Loading doctors...</div>
-                    ) : doctors.length > 0 ? (
-                      doctors.map((doctor) => (
-                        <SelectItem key={doctor.id} value={doctor.name}>
-                          {doctor.name}
-                        </SelectItem>
-                      ))
-                    ) : (
-                      <div className="p-2 text-sm text-gray-500">No doctors available</div>
-                    )}
-                    {!isLoadingDoctors && form.doctor && !doctors.some((doctor) => doctor.name === form.doctor) ? (
-                      <SelectItem value={String(form.doctor)}>{form.doctor}</SelectItem>
-                    ) : null}
-                  </SelectContent>
-                </Select>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => setEditModalStep("payment")}
+                  disabled={isLoading}
+                  className="bg-blue-600 hover:bg-blue-700 text-white h-11 px-8 rounded-lg shadow-lg shadow-blue-100"
+                >
+                  Next: Payment
+                </Button>
+              </DialogFooter>
+            </>
+          ) : (
+            <>
+              <div className="space-y-6">
+                <div className="bg-gray-50 p-4 rounded-lg space-y-3 border border-gray-100">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-500">Service:</span>
+                    <span className="font-medium text-gray-900">{editFormData?.type}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-500">Date:</span>
+                    <span className="font-medium text-gray-900">{appointment.date}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-500">Time:</span>
+                    <span className="font-medium text-gray-900">{formatTimeTo12h(appointment.time)}</span>
+                  </div>
+                  <div className="flex justify-between items-center pt-3 border-t border-gray-200">
+                    <span className="font-bold text-gray-900">Total Price:</span>
+                    <span className="font-bold text-lg text-gray-900">
+                      ₱{appointment.price || 0}
+                    </span>
+                  </div>
+                  {appointment.totalPaid && appointment.totalPaid > 0 && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-gray-500">Already Paid:</span>
+                      <span className="font-medium text-green-600">
+                        ₱{appointment.totalPaid}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-gray-900">Remaining Balance:</span>
+                    <span className="font-bold text-lg text-blue-600">
+                      ₱{appointment.balance ?? (appointment.price || 0)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="editPaymentAmount" className="text-sm font-semibold text-gray-700">Amount to Pay Now</Label>
+                  <Input
+                    id="editPaymentAmount"
+                    type="number"
+                    placeholder={`Enter amount (e.g. ${appointment.balance ?? appointment.price})`}
+                    value={editAmountToPay}
+                    onChange={(e) => setEditAmountToPay(e.target.value)}
+                    className="font-bold text-lg h-12 border-gray-200"
+                  />
+                  <p className="text-xs text-gray-500">Leave blank to pay the full remaining balance.</p>
+                </div>
+
+                <div className="space-y-3">
+                  <h3 className="font-semibold text-sm text-gray-900">Select Payment Method</h3>
+                  <div className="grid grid-cols-3 gap-2">
+                    <Button
+                      variant="outline"
+                      className={`h-20 flex flex-col items-center justify-center gap-1 border-2 rounded-lg transition-all ${
+                        editPaymentMethod === "GCash"
+                          ? "border-blue-500 bg-blue-50"
+                          : "border-gray-200 hover:border-blue-200"
+                      }`}
+                      onClick={() => setEditPaymentMethod("GCash")}
+                    >
+                      <span className="font-black text-blue-700 italic text-lg">
+                        GCash
+                      </span>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className={`h-20 flex flex-col items-center justify-center gap-1 border-2 rounded-lg transition-all ${
+                        editPaymentMethod === "Card"
+                          ? "border-blue-500 bg-blue-50"
+                          : "border-gray-200 hover:border-blue-200"
+                      }`}
+                      onClick={() => setEditPaymentMethod("Card")}
+                    >
+                      <CreditCard
+                        className={`h-6 w-6 ${
+                          editPaymentMethod === "Card" ? "text-blue-600" : "text-gray-600"
+                        }`}
+                      />
+                      <span
+                        className={`text-[10px] font-bold uppercase ${
+                          editPaymentMethod === "Card" ? "text-blue-700" : "text-gray-500"
+                        }`}
+                      >
+                        Card
+                      </span>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className={`h-20 flex flex-col items-center justify-center gap-1 border-2 rounded-lg transition-all ${
+                        editPaymentMethod === "Pay at Clinic"
+                          ? "border-blue-500 bg-blue-50"
+                          : "border-gray-200 hover:border-blue-200"
+                      }`}
+                      onClick={() => {
+                        setEditPaymentMethod("Pay at Clinic");
+                        setEditAmountToPay("0");
+                      }}
+                    >
+                      <Banknote
+                        className={`h-6 w-6 ${
+                          editPaymentMethod === "Pay at Clinic" ? "text-blue-600" : "text-gray-600"
+                        }`}
+                      />
+                      <span
+                        className={`text-[10px] font-bold uppercase text-center leading-tight ${
+                          editPaymentMethod === "Pay at Clinic" ? "text-blue-700" : "text-gray-500"
+                        }`}
+                      >
+                        Pay at Clinic
+                      </span>
+                    </Button>
+                  </div>
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label>Status</Label>
-                <Select value={String(form.status || 'scheduled')} onValueChange={(v) => setForm(prev => ({ ...prev, status: v as Appointment["status"] }))}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="scheduled">Scheduled</SelectItem>
-                    <SelectItem value="pending">Pending</SelectItem>
-                    <SelectItem value="tentative">Tentative</SelectItem>
-                    <SelectItem value="To Pay">To Pay</SelectItem>
-                    <SelectItem value="completed">Completed</SelectItem>
-                    <SelectItem value="cancelled">Cancelled</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+
+              <DialogFooter className="flex gap-3 pt-6 border-t">
+                <Button
+                  variant="outline"
+                  onClick={() => setEditModalStep("details")}
+                  disabled={isLoading}
+                  className="h-11 px-6 rounded-lg"
+                >
+                  Back
+                </Button>
+                <Button
+                  onClick={handleSave}
+                  disabled={isLoading}
+                  className="bg-blue-600 hover:bg-blue-700 text-white h-11 px-8 rounded-lg shadow-lg shadow-blue-100"
+                >
+                  {isLoading ? "Saving..." : "Save Changes"}
+                </Button>
+              </DialogFooter>
+            </>
           )}
+        </DialogContent>
+      </Dialog>
 
-          <div className="space-y-2">
-            <Label>Notes</Label>
-            {/* Notes are editable for both staff and patient mode (patients can save only notes) */}
-            <Textarea value={form.notes || ''} onChange={(e) => setForm(prev => ({ ...prev, notes: e.target.value }))} />
+      {/* Delete confirmation dialog */}
+      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete Appointment</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-gray-600">
+              Are you sure you want to delete this appointment? This action cannot be undone.
+            </p>
           </div>
-
-            <div className="modal-footer">
-            <div className="flex justify-end items-center gap-3 mt-4">
-              {isPatientFieldReadOnly ? (
-                <div className="flex items-center gap-3">
-                  <Button variant="outline" onClick={closeEditModal} disabled={isLoading}>Close</Button>
-                  <Button onClick={handleSave} className="bg-purple-600 text-white" disabled={isLoading}>
-                    {isLoading ? "Saving..." : "Save"}
-                  </Button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-3">
-                  <Button variant="outline" onClick={closeEditModal} disabled={isLoading}>Cancel</Button>
-                  <Button variant="destructive" onClick={handleDelete} disabled={isLoading}>
-                    {isLoading ? "Deleting..." : "Delete"}
-                  </Button>
-                  <Button onClick={handleSave} className="bg-purple-600 text-white" disabled={isLoading}>
-                    {isLoading ? "Saving..." : "Save"}
-                  </Button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-
-    <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Delete Appointment</DialogTitle>
-        </DialogHeader>
-        <div className="py-4">
-          <p className="text-sm text-muted-foreground">
-            Are you sure you want to delete this appointment? This action cannot be undone.
-          </p>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} disabled={isLoading}>
-            Cancel
-          </Button>
-          <Button variant="destructive" onClick={confirmDelete} disabled={isLoading}>
-            {isLoading ? "Deleting..." : "Delete"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} disabled={isLoading}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={isLoading}>
+              {isLoading ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
