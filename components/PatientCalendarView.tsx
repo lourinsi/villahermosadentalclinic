@@ -994,56 +994,75 @@ export function PatientCalendarView() {
 
       <Dialog open={!!selectedAppointment} onOpenChange={() => setSelectedAppointment(null)}>
         <DialogContent className="max-w-md">
-            <DialogHeader>
-                <DialogTitle>Appointment Details</DialogTitle>
+            <DialogHeader className="flex items-center justify-between space-y-0 mb-6">
+                <div className="flex items-center gap-2">
+                    <CalendarIcon className="h-5 w-5 text-blue-600" />
+                    <DialogTitle className="text-xl">Appointment Details</DialogTitle>
+                </div>
             </DialogHeader>
             {selectedAppointment && (
                 <div className="space-y-6">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1">
-                        <Label className="text-gray-500 text-xs uppercase tracking-wider">Patient</Label>
-                        <p className="font-semibold text-gray-900">{selectedAppointment.patientName}</p>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-gray-500 text-xs uppercase tracking-wider">Doctor</Label>
-                        <p className="font-semibold text-gray-900">Dr. {selectedAppointment.doctor}</p>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-gray-500 text-xs uppercase tracking-wider">Service</Label>
-                        <p className="font-semibold text-gray-900">{getAppointmentTypeName(selectedAppointment.type, selectedAppointment.customType)}</p>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-gray-500 text-xs uppercase tracking-wider">Status</Label>
-                        <div>
-                          <Badge variant={selectedAppointment.status === 'scheduled' ? 'default' : 'secondary'}>
-                            {selectedAppointment.status.toUpperCase()}
+                    {/* Appointment Details Section */}
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                          <Label className="text-gray-500 text-xs uppercase tracking-wider font-semibold">Patient</Label>
+                          <p className="font-semibold text-gray-900">{selectedAppointment.patientName}</p>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-gray-500 text-xs uppercase tracking-wider font-semibold">Doctor</Label>
+                          <p className="font-semibold text-gray-900">Dr. {selectedAppointment.doctor}</p>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-gray-500 text-xs uppercase tracking-wider font-semibold">Service</Label>
+                          <p className="font-semibold text-gray-900">{getAppointmentTypeName(selectedAppointment.type, selectedAppointment.customType)}</p>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-gray-500 text-xs uppercase tracking-wider font-semibold">Status</Label>
+                          <Badge className="w-fit bg-blue-600 text-white font-bold uppercase text-xs px-3 py-1.5 rounded-full">
+                            {selectedAppointment.status}
                           </Badge>
                         </div>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-gray-500 text-xs uppercase tracking-wider">Date</Label>
-                        <div className="flex items-center gap-2 font-medium text-gray-900">
-                          <CalendarIcon className="h-4 w-4 text-violet-500" />
-                          {formatDateToYYYYMMDD(parseBackendDateToLocal(selectedAppointment.date))}
+                        <div className="space-y-1">
+                          <Label className="text-gray-500 text-xs uppercase tracking-wider font-semibold">Date</Label>
+                          <div className="flex items-center gap-2 font-medium text-gray-900">
+                            <CalendarIcon className="h-4 w-4 text-violet-500" />
+                            {formatDateToYYYYMMDD(parseBackendDateToLocal(selectedAppointment.date))}
+                          </div>
                         </div>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-gray-500 text-xs uppercase tracking-wider">Time</Label>
-                        <div className="flex items-center gap-2 font-medium text-gray-900">
-                          <Clock className="h-4 w-4 text-violet-500" />
-                          {formatTimeTo12h(selectedAppointment.time)}
+                        <div className="space-y-1">
+                          <Label className="text-gray-500 text-xs uppercase tracking-wider font-semibold">Time</Label>
+                          <div className="flex items-center gap-2 font-medium text-gray-900">
+                            <Clock className="h-4 w-4 text-violet-500" />
+                            {formatTimeTo12h(selectedAppointment.time)}
+                          </div>
                         </div>
                       </div>
                     </div>
 
+                    {/* Notes Section */}
                     {selectedAppointment.notes && (
-                      <div className="space-y-1 border-t pt-4">
-                        <Label className="text-gray-500 text-xs uppercase tracking-wider">Notes</Label>
+                      <div className="space-y-2 border-t pt-4">
+                        <Label className="text-gray-500 text-xs uppercase tracking-wider font-semibold">Notes</Label>
                         <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-md italic">&quot;{selectedAppointment.notes}&quot;</p>
                       </div>
                     )}
 
-                    <DialogFooter className="flex-col sm:flex-row gap-2 pt-4 border-t">
+                    {/* Action Buttons */}
+                    <DialogFooter className="flex-col gap-2 pt-4 border-t">
+                        {/* Request Cancellation for scheduled/confirmed */}
+                        {(statusStr === 'scheduled' || statusStr === 'confirmed') && (
+                          <Button 
+                            variant="outline" 
+                            className="w-full gap-2 border-amber-200 text-amber-700 hover:bg-amber-50" 
+                            onClick={() => handleRequestCancellation(selectedAppointment)}
+                            disabled={isProcessing}
+                          >
+                            <AlertCircle className="h-4 w-4" />
+                            Request Cancellation
+                          </Button>
+                        )}
+
                         {/* Cancel button for non-confirmed/non-scheduled and future appointments */}
                         {(() => {
                           const aptDateLocal = parseBackendDateToLocal(selectedAppointment.date);
@@ -1067,25 +1086,12 @@ export function PatientCalendarView() {
                                 disabled={isProcessing}
                               >
                                 <Trash2 className="h-4 w-4" />
-                                Cancel Appointment
+                                Delete
                               </Button>
                             );
                           }
                           return null;
                         })()}
-
-                        {/* Request cancellation for scheduled/confirmed */
-                        (statusStr === 'scheduled' || statusStr === 'confirmed') && (
-                          <Button 
-                            variant="outline" 
-                            className="w-full gap-2 border-amber-200 text-amber-700 hover:bg-amber-50" 
-                            onClick={() => handleRequestCancellation(selectedAppointment)}
-                            disabled={isProcessing}
-                          >
-                            <AlertCircle className="h-4 w-4" />
-                            Request Cancellation
-                          </Button>
-                        )}
 
                         {/* Pay Now when not paid and not cancelled */}
                         {selectedAppointment.paymentStatus !== 'paid' && selectedAppointment.status !== 'cancelled' && (
@@ -1100,7 +1106,7 @@ export function PatientCalendarView() {
                         )}
 
                         <Button 
-                          variant="ghost" 
+                          variant="outline" 
                           onClick={() => setSelectedAppointment(null)}
                           className="w-full"
                           disabled={isProcessing}

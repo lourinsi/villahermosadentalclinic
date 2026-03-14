@@ -21,7 +21,15 @@ export function useDoctors(refreshKey?: number) {
   const loadDoctors = useCallback(async () => {
     try {
       setIsLoadingDoctors(true);
-      const response = await fetch(STAFF_API);
+      const token = typeof window !== 'undefined' ? localStorage.getItem("authToken") : null;
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      
+      const response = await fetch(STAFF_API, { headers, credentials: "include" });
       const result = await response.json();
       if (result?.success && Array.isArray(result.data)) {
         const dentistOnly = result.data.filter((staff: Staff) => {

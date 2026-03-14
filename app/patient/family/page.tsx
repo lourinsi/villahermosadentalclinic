@@ -55,7 +55,18 @@ const FamilyPage = () => {
     if (user?.patientId) {
       try {
         setIsLoading(true);
-        const response = await fetch(`http://localhost:3001/api/patients?parentId=${user.patientId}`);
+        const token = typeof window !== 'undefined' ? localStorage.getItem("authToken") : null;
+        const headers: HeadersInit = {
+          "Content-Type": "application/json",
+        };
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
+        
+        const response = await fetch(`http://localhost:3001/api/patients?parentId=${user.patientId}`, { 
+          headers, 
+          credentials: "include" 
+        });
         const result = await response.json();
         if (result.success) {
           setFamilyMembers(result.data.filter((p: Patient) => p.id !== user.patientId));
@@ -92,9 +103,18 @@ const FamilyPage = () => {
 
     try {
       setIsAdding(true);
+      const token = typeof window !== 'undefined' ? localStorage.getItem("authToken") : null;
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      
       const response = await fetch("http://localhost:3001/api/patients/dependent", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
+        credentials: "include",
         body: JSON.stringify({
           ...newMember,
           parentId: user.patientId,
@@ -141,9 +161,18 @@ const FamilyPage = () => {
     if (!selectedMember) return;
 
     try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem("authToken") : null;
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      
       const response = await fetch(`http://localhost:3001/api/patients/${selectedMember.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers,
+        credentials: "include",
         body: JSON.stringify({
           ...editFormData,
           name: `${editFormData.firstName} ${editFormData.lastName}`.trim()
@@ -166,7 +195,18 @@ const FamilyPage = () => {
   const fetchMemberAppointments = async (memberId: string) => {
     try {
       setIsLoadingAppointments(true);
-      const response = await fetch(`http://localhost:3001/api/appointments?patientId=${memberId}`);
+      const token = typeof window !== 'undefined' ? localStorage.getItem("authToken") : null;
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      
+      const response = await fetch(`http://localhost:3001/api/appointments?patientId=${memberId}`, { 
+        headers, 
+        credentials: "include" 
+      });
       const result = await response.json();
       if (result.success) {
         setMemberAppointments(result.data);

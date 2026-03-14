@@ -70,7 +70,17 @@ export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFi
           // eslint-disable-next-line no-console
           console.debug("useAppointments: fetching appointments URL:", url);
         } catch (e) {}
-        const response = await fetch(url);
+        
+        // Get auth token from localStorage
+        const token = typeof window !== 'undefined' ? localStorage.getItem("authToken") : null;
+        const headers: HeadersInit = {
+          "Content-Type": "application/json",
+        };
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
+        
+        const response = await fetch(url, { headers, credentials: "include" });
         const result = await response.json();
         if (result.success && result.data) {
           setAppointments(result.data);
@@ -89,9 +99,18 @@ export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFi
 
   const addAppointment = async (appointment: Omit<Appointment, "id" | "createdAt">) => {
     try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem("authToken") : null;
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      
       const response = await fetch(API_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
+        credentials: "include",
         body: JSON.stringify(appointment),
       });
       const result = await response.json();
@@ -109,9 +128,18 @@ export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFi
 
   const updateAppointment = async (id: string, updates: Partial<Appointment>) => {
     try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem("authToken") : null;
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      
       const response = await fetch(`${API_URL}/${id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers,
+        credentials: "include",
         body: JSON.stringify(updates),
       });
       const result = await response.json();
@@ -131,8 +159,18 @@ export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFi
 
   const deleteAppointment = async (id: string) => {
     try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem("authToken") : null;
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      
       const response = await fetch(`${API_URL}/${id}`, {
         method: "DELETE",
+        headers,
+        credentials: "include",
       });
       const result = await response.json();
       if (result.success) {

@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useDoctors } from "@/hooks/useDoctors";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { useAuth } from "@/hooks/useAuth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { DoctorCalendar } from "@/components/DoctorCalendar";
@@ -15,7 +16,10 @@ import {
   ChevronLeft, 
   ChevronRight,
   Award, 
-  Mail
+  Mail,
+  AlertCircle,
+  CreditCard,
+  Trash2
 } from "lucide-react";
 import { TIME_SLOTS, formatTimeTo12h } from "@/lib/time-slots";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
@@ -23,14 +27,19 @@ import { Badge } from "@/components/ui/badge";
 import { Appointment } from "@/hooks/useAppointments";
 import ViewMode from "@/components/viewMode";
 import BookingModal from "@/components/BookingModal";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
+import { getAppointmentTypeName } from "@/lib/appointment-types";
 
 export default function DoctorAvailabilityPage() {
   const params = useParams();
   const router = useRouter();
   const doctorName = decodeURIComponent(params.name as string);
   
+  const { user } = useAuth();
   const { doctors, isLoadingDoctors } = useDoctors();
-  const { addAppointment } = useAppointmentModal();
+  const { addAppointment, deleteAppointment, updateAppointment } = useAppointmentModal();
   
   const [viewMode, setViewMode] = useState<ViewMode>("day");
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
@@ -40,6 +49,10 @@ export default function DoctorAvailabilityPage() {
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
   const [bookingDefaultTime, setBookingDefaultTime] = useState<string | undefined>(undefined);
   const [bookingDefaultDate, setBookingDefaultDate] = useState<Date | undefined>(undefined);
+  
+  // Appointment details modal state
+  const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const doctor = useMemo(() => {
     return doctors.find(d => d.name === doctorName);
@@ -110,7 +123,6 @@ export default function DoctorAvailabilityPage() {
       apt.status !== 'cancelled' && 
       apt.paymentStatus !== 'unpaid'
     );
-    const bookedTimes = dayAppointments.map(apt => apt.time);
     
     const now = new Date();
     const todayStr = formatDateToYYYYMMDD(now);
@@ -120,19 +132,46 @@ export default function DoctorAvailabilityPage() {
     const currentHour = new Date().getHours();
     const currentMinute = new Date().getMinutes();
     
+    const timeToMinutes = (time: string): number => {
+      const [h, m] = time.split(':').map(Number);
+      return h * 60 + m;
+    };
+    
     return TIME_SLOTS.map(slot => {
       const [hour, minute] = slot.split(':').map(Number);
       const isPastTime = isToday && (hour < currentHour || (hour === currentHour && minute <= currentMinute));
-      const isBooked = bookedTimes.includes(slot);
-      const isTentative = dayAppointments.some(apt => apt.time === slot && apt.status === 'tentative');
       const isPast = isPastTime || isPastDate;
+      
+      // Check if this slot is occupied by any appointment (considering duration)
+      const slotMinutes = timeToMinutes(slot);
+      const slotEndMinutes = slotMinutes + 30; // Each slot is 30 mins
+      
+      let isBooked = false;
+      let isTentative = false;
+      let appointment: Appointment | undefined;
+      
+      for (const apt of dayAppointments) {
+        const aptStart = timeToMinutes(apt.time);
+        const aptEnd = aptStart + (apt.duration || 30);
+        
+        // Check if the current slot overlaps with any appointment
+        if (slotMinutes < aptEnd && slotEndMinutes > aptStart) {
+          isBooked = true;
+          appointment = apt;
+          if (apt.status === 'tentative') {
+            isTentative = true;
+          }
+          break;
+        }
+      }
       
       return {
         time: slot,
         isAvailable: !isBooked && !isPast,
         isBooked,
         isTentative,
-        isPast
+        isPast,
+        appointment
       };
     });
   }, [appointments]);
@@ -147,6 +186,29 @@ export default function DoctorAvailabilityPage() {
       newDate.setMonth(selectedDate.getMonth() + (direction === 'next' ? 1 : -1));
     }
     setSelectedDate(newDate);
+  };
+
+  // Check if appointment belongs to logged-in patient or family member
+  const isOwnAppointment = (apt: Appointment | undefined): boolean => {
+    if (!apt || !user) return false;
+    return apt.patientId === user.patientId;
+  };
+
+  const handleSlotClick = (slot: { time: string; isAvailable: boolean; isBooked: boolean; appointment?: Appointment }, date: Date) => {
+    if (!slot.isAvailable && slot.isBooked && slot.appointment) {
+      // Booked slot - check if it's the patient's own appointment
+      if (isOwnAppointment(slot.appointment)) {
+        setSelectedAppointment(slot.appointment);
+      } else {
+        // Not their appointment, can't view details
+        toast.error("This appointment belongs to another patient");
+      }
+    } else if (slot.isAvailable) {
+      // Available slot - open booking modal
+      setBookingDefaultTime(slot.time);
+      setBookingDefaultDate(date);
+      setBookingModalOpen(true);
+    }
   };
 
   const renderDayView = () => {
@@ -183,24 +245,20 @@ export default function DoctorAvailabilityPage() {
                 {slots.map((slot) => (
                   <button
                     key={slot.time}
-                    disabled={!slot.isAvailable}
-                    onClick={() => {
-                      if (slot.isAvailable) {
-                        setBookingDefaultTime(slot.time);
-                        setBookingDefaultDate(selectedDate);
-                        setBookingModalOpen(true);
-                      }
-                    }}
+                    disabled={false}
+                    onClick={() => handleSlotClick(slot, selectedDate)}
                     className={`
                       group flex items-center justify-between p-4 rounded-2xl border transition-all duration-200
                       ${slot.isAvailable
                         ? "bg-white border-gray-100 hover:border-emerald-400 hover:shadow-md cursor-pointer"
+                        : slot.isBooked
+                        ? "bg-gray-50 border-gray-100 opacity-60 cursor-not-allowed hover:opacity-100 hover:bg-white hover:border-emerald-400 hover:shadow-md"
                         : "bg-gray-50 border-gray-100 opacity-60 cursor-not-allowed"}
                     `}
                   >
                     <div className="flex items-center gap-3">
                       <div>
-                        <p className={`font-bold text-sm ${slot.isAvailable ? "text-gray-900" : "text-gray-400"}`}>
+                        <p className={`font-bold text-sm ${slot.isAvailable || slot.isBooked ? "text-gray-900 group-hover:text-gray-900" : "text-gray-400"}`}>
                           {formatTimeTo12h(slot.time)}
                         </p>
                       </div>
@@ -263,16 +321,11 @@ export default function DoctorAvailabilityPage() {
                     <button
                       key={slot.time}
                       disabled={!slot.isAvailable}
-                      onClick={() => {
-                        if (!slot.isAvailable) return;
-                        setBookingDefaultTime(slot.time);
-                        setBookingDefaultDate(day);
-                        setBookingModalOpen(true);
-                      }}
-                      className={`w-full group ${!slot.isAvailable ? 'cursor-not-allowed opacity-70' : ''}`}
+                      onClick={() => handleSlotClick(slot, day)}
+                      className={`w-full group ${!slot.isAvailable && !slot.isBooked ? 'cursor-not-allowed opacity-70' : ''}`}
                     >
                       <div className={`
-                        flex flex-col items-center justify-center p-1 rounded-md border text-center transition-all ${slot.isAvailable ? 'hover:scale-[1.02]' : ''}
+                        flex flex-col items-center justify-center p-1 rounded-md border text-center transition-all ${slot.isAvailable ? 'hover:scale-[1.02] cursor-pointer' : (slot.isBooked ? 'hover:scale-[1.02] cursor-pointer' : '')}
                           ${slot.isAvailable ? 'bg-emerald-600 border-emerald-700' : (slot.isTentative ? 'bg-emerald-100 border-emerald-200' : 'bg-emerald-700 border-emerald-800')}
                       `}>
                         <span className="text-[8px] font-bold text-white/90 leading-none">{formatTimeTo12h(slot.time)}</span>
@@ -343,18 +396,13 @@ export default function DoctorAvailabilityPage() {
                 {!isPast && displaySlots.slice(0, 5).map(slot => (
                   <button
                     key={slot.time}
-                    disabled={!slot.isAvailable}
-                    onClick={() => {
-                      if (!slot.isAvailable) return;
-                      setBookingDefaultTime(slot.time);
-                      setBookingDefaultDate(day);
-                      setBookingModalOpen(true);
-                    }}
-                    className={`w-full text-left ${!slot.isAvailable ? 'cursor-not-allowed opacity-70' : ''}`}
+                    disabled={false}
+                    onClick={() => handleSlotClick(slot, day)}
+                    className={`w-full text-left`}
                   >
                     <div className={`
-                      px-1 py-0.5 rounded text-[7px] font-black text-white flex items-center justify-between transition-transform ${slot.isAvailable ? 'hover:scale-[1.03]' : ''}
-                      ${slot.isAvailable ? 'bg-emerald-600' : (slot.isTentative ? 'bg-emerald-100' : 'bg-emerald-700')}
+                      px-1 py-0.5 rounded text-[7px] font-black text-white flex items-center justify-between transition-transform ${slot.isAvailable || slot.isBooked ? 'hover:scale-[1.03] cursor-pointer' : ''}
+                      ${slot.isAvailable ? 'bg-emerald-600' : (slot.isTentative ? 'bg-emerald-100' : slot.isBooked ? 'bg-emerald-700 opacity-60 hover:opacity-100' : 'bg-emerald-700')}
                     `}>
                       <span className="leading-tight">{formatTimeTo12h(slot.time)}</span>
                       <span className="leading-tight">{slot.isAvailable ? 'OPEN' : (slot.isTentative ? 'RESERVED' : 'BOOKED')}</span>
@@ -582,6 +630,79 @@ export default function DoctorAvailabilityPage() {
           window.dispatchEvent(new CustomEvent('appointments:updated', { detail: { from: 'patient-page' } }));
         }}
       />
+
+      {/* Appointment Details Modal */}
+      <Dialog open={!!selectedAppointment} onOpenChange={() => setSelectedAppointment(null)}>
+        <DialogContent className="max-w-md">
+            <DialogHeader className="flex items-center justify-between space-y-0 mb-6">
+                <div className="flex items-center gap-2">
+                    <CalendarIcon className="h-5 w-5 text-blue-600" />
+                    <DialogTitle className="text-xl">Appointment Details</DialogTitle>
+                </div>
+            </DialogHeader>
+            {selectedAppointment && (
+                <div className="space-y-6">
+                    {/* Appointment Details Section */}
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                          <Label className="text-gray-500 text-xs uppercase tracking-wider font-semibold">Patient</Label>
+                          <p className="font-semibold text-gray-900">{selectedAppointment.patientName}</p>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-gray-500 text-xs uppercase tracking-wider font-semibold">Doctor</Label>
+                          <p className="font-semibold text-gray-900">Dr. {selectedAppointment.doctor}</p>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-gray-500 text-xs uppercase tracking-wider font-semibold">Service</Label>
+                          <p className="font-semibold text-gray-900">{getAppointmentTypeName(selectedAppointment.type, selectedAppointment.customType)}</p>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-gray-500 text-xs uppercase tracking-wider font-semibold">Status</Label>
+                          <Badge className="w-fit bg-blue-600 text-white font-bold uppercase text-xs px-3 py-1.5 rounded-full">
+                            {selectedAppointment.status}
+                          </Badge>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-gray-500 text-xs uppercase tracking-wider font-semibold">Date</Label>
+                          <div className="flex items-center gap-2 font-medium text-gray-900">
+                            <CalendarIcon className="h-4 w-4 text-violet-500" />
+                            {selectedAppointment.date}
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-gray-500 text-xs uppercase tracking-wider font-semibold">Time</Label>
+                          <div className="flex items-center gap-2 font-medium text-gray-900">
+                            <Clock className="h-4 w-4 text-violet-500" />
+                            {formatTimeTo12h(selectedAppointment.time)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Notes Section */}
+                    {selectedAppointment.notes && (
+                      <div className="space-y-2 border-t pt-4">
+                        <Label className="text-gray-500 text-xs uppercase tracking-wider font-semibold">Notes</Label>
+                        <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-md italic">&quot;{selectedAppointment.notes}&quot;</p>
+                      </div>
+                    )}
+
+                    {/* Action Buttons */}
+                    <DialogFooter className="flex-col gap-2 pt-4 border-t">
+                        <Button 
+                          variant="outline" 
+                          onClick={() => setSelectedAppointment(null)}
+                          className="w-full"
+                          disabled={isProcessing}
+                        >
+                          Close
+                        </Button>
+                      </DialogFooter>
+                </div>
+            )}
+        </DialogContent>
+      </Dialog>
 
       <style jsx global>{`
         .custom-scrollbar::-webkit-scrollbar {
