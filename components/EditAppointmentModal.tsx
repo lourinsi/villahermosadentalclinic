@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { toast } from "sonner";
 import { Appointment } from "../hooks/useAppointments";
-import { Calendar as CalendarIcon, CreditCard, Banknote } from "lucide-react";
+import { Calendar as CalendarIcon, CreditCard, Banknote, Trash2 } from "lucide-react";
 import { formatTimeTo12h } from "../lib/time-slots";
 
 // Map numeric type IDs to appointment type strings
@@ -22,6 +22,33 @@ const APPOINTMENT_TYPE_MAP: { [key: number]: string } = {
   4: "Root Canal",
   5: "Extraction",
   6: "Whitening",
+};
+
+interface StatusOption {
+  label: string;
+  value: string;
+  description?: string;
+}
+
+const DEFAULT_STATUS_OPTIONS: StatusOption[] = [
+  { label: 'Scheduled', value: 'scheduled', description: 'Appointment is confirmed and scheduled' },
+  { label: 'Pending', value: 'pending', description: 'Awaiting confirmation' },
+  { label: 'Reserved', value: 'reserved', description: 'Time slot is tentatively reserved' },
+  { label: 'Cancelled', value: 'cancelled', description: 'Appointment has been cancelled' },
+];
+
+const LEGACY_STATUS_MAP: Record<string, string> = {
+  'confirmed': 'scheduled',
+  'tentative': 'pending',
+  'pending': 'pending',
+  'reserved': 'reserved',
+  'cancelled': 'cancelled',
+  'scheduled': 'scheduled',
+};
+
+const normalizeStatus = (status: string): string => {
+  const s = status?.toLowerCase().trim();
+  return LEGACY_STATUS_MAP[s] || 'pending';
 };
 
 export function EditAppointmentModal() {
@@ -40,6 +67,44 @@ export function EditAppointmentModal() {
   const [editAmountToPay, setEditAmountToPay] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [statusOptions, setStatusOptions] = useState<StatusOption[]>(DEFAULT_STATUS_OPTIONS);
+  const [isLoadingStatuses, setIsLoadingStatuses] = useState(false);
+
+  // Fetch appointment statuses from backend
+  useEffect(() => {
+    const fetchStatuses = async () => {
+      try {
+        setIsLoadingStatuses(true);
+        const token = typeof window !== 'undefined' ? localStorage.getItem("authToken") : null;
+        const headers: HeadersInit = {
+          "Content-Type": "application/json",
+        };
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
+        
+        const response = await fetch('http://localhost:3001/api/appointment-statuses/options', { 
+          headers, 
+          credentials: "include" 
+        });
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const result = await response.json();
+        console.log('[APPOINTMENT STATUS] Fetched statuses:', result);
+        if (result.success && result.data && Array.isArray(result.data) && result.data.length > 0) {
+          setStatusOptions(result.data);
+        }
+      } catch (error) {
+        console.error('Error fetching appointment statuses, using defaults:', error);
+        // Fallback already set via DEFAULT_STATUS_OPTIONS in useState
+      } finally {
+        setIsLoadingStatuses(false);
+      }
+    };
+
+    fetchStatuses();
+  }, []);
 
   // Initialize form data when appointment changes
   useEffect(() => {
@@ -48,7 +113,7 @@ export function EditAppointmentModal() {
       setEditFormData({
         type: appointmentType,
         duration: appointment.duration,
-        status: appointment.status,
+        status: normalizeStatus(appointment.status),
         notes: appointment.notes,
       });
       setEditPaymentMethod("GCash");
@@ -235,11 +300,11 @@ export function EditAppointmentModal() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="scheduled">Scheduled</SelectItem>
-                      <SelectItem value="tentative">Tentative</SelectItem>
-                      <SelectItem value="pending">Pending</SelectItem>
-                      <SelectItem value="confirmed">Confirmed</SelectItem>
-                      <SelectItem value="cancelled">Cancelled</SelectItem>
+                      {statusOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -257,6 +322,16 @@ export function EditAppointmentModal() {
               </div>
 
               <DialogFooter className="flex gap-3 pt-6 border-t">
+                <Button
+                  variant="destructive"
+                  onClick={() => setIsDeleteDialogOpen(true)}
+                  disabled={isLoading}
+                  className="h-11 px-6 rounded-lg"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete
+                </Button>
+                <div className="flex-1" />
                 <Button
                   variant="outline"
                   onClick={() => closeEditModal()}

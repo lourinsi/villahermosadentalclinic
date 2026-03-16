@@ -12,6 +12,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { EditAppointmentModal } from "@/components/EditAppointmentModal";
+import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import {
   Loader2,
   Calendar as CalendarIcon,
@@ -65,10 +67,6 @@ const AdminBookAppointmentPage = () => {
   
   // Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [editModalStep, setEditModalStep] = useState<"details" | "payment">("details");
-  const [editingAppointment, setEditingAppointment] = useState<any>(null);
-  const [editFormData, setEditFormData] = useState<any>(null);
   const [modalStep, setModalStep] = useState<"details" | "payment">("details");
   const [selectedTime, setSelectedTime] = useState("");
   const [appointmentType, setAppointmentType] = useState("");
@@ -81,10 +79,7 @@ const AdminBookAppointmentPage = () => {
   const [showSuccessPrompt, setShowSuccessPrompt] = useState(false);
   const [bookedAppointmentId, setBookedAppointmentId] = useState<string | null>(null);
   const [bookedAppointment, setBookedAppointment] = useState<any>(null);
-
-  // Edit appointment state
-  const [editPaymentMethod, setEditPaymentMethod] = useState<string>("GCash");
-  const [editAmountToPay, setEditAmountToPay] = useState<string>("");
+  const { openEditModal, isEditModalOpen, selectedAppointment } = useAppointmentModal();
 
   const basePrice = APPOINTMENT_PRICES[appointmentType] || 0;
   const finalPrice = Math.max(0, basePrice - (Number(discount) || 0));
@@ -92,19 +87,6 @@ const AdminBookAppointmentPage = () => {
   const selectedDoctorObj = useMemo(() => {
     return doctors.find(d => String(d.id) === String(selectedDoctor));
   }, [doctors, selectedDoctor]);
-
-  // Log edit form data changes
-  useEffect(() => {
-    if (editFormData) {
-      console.log("[Edit Form Data Updated]:", {
-        type: editFormData.type,
-        duration: editFormData.duration,
-        status: editFormData.status,
-        notes: editFormData.notes,
-        timestamp: new Date().toISOString()
-      });
-    }
-  }, [editFormData]);
 
   // Log appointment type changes with price
   useEffect(() => {
@@ -173,13 +155,13 @@ const AdminBookAppointmentPage = () => {
     const dateStr = formatDateToYYYYMMDD(date);
     // Filter for selected doctor's appointments only
     const dayAppointments = appointments.filter(
-      apt => apt.date === dateStr && apt.doctor === selectedDoctorObj?.name && apt.status !== "cancelled" && apt.paymentStatus !== "unpaid"
+      apt => apt.date === dateStr && apt.doctor === selectedDoctorObj?.name && apt.status !== "cancelled"
     );
 
     // Also filter for selected patient's appointments (if one is selected)
     const patientAppointments = selectedPatient
       ? appointments.filter(
-          apt => apt.date === dateStr && apt.patientId === selectedPatient && apt.status !== "cancelled" && apt.paymentStatus !== "unpaid"
+          apt => apt.date === dateStr && apt.patientId === selectedPatient && apt.status !== "cancelled"
         )
       : [];
 
@@ -212,10 +194,10 @@ const AdminBookAppointmentPage = () => {
         return (slotStartTime < aptEndTime && slotEndTime > aptStartTime);
       });
 
-      // Check if any appointment at this time is tentative (reserved)
+      // Check if any appointment at this time is reserved (tentatively booked)
       const isTentative = dayAppointments.some(apt => 
         apt.time === slot && 
-        (apt.status === "tentative" || apt.status === "pending")
+        (apt.status === "reserved" || apt.status === "pending")
       );
 
       // Check if selected patient has any appointment that conflicts with this slot (considering duration)
@@ -257,7 +239,7 @@ const AdminBookAppointmentPage = () => {
     const allAppointments = appointments;
     
     allAppointments.forEach(apt => {
-      if (apt.date === dateStr && apt.time === selectedTime && apt.status !== "cancelled" && apt.paymentStatus !== "unpaid") {
+      if (apt.date === dateStr && apt.time === selectedTime && apt.status !== "cancelled") {
         patientConflicts.add(apt.patientId);
       }
     });
@@ -350,24 +332,8 @@ const AdminBookAppointmentPage = () => {
         balance: appointment.balance,
       });
 
-      console.log("[handleBookedSlotClick] Setting edit form data:", {
-        type: appointment.customType || APPOINTMENT_TYPE_MAP[appointment.type] || "Other",
-        duration: appointment.duration,
-        status: appointment.status,
-        notes: appointment.notes,
-      });
-
-      setEditingAppointment(appointment);
-      setEditFormData({
-        type: appointment.customType || APPOINTMENT_TYPE_MAP[appointment.type] || "Other",
-        duration: appointment.duration,
-        status: appointment.status,
-        notes: appointment.notes,
-      });
-      setEditPaymentMethod("GCash");
-      setEditAmountToPay("");
-      setEditModalStep("details");
-      setIsEditModalOpen(true);
+      // Use the EditAppointmentModal hook to open the modal
+      openEditModal(appointment);
     } else {
       console.warn("[handleBookedSlotClick] No appointment found for:", { time, dateStr, selectedDoctorName: selectedDoctorObj?.name });
       console.log("[handleBookedSlotClick] All appointments:", appointments);
@@ -390,8 +356,7 @@ const AdminBookAppointmentPage = () => {
         apt.patientId === selectedPatient && 
         apt.date === dateStr && 
         apt.time === selectedTime &&
-        apt.status !== 'cancelled' &&
-        apt.paymentStatus !== 'unpaid'
+        apt.status !== 'cancelled'
       );
 
       if (patientConflict) {
@@ -405,8 +370,7 @@ const AdminBookAppointmentPage = () => {
         apt.doctor === selectedDoctorObj?.name && 
         apt.date === dateStr && 
         apt.time === selectedTime &&
-        apt.status !== 'cancelled' &&
-        apt.paymentStatus !== 'unpaid'
+        apt.status !== 'cancelled'
       );
 
       if (doctorConflict) {
@@ -1033,9 +997,8 @@ const AdminBookAppointmentPage = () => {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="scheduled">Scheduled</SelectItem>
-                        <SelectItem value="tentative">Tentative</SelectItem>
                         <SelectItem value="pending">Pending</SelectItem>
-                        <SelectItem value="confirmed">Confirmed</SelectItem>
+                        <SelectItem value="reserved">Reserved</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1149,301 +1112,8 @@ const AdminBookAppointmentPage = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Edit Appointment Modal - 2 Steps */}
-      <Dialog open={isEditModalOpen} onOpenChange={(open) => {
-        if (!open) {
-          setIsEditModalOpen(false);
-          setEditModalStep("details");
-        } else {
-          setIsEditModalOpen(true);
-        }
-      }}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <div className="flex items-center justify-between mb-4">
-              <DialogTitle className="flex items-center gap-2 text-2xl">
-                <CalendarIcon className="h-6 w-6 text-blue-600" />
-                {editModalStep === "details" ? "Edit Appointment" : "Payment Summary"}
-              </DialogTitle>
-              <div className="flex gap-2">
-                <div className={`px-3 py-1 rounded-full text-xs font-bold ${editModalStep === "details" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-600"}`}>
-                  Step 1: Details
-                </div>
-                <div className={`px-3 py-1 rounded-full text-xs font-bold ${editModalStep === "payment" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-600"}`}>
-                  Step 2: Payment
-                </div>
-              </div>
-            </div>
-            <DialogDescription>
-              {editModalStep === "details" 
-                ? "Modify appointment details" 
-                : "Review and manage payment"}
-            </DialogDescription>
-          </DialogHeader>
-
-          {editModalStep === "details" && editingAppointment && editFormData ? (
-            <>
-              <div className="space-y-6">
-                <div className="space-y-4 bg-gray-50 p-4 rounded-lg">
-                  <h3 className="font-bold text-gray-900">Appointment Details</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label className="text-xs font-semibold text-gray-600">Patient Name</Label>
-                      <Input 
-                        type="text"
-                        value={editingAppointment.patientName}
-                        readOnly
-                        className="bg-white"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-xs font-semibold text-gray-600">Doctor</Label>
-                      <Input 
-                        type="text"
-                        value={editingAppointment.doctor}
-                        readOnly
-                        className="bg-white"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-xs font-semibold text-gray-600">Type</Label>
-                      <Select value={editFormData?.type || ""} onValueChange={(val) => setEditFormData({ ...editFormData, type: val })}>
-                        <SelectTrigger className="h-11 rounded-lg border-gray-200">
-                          <SelectValue placeholder="Select type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Routine Cleaning">Routine Cleaning</SelectItem>
-                          <SelectItem value="Checkup">Checkup</SelectItem>
-                          <SelectItem value="Filling">Filling</SelectItem>
-                          <SelectItem value="Root Canal">Root Canal</SelectItem>
-                          <SelectItem value="Extraction">Extraction</SelectItem>
-                          <SelectItem value="Whitening">Whitening</SelectItem>
-                          <SelectItem value="Other">Other</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-xs font-semibold text-gray-600">Duration (mins)</Label>
-                      <Select value={String(editFormData.duration)} onValueChange={(val) => setEditFormData({ ...editFormData, duration: Number(val) })}>
-                        <SelectTrigger className="h-11 rounded-lg border-gray-200">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="15">15 mins</SelectItem>
-                          <SelectItem value="30">30 mins</SelectItem>
-                          <SelectItem value="45">45 mins</SelectItem>
-                          <SelectItem value="60">1 hour</SelectItem>
-                          <SelectItem value="90">1.5 hours</SelectItem>
-                          <SelectItem value="120">2 hours</SelectItem>
-                          <SelectItem value="150">2.5 hours</SelectItem>
-                          <SelectItem value="180">3 hours</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-xs font-semibold text-gray-600">Date</Label>
-                      <div className="h-11 rounded-lg border border-gray-200 bg-gray-100 flex items-center px-3 text-sm">
-                        {editingAppointment.date}
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-xs font-semibold text-gray-600">Time</Label>
-                      <div className="h-11 rounded-lg border border-gray-200 bg-gray-100 flex items-center px-3 text-sm">
-                        {formatTimeTo12h(editingAppointment.time)}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-sm font-bold text-gray-700">Appointment Status</Label>
-                  <Select value={editFormData.status} onValueChange={(val) => setEditFormData({ ...editFormData, status: val })}>
-                    <SelectTrigger className="h-11 rounded-lg border-gray-200">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="scheduled">Scheduled</SelectItem>
-                      <SelectItem value="tentative">Tentative</SelectItem>
-                      <SelectItem value="pending">Pending</SelectItem>
-                      <SelectItem value="confirmed">Confirmed</SelectItem>
-                      <SelectItem value="cancelled">Cancelled</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-sm font-bold text-gray-700">Notes (Optional)</Label>
-                  <Textarea
-                    placeholder="Any additional notes..."
-                    value={editFormData.notes || ""}
-                    onChange={(e) => setEditFormData({ ...editFormData, notes: e.target.value })}
-                    className="resize-none rounded-lg border-gray-200"
-                    rows={3}
-                  />
-                </div>
-              </div>
-
-              <DialogFooter className="flex gap-3 pt-6 border-t">
-                <Button
-                  variant="outline"
-                  onClick={() => setIsEditModalOpen(false)}
-                  disabled={false}
-                  className="h-11 px-6 rounded-lg"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={() => setEditModalStep("payment")}
-                  disabled={false}
-                  className="bg-blue-600 hover:bg-blue-700 text-white gap-2 h-11 px-8 rounded-lg shadow-lg shadow-blue-100"
-                >
-                  Next: Payment
-                </Button>
-              </DialogFooter>
-            </>
-          ) : editModalStep === "payment" && editingAppointment ? (
-            <>
-              <div className="space-y-6">
-                <div className="bg-gray-50 p-4 rounded-lg space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-gray-500">Service:</span>
-                    <span className="font-medium">{editFormData?.type}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-gray-500">Date:</span>
-                    <span className="font-medium">{editingAppointment.date}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-gray-500">Time:</span>
-                    <span className="font-medium">{formatTimeTo12h(editingAppointment.time)}</span>
-                  </div>
-                  <div className="flex justify-between items-center pt-3 border-t">
-                    <span className="font-bold">Total Price:</span>
-                    <span className="font-bold text-lg text-gray-900">
-                      ₱{editingAppointment.price || 0}
-                    </span>
-                  </div>
-                  {editingAppointment.totalPaid && editingAppointment.totalPaid > 0 && (
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-gray-500">Already Paid:</span>
-                      <span className="font-medium text-green-600">
-                        ₱{editingAppointment.totalPaid}
-                      </span>
-                    </div>
-                  )}
-                  <div className="flex justify-between items-center">
-                    <span className="font-bold">Remaining Balance:</span>
-                    <span className="font-bold text-lg text-blue-600">
-                      ₱{editingAppointment.balance ?? (editingAppointment.price || 0)}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="editPaymentAmount" className="text-sm font-semibold">Amount to Pay Now</Label>
-                  <Input
-                    id="editPaymentAmount"
-                    type="number"
-                    placeholder={`Enter amount (e.g. ${editingAppointment.balance ?? editingAppointment.price})`}
-                    value={editAmountToPay}
-                    onChange={(e) => setEditAmountToPay(e.target.value)}
-                    className="font-bold text-lg h-12"
-                  />
-                  <p className="text-[10px] text-gray-500">Leave blank to pay the full remaining balance.</p>
-                </div>
-
-                <div className="space-y-3">
-                  <h3 className="font-semibold text-sm">Select Payment Method</h3>
-                  <div className="grid grid-cols-3 gap-2">
-                    <Button
-                      variant="outline"
-                      className={`h-20 flex flex-col items-center justify-center gap-1 border-2 ${
-                        editPaymentMethod === "GCash"
-                          ? "border-blue-500 bg-blue-50"
-                          : "border-gray-200 hover:border-blue-200"
-                      }`}
-                      onClick={() => setEditPaymentMethod("GCash")}
-                    >
-                      <span className="font-black text-blue-700 italic text-lg">
-                        GCash
-                      </span>
-                    </Button>
-                    <Button
-                      variant="outline"
-                      className={`h-20 flex flex-col items-center justify-center gap-1 border-2 ${
-                        editPaymentMethod === "Card"
-                          ? "border-blue-500 bg-blue-50"
-                          : "border-gray-200 hover:border-blue-200"
-                      }`}
-                      onClick={() => setEditPaymentMethod("Card")}
-                    >
-                      <CreditCard
-                        className={`h-6 w-6 ${
-                          editPaymentMethod === "Card" ? "text-blue-600" : "text-gray-600"
-                        }`}
-                      />
-                      <span
-                        className={`text-[10px] font-bold uppercase ${
-                          editPaymentMethod === "Card" ? "text-blue-700" : "text-gray-500"
-                        }`}
-                      >
-                        Card
-                      </span>
-                    </Button>
-                    <Button
-                      variant="outline"
-                      className={`h-20 flex flex-col items-center justify-center gap-1 border-2 ${
-                        editPaymentMethod === "Pay at Clinic"
-                          ? "border-blue-500 bg-blue-50"
-                          : "border-gray-200 hover:border-blue-200"
-                      }`}
-                      onClick={() => {
-                        setEditPaymentMethod("Pay at Clinic");
-                        setEditAmountToPay("0");
-                      }}
-                    >
-                      <Banknote
-                        className={`h-6 w-6 ${
-                          editPaymentMethod === "Pay at Clinic" ? "text-blue-600" : "text-gray-600"
-                        }`}
-                      />
-                      <span
-                        className={`text-[10px] font-bold uppercase text-center leading-tight ${
-                          editPaymentMethod === "Pay at Clinic" ? "text-blue-700" : "text-gray-500"
-                        }`}
-                      >
-                        Pay at Clinic
-                      </span>
-                    </Button>
-                  </div>
-                </div>
-              </div>
-
-              <DialogFooter className="flex gap-3 pt-6 border-t">
-                <Button
-                  variant="outline"
-                  onClick={() => setEditModalStep("details")}
-                  disabled={false}
-                  className="h-11 px-6 rounded-lg"
-                >
-                  Back
-                </Button>
-                <Button
-                  onClick={async () => {
-                    toast.success("Appointment updated successfully!");
-                    setIsEditModalOpen(false);
-                    setEditModalStep("details");
-                  }}
-                  disabled={false}
-                  className="bg-green-600 hover:bg-green-700 text-white gap-2 h-11 px-8 rounded-lg shadow-lg shadow-green-100"
-                >
-                  Save Changes
-                </Button>
-              </DialogFooter>
-            </>
-          ) : null}
-        </DialogContent>
-      </Dialog>
+      {/* Edit Appointment Modal - using component */}
+      <EditAppointmentModal />
 
       <style jsx global>{`
         .custom-scrollbar::-webkit-scrollbar {
