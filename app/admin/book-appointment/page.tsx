@@ -8,11 +8,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { DoctorCalendar } from "@/components/DoctorCalendar";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { EditAppointmentModal } from "@/components/EditAppointmentModal";
+import BookingModal from "@/components/BookingModal";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import {
   Loader2,
@@ -791,326 +791,33 @@ const AdminBookAppointmentPage = () => {
         </div>
       </div>
 
-      {/* Appointment Details Modal - 2 Steps */}
-      <Dialog open={isModalOpen} onOpenChange={(open) => {
-        if (!open) {
+      {/* In-page appointment modal & success prompt removed - BookingModal component is used instead */}
+
+      {/* Booking Modal for new appointments */}
+      <BookingModal
+        open={isModalOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setIsModalOpen(false);
+            setModalStep("details");
+            setSelectedTime("");
+            setAppointmentType("");
+          } else {
+            setIsModalOpen(open);
+          }
+        }}
+        defaultDate={selectedDate}
+        defaultTime={selectedTime}
+        doctorName={selectedDoctorObj?.name}
+        onBooked={() => {
           setIsModalOpen(false);
-          setModalStep("details");
-        } else {
-          setIsModalOpen(true);
-        }
-      }}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <div className="flex items-center justify-between mb-4">
-              <DialogTitle className="flex items-center gap-2 text-2xl">
-                <CalendarIcon className="h-6 w-6 text-blue-600" />
-                {modalStep === "details" ? "Appointment Details" : "Payment Summary"}
-              </DialogTitle>
-              <div className="flex gap-2">
-                <div className={`px-3 py-1 rounded-full text-xs font-bold ${modalStep === "details" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-600"}`}>
-                  Step 1: Details
-                </div>
-                <div className={`px-3 py-1 rounded-full text-xs font-bold ${modalStep === "payment" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-600"}`}>
-                  Step 2: Payment
-                </div>
-              </div>
-            </div>
-            <DialogDescription>
-              {modalStep === "details" 
-                ? "Complete the following information to book your appointment" 
-                : "Review and confirm the appointment details and payment"}
-            </DialogDescription>
-          </DialogHeader>
-
-          {modalStep === "details" ? (
-            <>
-              <div className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <Label className="text-sm font-bold text-gray-700">Who is this appointment for?</Label>
-                      <Select value={selectedPatient} onValueChange={setSelectedPatient} disabled={isLoadingPatients}>
-                        <SelectTrigger className="h-11 rounded-lg border-gray-200">
-                          <SelectValue placeholder="Select patient" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {patients.map(patient => {
-                            const patientsWithConflicts = getPatientsWithConflicts();
-                            const hasConflict = patientsWithConflicts.has(patient.id);
-                            return (
-                              <SelectItem key={patient.id} value={patient.id} disabled={hasConflict}>
-                                {patient.name || `${patient.firstName} ${patient.lastName}`}
-                                {hasConflict && " (Unavailable at this time)"}
-                              </SelectItem>
-                            );
-                          })}
-                        </SelectContent>
-                      </Select>
-                      {selectedPatient && getPatientsWithConflicts().has(selectedPatient) && (
-                        <p className="text-xs text-orange-600">This patient has an appointment at the selected time</p>
-                      )}
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label className="text-sm font-bold text-gray-700">Appointment Type</Label>
-                      <Select value={appointmentType} onValueChange={setAppointmentType}>
-                        <SelectTrigger className="h-11 rounded-lg border-gray-200">
-                          <SelectValue placeholder="Select type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Routine Cleaning">Routine Cleaning</SelectItem>
-                          <SelectItem value="Checkup">Checkup</SelectItem>
-                          <SelectItem value="Filling">Filling</SelectItem>
-                          <SelectItem value="Root Canal">Root Canal</SelectItem>
-                          <SelectItem value="Extraction">Extraction</SelectItem>
-                          <SelectItem value="Whitening">Whitening</SelectItem>
-                          <SelectItem value="Other">Other</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label className="text-sm font-bold text-gray-700">Duration (mins)</Label>
-                        <Input
-                          type="number"
-                          value={duration}
-                          onChange={(e) => setDuration(e.target.value)}
-                          placeholder="30"
-                          className="h-11 rounded-lg border-gray-200"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-sm font-bold text-gray-700">Discount</Label>
-                        <Input
-                          type="number"
-                          value={discount}
-                          onChange={(e) => setDiscount(e.target.value)}
-                          placeholder="0"
-                          className="h-11 rounded-lg border-gray-200"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label className="text-sm font-bold text-gray-700">Total Price</Label>
-                      <Input
-                        type="text"
-                        value={`₱${finalPrice.toLocaleString()}`}
-                        readOnly
-                        className="h-11 rounded-lg border-gray-200 bg-gray-50 font-bold text-blue-700"
-                      />
-                      <p className="text-[10px] text-gray-400">Base price: ₱{basePrice.toLocaleString()}</p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-sm font-bold text-gray-700">Selected Schedule</Label>
-                    <div className="p-3 bg-blue-50 rounded-lg border border-blue-100 space-y-2">
-                      <div className="flex items-center gap-2 text-blue-700 text-sm font-medium">
-                        <CalendarIcon className="h-4 w-4" />
-                        {selectedDate.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
-                      </div>
-                      <div className="flex items-center gap-2 text-blue-700 text-sm font-medium">
-                        <Clock className="h-4 w-4" />
-                        {formatTimeTo12h(selectedTime)}
-                      </div>
-                      <div className="flex items-center gap-2 text-blue-700 text-sm font-medium">
-                        <Award className="h-4 w-4" />
-                        Dr. {selectedDoctorObj?.name}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-sm font-bold text-gray-700">Notes (Optional)</Label>
-                  <Textarea
-                    placeholder="Any details you'd like to add..."
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    className="resize-none rounded-lg border-gray-200"
-                    rows={3}
-                  />
-                </div>
-              </div>
-
-              <DialogFooter className="flex gap-3 pt-6 border-t">
-                <Button
-                  variant="outline"
-                  onClick={() => setIsModalOpen(false)}
-                  disabled={isBooking}
-                  className="h-11 px-6 rounded-lg"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={handleConfirmBooking}
-                  disabled={isBooking || !appointmentType || !selectedPatient}
-                  className="bg-blue-600 hover:bg-blue-700 text-white gap-2 h-11 px-8 rounded-lg shadow-lg shadow-blue-100"
-                >
-                  {isBooking && <Loader2 className="h-4 w-4 animate-spin" />}
-                  Next: Payment
-                </Button>
-              </DialogFooter>
-            </>
-          ) : (
-            <>
-              <div className="space-y-6">
-                <div className="space-y-4 bg-gray-50 p-4 rounded-lg">
-                  <h3 className="font-bold text-gray-900">Appointment Summary</h3>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Patient:</span>
-                      <span className="font-medium">{patients.find(p => p.id === selectedPatient)?.name || `${patients.find(p => p.id === selectedPatient)?.firstName} ${patients.find(p => p.id === selectedPatient)?.lastName}`}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Type:</span>
-                      <span className="font-medium">{appointmentType}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Date & Time:</span>
-                      <span className="font-medium">{selectedDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })} at {formatTimeTo12h(selectedTime)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Doctor:</span>
-                      <span className="font-medium">Dr. {selectedDoctorObj?.name}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Duration:</span>
-                      <span className="font-medium">{duration} mins</span>
-                    </div>
-                    <div className="border-t border-gray-200 pt-2 flex justify-between font-bold">
-                      <span>Total Amount:</span>
-                      <span className="text-blue-600">₱{finalPrice.toLocaleString()}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label className="text-sm font-bold text-gray-700">Appointment Status</Label>
-                    <Select value={appointmentStatus} onValueChange={setAppointmentStatus}>
-                      <SelectTrigger className="h-11 rounded-lg border-gray-200">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="scheduled">Scheduled</SelectItem>
-                        <SelectItem value="pending">Pending</SelectItem>
-                        <SelectItem value="reserved">Reserved</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-sm font-bold text-gray-700">Amount to Pay</Label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-600">₱</span>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        max={finalPrice}
-                        placeholder="0.00"
-                        value={amountToPay}
-                        onChange={(e) => setAmountToPay(e.target.value)}
-                        className="pl-7 h-11 rounded-lg border-gray-200"
-                      />
-                    </div>
-                    <div className="flex items-center justify-between text-xs text-gray-500 mt-1">
-                      <span>Total: ₱{finalPrice.toLocaleString()}</span>
-                      <button
-                        type="button"
-                        onClick={() => setAmountToPay(String(finalPrice.toFixed(2)))}
-                        className="text-blue-600 font-semibold hover:underline"
-                      >
-                        Pay in full
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-sm font-bold text-gray-700">Payment Method</Label>
-                    <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-                      <SelectTrigger className="h-11 rounded-lg border-gray-200">
-                        <SelectValue placeholder="Select payment method" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Credit Card">Credit Card</SelectItem>
-                        <SelectItem value="Cash">Cash</SelectItem>
-                        <SelectItem value="Debit Card">Debit Card</SelectItem>
-                        <SelectItem value="Insurance">Insurance</SelectItem>
-                        <SelectItem value="Check">Check</SelectItem>
-                        <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-sm font-bold text-gray-700">Payment Status</Label>
-                    <Select value={amountToPay ? (parseFloat(amountToPay) >= finalPrice ? "paid" : "half-paid") : "unpaid"} disabled>
-                      <SelectTrigger className="h-11 rounded-lg border-gray-200 bg-gray-50">
-                        <SelectValue />
-                      </SelectTrigger>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <p className="text-sm text-blue-900">
-                    ✓ Review appointment details and payment information. Payment can be recorded later if needed.
-                  </p>
-                </div>
-              </div>
-
-              <DialogFooter className="flex gap-3 pt-6 border-t">
-                <Button
-                  variant="outline"
-                  onClick={() => setModalStep("details")}
-                  disabled={isBooking}
-                  className="h-11 px-6 rounded-lg"
-                >
-                  Back
-                </Button>
-                <Button
-                  onClick={handleConfirmPayment}
-                  disabled={isBooking}
-                  className="bg-green-600 hover:bg-green-700 text-white gap-2 h-11 px-8 rounded-lg shadow-lg shadow-green-100"
-                >
-                  {isBooking && <Loader2 className="h-4 w-4 animate-spin" />}
-                  Confirm Booking
-                </Button>
-              </DialogFooter>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Success Prompt Dialog */}
-      <Dialog open={showSuccessPrompt} onOpenChange={setShowSuccessPrompt}>
-        <DialogContent className="max-w-sm">
-          <div className="flex flex-col items-center text-center space-y-4 py-4">
-            <div className="h-16 w-16 bg-green-100 rounded-full flex items-center justify-center">
-              <CheckCircle2 className="h-10 w-10 text-green-600" />
-            </div>
-            <div className="space-y-2">
-              <DialogTitle className="text-xl">Appointment Booked!</DialogTitle>
-              <DialogDescription>
-                Appointment has been successfully booked. Would you like to proceed with payment?
-              </DialogDescription>
-            </div>
-          </div>
-          <DialogFooter className="flex-col sm:flex-col gap-2">
-            <Button onClick={handlePayNow} className="w-full bg-blue-600 hover:bg-blue-700">
-              Pay Now
-            </Button>
-            <Button variant="ghost" onClick={handlePayLater} className="w-full">
-              Pay Later
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          setSelectedTime("");
+          setAppointmentType("");
+          setNotes("");
+          setSelectedPatient("");
+          router.push("/admin/calendar");
+        }}
+      />
 
       {/* Edit Appointment Modal - using component */}
       <EditAppointmentModal />

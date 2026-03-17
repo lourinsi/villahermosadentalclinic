@@ -17,8 +17,8 @@ export interface Appointment {
   duration?: number;
   notes: string;
   serviceType?: string;
-  // 'confirmed' is used interchangeably with 'scheduled' in some workflows
-  status: "scheduled" | "confirmed" | "pending" | "tentative" | "completed" | "cancelled" | "To Pay";
+  // Status is flexible to accept any value from the backend JSON configuration
+  status: string;
   paymentStatus?: "paid" | "unpaid" | "overdue" | "half-paid";
   balance?: number;
   totalPaid?: number;

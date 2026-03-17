@@ -162,7 +162,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
       const doctorParam = doctorFilter ? `&doctor=${encodeURIComponent(doctorFilter)}` : "";
       const res = await fetch(
         `http://localhost:3001/api/patients?page=${page}&limit=${itemsPerPage}&search=${q}&status=${statusParam}${doctorParam}`,
-        { signal: controller.signal }
+        { signal: controller.signal, credentials: 'include' }
       );
 
       const result = await res.json();
@@ -952,7 +952,7 @@ const PatientDetails = React.forwardRef<{
         
         // 1. If this patient has a parentId, fetch the parent
         if (patient.parentId && patient.parentId !== patient.id) {
-          const parentRes = await fetch(`http://localhost:3001/api/patients/${patient.parentId}`);
+          const parentRes = await fetch(`http://localhost:3001/api/patients/${patient.parentId}`, { credentials: 'include' });
           const parentJson = await parentRes.json();
           if (parentJson.success) {
             setParentPatient(parentJson.data);
@@ -962,7 +962,7 @@ const PatientDetails = React.forwardRef<{
         }
 
         // 2. Fetch all dependents (patients where parentId is this patient's id)
-        const familyRes = await fetch(`http://localhost:3001/api/patients?parentId=${patient.id}`);
+        const familyRes = await fetch(`http://localhost:3001/api/patients?parentId=${patient.id}`, { credentials: 'include' });
         const familyJson = await familyRes.json();
         if (familyJson.success) {
           // Filter out the current patient from the family list
@@ -1032,7 +1032,7 @@ const PatientDetails = React.forwardRef<{
       }
 
       try {
-        const res = await fetch(`http://localhost:3001/api/patients/${patient.id}`);
+        const res = await fetch(`http://localhost:3001/api/patients/${patient.id}`, { credentials: 'include' });
         const json = await res.json();
         if (json?.success && json.data) {
           const p = json.data;
@@ -1080,7 +1080,8 @@ const PatientDetails = React.forwardRef<{
         try {
           const patientName = patient.name || `${patient.firstName} ${patient.lastName}`;
           const response = await fetch(
-            `http://localhost:3001/api/appointments?doctor=${encodeURIComponent(doctorFilter)}`
+            `http://localhost:3001/api/appointments?doctor=${encodeURIComponent(doctorFilter)}`,
+            { credentials: 'include' }
           );
           const result = await response.json();
           if (result.success && result.data) {
@@ -1156,7 +1157,7 @@ const PatientDetails = React.forwardRef<{
 
       // Fetch payments from new payments collection and merge into history
       if (patient?.id) {
-        fetch(`http://localhost:3001/api/payments/patient/${patient.id}`)
+        fetch(`http://localhost:3001/api/payments/patient/${patient.id}`, { credentials: 'include' })
           .then(res => res.json())
           .then(json => {
             if (json?.success && Array.isArray(json.data)) {
@@ -2055,4 +2056,4 @@ const PatientDetails = React.forwardRef<{
 });
 PatientDetails.displayName = "PatientDetails";
 
- 
+

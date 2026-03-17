@@ -27,6 +27,7 @@ import { Badge } from "@/components/ui/badge";
 import { Appointment } from "@/hooks/useAppointments";
 import ViewMode from "@/components/viewMode";
 import BookingModal from "@/components/BookingModal";
+import { EditAppointmentModal } from "@/components/EditAppointmentModal";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
@@ -39,7 +40,7 @@ export default function DoctorAvailabilityPage() {
   
   const { user } = useAuth();
   const { doctors, isLoadingDoctors } = useDoctors();
-  const { addAppointment, deleteAppointment, updateAppointment } = useAppointmentModal();
+  const { addAppointment, deleteAppointment, updateAppointment, openEditModal } = useAppointmentModal();
   
   const [viewMode, setViewMode] = useState<ViewMode>("day");
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
@@ -53,6 +54,7 @@ export default function DoctorAvailabilityPage() {
   // Appointment details modal state
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [appointmentToEdit, setAppointmentToEdit] = useState<Appointment | null>(null);
 
   const doctor = useMemo(() => {
     return doctors.find(d => d.name === doctorName);
@@ -118,10 +120,11 @@ export default function DoctorAvailabilityPage() {
 
   const getDaySlots = useCallback((date: Date) => {
     const dateStr = formatDateToYYYYMMDD(date);
-    const dayAppointments = appointments.filter(apt => 
-      apt.date === dateStr && 
-      apt.status !== 'cancelled' && 
-      apt.paymentStatus !== 'unpaid'
+    const dayAppointments = appointments.filter(apt =>
+      apt.date === dateStr &&
+      apt.status !== 'cancelled' &&
+      // include appointments that are scheduled/confirmed, to-pay, pending, or have payments (including half-paid)
+      (apt.status === 'scheduled' || apt.status === 'confirmed' || apt.status === 'pending' || apt.status === 'To Pay' || apt.paymentStatus === 'paid' || apt.paymentStatus === 'half-paid')
     );
     
     const now = new Date();
@@ -158,7 +161,8 @@ export default function DoctorAvailabilityPage() {
         if (slotMinutes < aptEnd && slotEndMinutes > aptStart) {
           isBooked = true;
           appointment = apt;
-          if (apt.status === 'tentative') {
+          // treat half-paid, pending or To Pay as tentative/reserved in UI
+          if (apt.status === 'tentative' || apt.paymentStatus === 'half-paid' || apt.status === 'pending' || apt.status === 'To Pay') {
             isTentative = true;
           }
           break;
@@ -194,11 +198,32 @@ export default function DoctorAvailabilityPage() {
     return apt.patientId === user.patientId;
   };
 
-  const handleSlotClick = (slot: { time: string; isAvailable: boolean; isBooked: boolean; appointment?: Appointment }, date: Date) => {
+  const handleSlotClick = async (slot: { time: string; isAvailable: boolean; isBooked: boolean; appointment?: Appointment }, date: Date) => {
     if (!slot.isAvailable && slot.isBooked && slot.appointment) {
       // Booked slot - check if it's the patient's own appointment
       if (isOwnAppointment(slot.appointment)) {
-        setSelectedAppointment(slot.appointment);
+        // If the appointment is fully paid but backend hasn't marked it scheduled, update it now
+        try {
+          if (slot.appointment.paymentStatus === 'paid' && slot.appointment.status !== 'scheduled') {
+            setIsProcessing(true);
+            try {
+              const updated = await updateAppointment(slot.appointment.id, { ...slot.appointment, status: 'scheduled' });
+              try { window.dispatchEvent(new CustomEvent('appointments:updated', { detail: { appointmentId: updated.id, newStatus: 'scheduled' } })); } catch (e) {}
+            } catch (err) {
+              console.error('Failed to auto-update appointment status to scheduled', err);
+            } finally {
+              setIsProcessing(false);
+            }
+          }
+        } catch (err) {
+          // ignore
+        }
+
+        // Open the BookingModal in edit mode (patients can view/edit notes)
+        setAppointmentToEdit(slot.appointment);
+        setBookingDefaultTime(slot.time);
+        setBookingDefaultDate(date);
+        setBookingModalOpen(true);
       } else {
         // Not their appointment, can't view details
         toast.error("This appointment belongs to another patient");
@@ -621,88 +646,26 @@ export default function DoctorAvailabilityPage() {
       {/* Reusable Booking Modal */}
       <BookingModal
         open={bookingModalOpen}
-        onOpenChange={setBookingModalOpen}
+        onOpenChange={(open) => {
+          setBookingModalOpen(open);
+          if (!open) setAppointmentToEdit(null);
+        }}
         defaultDate={bookingDefaultDate}
         defaultTime={bookingDefaultTime}
         doctorName={doctor?.name}
+        appointmentToEdit={appointmentToEdit}
         onBooked={() => {
           // refresh appointments after booking
           window.dispatchEvent(new CustomEvent('appointments:updated', { detail: { from: 'patient-page' } }));
         }}
+        onDeleted={(id) => {
+          setAppointmentToEdit(null);
+          window.dispatchEvent(new CustomEvent('appointments:updated', { detail: { from: 'patient-page', deleted: id } }));
+        }}
       />
 
-      {/* Appointment Details Modal */}
-      <Dialog open={!!selectedAppointment} onOpenChange={() => setSelectedAppointment(null)}>
-        <DialogContent className="max-w-md">
-            <DialogHeader className="flex items-center justify-between space-y-0 mb-6">
-                <div className="flex items-center gap-2">
-                    <CalendarIcon className="h-5 w-5 text-blue-600" />
-                    <DialogTitle className="text-xl">Appointment Details</DialogTitle>
-                </div>
-            </DialogHeader>
-            {selectedAppointment && (
-                <div className="space-y-6">
-                    {/* Appointment Details Section */}
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1">
-                          <Label className="text-gray-500 text-xs uppercase tracking-wider font-semibold">Patient</Label>
-                          <p className="font-semibold text-gray-900">{selectedAppointment.patientName}</p>
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-gray-500 text-xs uppercase tracking-wider font-semibold">Doctor</Label>
-                          <p className="font-semibold text-gray-900">Dr. {selectedAppointment.doctor}</p>
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-gray-500 text-xs uppercase tracking-wider font-semibold">Service</Label>
-                          <p className="font-semibold text-gray-900">{getAppointmentTypeName(selectedAppointment.type, selectedAppointment.customType)}</p>
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-gray-500 text-xs uppercase tracking-wider font-semibold">Status</Label>
-                          <Badge className="w-fit bg-blue-600 text-white font-bold uppercase text-xs px-3 py-1.5 rounded-full">
-                            {selectedAppointment.status}
-                          </Badge>
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-gray-500 text-xs uppercase tracking-wider font-semibold">Date</Label>
-                          <div className="flex items-center gap-2 font-medium text-gray-900">
-                            <CalendarIcon className="h-4 w-4 text-violet-500" />
-                            {selectedAppointment.date}
-                          </div>
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-gray-500 text-xs uppercase tracking-wider font-semibold">Time</Label>
-                          <div className="flex items-center gap-2 font-medium text-gray-900">
-                            <Clock className="h-4 w-4 text-violet-500" />
-                            {formatTimeTo12h(selectedAppointment.time)}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Notes Section */}
-                    {selectedAppointment.notes && (
-                      <div className="space-y-2 border-t pt-4">
-                        <Label className="text-gray-500 text-xs uppercase tracking-wider font-semibold">Notes</Label>
-                        <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-md italic">&quot;{selectedAppointment.notes}&quot;</p>
-                      </div>
-                    )}
-
-                    {/* Action Buttons */}
-                    <DialogFooter className="flex-col gap-2 pt-4 border-t">
-                        <Button 
-                          variant="outline" 
-                          onClick={() => setSelectedAppointment(null)}
-                          className="w-full"
-                          disabled={isProcessing}
-                        >
-                          Close
-                        </Button>
-                      </DialogFooter>
-                </div>
-            )}
-        </DialogContent>
-      </Dialog>
+      {/* Edit Appointment Modal (shared) */}
+      <EditAppointmentModal />
 
       <style jsx global>{`
         .custom-scrollbar::-webkit-scrollbar {

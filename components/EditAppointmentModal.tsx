@@ -8,6 +8,7 @@ import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { APPOINTMENT_STATUSES } from "@/lib/appointment-statuses";
 import { toast } from "sonner";
 import { Appointment } from "../hooks/useAppointments";
 import { Calendar as CalendarIcon, CreditCard, Banknote, Trash2 } from "lucide-react";
@@ -22,33 +23,6 @@ const APPOINTMENT_TYPE_MAP: { [key: number]: string } = {
   4: "Root Canal",
   5: "Extraction",
   6: "Whitening",
-};
-
-interface StatusOption {
-  label: string;
-  value: string;
-  description?: string;
-}
-
-const DEFAULT_STATUS_OPTIONS: StatusOption[] = [
-  { label: 'Scheduled', value: 'scheduled', description: 'Appointment is confirmed and scheduled' },
-  { label: 'Pending', value: 'pending', description: 'Awaiting confirmation' },
-  { label: 'Reserved', value: 'reserved', description: 'Time slot is tentatively reserved' },
-  { label: 'Cancelled', value: 'cancelled', description: 'Appointment has been cancelled' },
-];
-
-const LEGACY_STATUS_MAP: Record<string, string> = {
-  'confirmed': 'scheduled',
-  'tentative': 'pending',
-  'pending': 'pending',
-  'reserved': 'reserved',
-  'cancelled': 'cancelled',
-  'scheduled': 'scheduled',
-};
-
-const normalizeStatus = (status: string): string => {
-  const s = status?.toLowerCase().trim();
-  return LEGACY_STATUS_MAP[s] || 'pending';
 };
 
 export function EditAppointmentModal() {
@@ -67,44 +41,6 @@ export function EditAppointmentModal() {
   const [editAmountToPay, setEditAmountToPay] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [statusOptions, setStatusOptions] = useState<StatusOption[]>(DEFAULT_STATUS_OPTIONS);
-  const [isLoadingStatuses, setIsLoadingStatuses] = useState(false);
-
-  // Fetch appointment statuses from backend
-  useEffect(() => {
-    const fetchStatuses = async () => {
-      try {
-        setIsLoadingStatuses(true);
-        const token = typeof window !== 'undefined' ? localStorage.getItem("authToken") : null;
-        const headers: HeadersInit = {
-          "Content-Type": "application/json",
-        };
-        if (token) {
-          headers["Authorization"] = `Bearer ${token}`;
-        }
-        
-        const response = await fetch('http://localhost:3001/api/appointment-statuses/options', { 
-          headers, 
-          credentials: "include" 
-        });
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const result = await response.json();
-        console.log('[APPOINTMENT STATUS] Fetched statuses:', result);
-        if (result.success && result.data && Array.isArray(result.data) && result.data.length > 0) {
-          setStatusOptions(result.data);
-        }
-      } catch (error) {
-        console.error('Error fetching appointment statuses, using defaults:', error);
-        // Fallback already set via DEFAULT_STATUS_OPTIONS in useState
-      } finally {
-        setIsLoadingStatuses(false);
-      }
-    };
-
-    fetchStatuses();
-  }, []);
 
   // Initialize form data when appointment changes
   useEffect(() => {
@@ -113,10 +49,11 @@ export function EditAppointmentModal() {
       setEditFormData({
         type: appointmentType,
         duration: appointment.duration,
-        status: normalizeStatus(appointment.status),
+        status: appointment.status,
         notes: appointment.notes,
       });
       setEditPaymentMethod("GCash");
+      // Initialize payment amount to empty so user enters NEW payment
       setEditAmountToPay("");
     } else {
       setEditFormData(null);
@@ -142,16 +79,84 @@ export function EditAppointmentModal() {
 
     setIsLoading(true);
     try {
+      // Parse payment amount
+      const amountPaidRaw = editAmountToPay.trim() === '' ? '0' : editAmountToPay;
+      const amountPaid = parseFloat(amountPaidRaw) || 0;
+
+      console.log('[EditAppointmentModal Payment] Payment confirmation:', {
+        editAmountToPay,
+        amountPaidRaw,
+        amountPaid,
+        totalPrice: appointment.price,
+        parsing: {
+          trimmed: editAmountToPay.trim(),
+          parseFloat: parseFloat(amountPaidRaw),
+        }
+      });
+
+      // Calculate new payment totals
+      const previouslyPaid = appointment.totalPaid || 0;
+      const newTotalPaid = previouslyPaid + amountPaid;
+      const newBalance = Math.max(0, (appointment.price || 0) - newTotalPaid);
+
+      // Determine payment status and appointment status
+      let paymentStatus: 'paid' | 'unpaid' | 'half-paid' = 'unpaid';
+      let autoStatus: string = editFormData.status;
+
+      if (newBalance <= 0) {
+        paymentStatus = 'paid';
+        autoStatus = 'scheduled';
+      } else if (newTotalPaid > 0) {
+        paymentStatus = 'half-paid';
+        autoStatus = 'reserved';
+      } else {
+        paymentStatus = 'unpaid';
+        autoStatus = editFormData.status;
+      }
+
+      console.log('[EditAppointmentModal Payment] Calculated payment details:', {
+        previouslyPaid,
+        newPayment: amountPaid,
+        newTotalPaid,
+        newBalance,
+        paymentStatus,
+        autoStatus,
+      });
+
       const updatedForm = {
         type: appointment.type,
         customType: editFormData.type,
         duration: editFormData.duration,
-        status: editFormData.status,
+        status: autoStatus,
         notes: editFormData.notes,
+        paymentStatus: paymentStatus,
+        totalPaid: newTotalPaid,
+        balance: newBalance,
       };
 
-      await updateAppointment(appointment.id, updatedForm as Partial<Appointment>);
-      toast.success("Appointment updated");
+      const updated = await updateAppointment(appointment.id, updatedForm as Partial<Appointment>);
+
+      // Log the updated appointment with all details
+      console.log('[EditAppointmentModal Payment] ✅ APPOINTMENT UPDATED SUCCESSFULLY:', {
+        appointmentId: updated?.id,
+        patientName: updated?.patientName,
+        service: updated?.customType,
+        scheduleDate: updated?.date,
+        scheduleTime: updated?.time,
+        totalPrice: updated?.price,
+        paymentDetails: {
+          previouslyPaid,
+          newPayment: amountPaid,
+          totalPaid: updated?.totalPaid,
+          balance: updated?.balance,
+          paymentStatus: updated?.paymentStatus,
+        },
+        appointmentStatus: updated?.status,
+        timestamp: new Date().toISOString(),
+      });
+
+      toast.success(`Appointment updated with payment of ₱${amountPaid.toLocaleString()}!`);
+      try { window.dispatchEvent(new CustomEvent('appointments:updated', { detail: { appointment: updated } })); } catch (e) {}
       refreshAppointments();
       closeEditModal();
     } catch (err) {
@@ -300,8 +305,8 @@ export function EditAppointmentModal() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {statusOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
+                      {APPOINTMENT_STATUSES.map((option) => (
+                        <SelectItem key={option.key} value={option.value}>
                           {option.label}
                         </SelectItem>
                       ))}
@@ -329,7 +334,7 @@ export function EditAppointmentModal() {
                   className="h-11 px-6 rounded-lg"
                 >
                   <Trash2 className="h-4 w-4 mr-2" />
-                  Delete
+                  Cancel
                 </Button>
                 <div className="flex-1" />
                 <Button
@@ -368,21 +373,21 @@ export function EditAppointmentModal() {
                   <div className="flex justify-between items-center pt-3 border-t border-gray-200">
                     <span className="font-bold text-gray-900">Total Price:</span>
                     <span className="font-bold text-lg text-gray-900">
-                      ₱{appointment.price || 0}
+                      ₱{((appointment?.price) || 0).toLocaleString()}
                     </span>
                   </div>
-                  {appointment.totalPaid && appointment.totalPaid > 0 && (
+                  {(appointment?.totalPaid || 0) > 0 && (
                     <div className="flex justify-between items-center">
                       <span className="text-sm text-gray-500">Already Paid:</span>
                       <span className="font-medium text-green-600">
-                        ₱{appointment.totalPaid}
+                        ₱{(appointment?.totalPaid || 0).toLocaleString()}
                       </span>
                     </div>
                   )}
                   <div className="flex justify-between items-center">
                     <span className="font-bold text-gray-900">Remaining Balance:</span>
                     <span className="font-bold text-lg text-blue-600">
-                      ₱{appointment.balance ?? (appointment.price || 0)}
+                      ₱{((appointment?.balance ?? appointment?.price) || 0).toLocaleString()}
                     </span>
                   </div>
                 </div>
@@ -392,12 +397,12 @@ export function EditAppointmentModal() {
                   <Input
                     id="editPaymentAmount"
                     type="number"
-                    placeholder={`Enter amount (e.g. ${appointment.balance ?? appointment.price})`}
+                    placeholder={`Enter amount (e.g. ${((appointment?.balance ?? appointment?.price) || 0).toLocaleString()})`}
                     value={editAmountToPay}
                     onChange={(e) => setEditAmountToPay(e.target.value)}
                     className="font-bold text-lg h-12 border-gray-200"
                   />
-                  <p className="text-xs text-gray-500">Leave blank to pay the full remaining balance.</p>
+                  <p className="text-xs text-gray-500">Leave blank or enter 0 to skip payment. Remaining balance: ₱{((appointment?.balance ?? appointment?.price) || 0).toLocaleString()}</p>
                 </div>
 
                 <div className="space-y-3">
@@ -505,7 +510,7 @@ export function EditAppointmentModal() {
               Cancel
             </Button>
             <Button variant="destructive" onClick={handleDelete} disabled={isLoading}>
-              {isLoading ? "Deleting..." : "Delete"}
+              {isLoading ? "Deleting..." : "Cancel"}
             </Button>
           </DialogFooter>
         </DialogContent>

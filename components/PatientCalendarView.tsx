@@ -32,16 +32,13 @@ import { Label } from "./ui/label";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
 import { useAuth } from "@/hooks/useAuth.tsx";
-import { AllAppointmentsView } from "./AllAppointmentsView";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import ConfirmDialog from "./ConfirmDialog";
 import { Avatar, AvatarImage, AvatarFallback } from "./ui/avatar";
 import { useDoctors } from "@/hooks/useDoctors";
 import ViewMode from "./viewMode";
-
- 
- 
+import BookingModal from '@/components/BookingModal';
 
 const appointmentColors: Record<string, { bg: string; text: string; border: string }> = {
   "Routine Cleaning": { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" },
@@ -72,29 +69,27 @@ export function PatientCalendarView() {
   const [confirmMessage, setConfirmMessage] = useState<string | undefined>(undefined);
   const [confirmAction, setConfirmAction] = useState<(() => Promise<void>) | null>(null);
 
-  const [activeFilter, setActiveFilter] = useState<'scheduled' | 'cart'>('scheduled');
-
   const { openPatientBookingModal, appointments, isLoading, refreshAppointments, deleteAppointment, updateAppointment } = useAppointmentModal();
+  const [bookingModalOpen, setBookingModalOpen] = useState(false);
+  const [bookingDefaultDate, setBookingDefaultDate] = useState<Date | undefined>(undefined);
+  const [bookingDefaultTime, setBookingDefaultTime] = useState<string | undefined>(undefined);
+  const [appointmentToEditLocal, setAppointmentToEditLocal] = useState<Appointment | null>(null);
   const { openPatientPaymentFor } = usePaymentModal();
   const { doctors, isLoadingDoctors } = useDoctors();
 
   const filteredAppointments = useMemo(() => {
-    if (activeFilter === "cart") {
-      return appointments.filter(apt => apt.status === "pending" || apt.status === "tentative");
-    }
-    
-    // "Scheduled" view shows confirmed, scheduled, and anything normally shown (not pending/cancelled)
-    return appointments.filter(apt => apt.status !== "pending" && apt.status !== "cancelled");
-  }, [appointments, activeFilter]);
+    // Show all non-cancelled appointments in calendar views
+    return appointments.filter(apt => apt.status !== 'cancelled');
+  }, [appointments]);
 
   const handleDelete = (id: string) => {
-    setConfirmTitle("Delete appointment");
-    setConfirmMessage("Are you sure you want to delete this pending appointment?");
+    setConfirmTitle("Cancel appointment");
+    setConfirmMessage("Are you sure you want to cancel this appointment?");
     setConfirmAction(() => async () => {
       setIsProcessing(true);
       try {
         await deleteAppointment(id);
-        toast.success("Appointment deleted successfully");
+        toast.success("Appointment canceled successfully");
         setSelectedAppointment(null);
         refreshAppointments(filters);
       } catch (err) {
@@ -163,6 +158,32 @@ export function PatientCalendarView() {
     setSelectedAppointment(null);
   };
   
+  // Open booking modal for an existing appointment (used when patient clicks their appointment)
+  const openBookingForAppointment = async (appointment: Appointment) => {
+    setIsProcessing(true);
+    try {
+      // If fully paid but not marked scheduled, update status
+      if (appointment.paymentStatus === 'paid' && appointment.status !== 'scheduled') {
+        try {
+          const updated = await updateAppointment(appointment.id, { ...appointment, status: 'scheduled' });
+          try { window.dispatchEvent(new CustomEvent('appointments:updated', { detail: { appointmentId: updated.id, newStatus: 'scheduled' } })); } catch (e) {}
+        } catch (err) {
+          console.error('Failed to update appointment status to scheduled', err);
+        }
+      }
+
+      // Open booking modal in edit mode (BookingModal handles readonly state for patients)
+      const aptDate = parseBackendDateToLocal(appointment.date);
+      setAppointmentToEditLocal(appointment);
+      setBookingDefaultDate(aptDate);
+      setBookingDefaultTime(appointment.time);
+      setBookingModalOpen(true);
+      setSelectedAppointment(null);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const getViewRange = useCallback((date: Date) => {
     const start = new Date(date);
     const end = new Date(date);
@@ -224,10 +245,9 @@ export function PatientCalendarView() {
     return { 
       parentId,
       startDate: fetchStartStr,
-      endDate: fetchEndStr,
-      includeUnpaid: activeFilter === "cart" ? true : undefined
+      endDate: fetchEndStr
     };
-  }, [parentId, activeFilter, viewMode, selectedDate, dateRange, getViewRange]);
+  }, [parentId, viewMode, selectedDate, dateRange, getViewRange]);
 
   useEffect(() => {
     // Don't trigger a backend fetch when the custom picker is opened but a full
@@ -247,7 +267,7 @@ export function PatientCalendarView() {
     }
   // Narrow dependencies so changes to the actual start/end dates trigger refresh,
   // but opening the picker (which may create a new DateRange object) does not.
-  }, [parentId, filters.parentId, filters.startDate, filters.endDate, filters.includeUnpaid, refreshAppointments, viewMode, dateRange?.from, dateRange?.to]);
+  }, [parentId, filters.parentId, filters.startDate, filters.endDate, refreshAppointments, viewMode, dateRange?.from, dateRange?.to]);
 
   useEffect(() => {
     const onUpdated = (e: Event) => {
@@ -286,8 +306,8 @@ export function PatientCalendarView() {
       return `${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
     } else if (viewMode === "month") {
       return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-    } else if (viewMode === "all" || activeFilter === "cart") {
-      return activeFilter === "cart" ? "My Appointment Cart" : "All Appointments";
+    } else if (viewMode === "all") {
+      return "All Appointments";
     } else if (viewMode === "custom") {
       if (dateRange?.from && dateRange?.to) {
         return `${dateRange.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${dateRange.to.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
@@ -407,7 +427,8 @@ export function PatientCalendarView() {
   const slotHeight = 64;
     const slotsOccupied = duration / 30;
     return {
-      height: `${slotHeight * slotsOccupied - 4}px`
+      // compute height based on slot occupancy
+      height: `${(slotHeight * slotsOccupied) - 4}px`
     };
   };
 
@@ -452,14 +473,14 @@ export function PatientCalendarView() {
         {TIME_SLOTS.map((timeSlot) => {
           const appointmentsStartingAtSlot = dayAppointments.filter((apt: Appointment) => apt.time === timeSlot);
           const currentSlotIsCovered = isSlotCovered(timeSlot);
-          const isPast = new Date(`${formatDateToYYYYMMDD(selectedDate)}T${timeSlot}`) < new Date();
+          const isPast = new Date(formatDateToYYYYMMDD(selectedDate) + 'T' + timeSlot) < new Date();
 
           return (
             <div key={timeSlot} className="flex items-start min-h-[64px] border-b border-gray-100 relative group">
               {!currentSlotIsCovered && !isPast && (
                 <div
                   className="absolute inset-y-2 left-32 right-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-10 hover:bg-violet-50/50 rounded-xl border-2 border-dashed border-transparent hover:border-violet-200/50 group/plus"
-                  onClick={() => openPatientBookingModal(selectedDate, timeSlot)}
+                  onClick={() => { setAppointmentToEditLocal(null); setBookingDefaultDate(selectedDate); setBookingDefaultTime(timeSlot); setBookingModalOpen(true); }}
                 >
                   <Plus className="h-6 w-6 text-violet-300 transition-colors group-hover/plus:text-violet-600" />
                 </div>
@@ -476,8 +497,8 @@ export function PatientCalendarView() {
                   const typeName = getAppointmentTypeName(appointment.type, appointment.customType);
                   const colors = getColorForType(typeName);
                   
-                  const width = `${100 / totalColumns}%`;
-                  const left = `${(columnIndex * 100) / totalColumns}%`;
+                  const width = `${(100 / totalColumns)}%`;
+                  const left = `${((columnIndex * 100) / totalColumns)}%`;
                   
                   return (
                     <div 
@@ -490,7 +511,7 @@ export function PatientCalendarView() {
                       }}
                       onClick={(e) => {
                         e.stopPropagation();
-                        setSelectedAppointment(appointment);
+                        openBookingForAppointment(appointment);
                       }}
                     >
                       <div className="flex flex-col h-full">
@@ -603,7 +624,7 @@ export function PatientCalendarView() {
                         {!currentSlotIsCovered && (
                             <div
                             className="absolute inset-1 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-10 hover:bg-violet-50/50 rounded border border-dashed border-transparent hover:border-violet-200/50"
-                            onClick={() => openPatientBookingModal(day, timeSlot)}
+                            onClick={() => { setAppointmentToEditLocal(null); setBookingDefaultDate(day); setBookingDefaultTime(timeSlot); setBookingModalOpen(true); }}
                             >
                             <Plus className="h-5 w-5 text-violet-300" />
                             </div>
@@ -616,8 +637,8 @@ export function PatientCalendarView() {
                           const typeName = getAppointmentTypeName(appointment.type, appointment.customType);
                           const colors = getColorForType(typeName);
                           
-                          const width = `${100 / totalColumns}%`;
-                          const left = `${(columnIndex * 100) / totalColumns}%`;
+                          const width = `${(100 / totalColumns)}%`;
+                          const left = `${((columnIndex * 100) / totalColumns)}%`;
 
                           return (
                             <div 
@@ -630,7 +651,7 @@ export function PatientCalendarView() {
                               }}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setSelectedAppointment(appointment);
+                                openBookingForAppointment(appointment);
                               }}
                             >
                               <div className="flex justify-between items-start">
@@ -682,16 +703,16 @@ export function PatientCalendarView() {
           <div className="flex items-start justify-between">
             <div>
               <h2 className="text-2xl font-bold">{days ? `${days} days range` : 'Custom range'}</h2>
-              <p className="text-sm text-muted-foreground">{dateRange && dateRange.from && dateRange.to ? `${dateRange.from.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${dateRange.to.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}` : 'Select a start and end date'}</p>
+              <p className="text-sm text-muted-foreground">{dateRange && (dateRange.from as Date) && (dateRange.to as Date) ? `${(dateRange.from as Date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${(dateRange.to as Date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}` : 'Select a start and end date'}</p>
             </div>
             <div className="flex items-center gap-4">
               <div className="p-2 border rounded-lg">
                 <div className="text-xs text-muted-foreground uppercase">Start date</div>
-                <div className="font-medium">{dateRange?.from ? dateRange.from.toLocaleDateString() : '—'}</div>
+                <div className="font-medium">{dateRange?.from ? (dateRange.from as Date).toLocaleDateString() : '—'}</div>
               </div>
               <div className="p-2 border rounded-lg">
                 <div className="text-xs text-muted-foreground uppercase">End date</div>
-                <div className="font-medium">{dateRange?.to ? dateRange.to.toLocaleDateString() : '—'}</div>
+                <div className="font-medium">{dateRange?.to ? (dateRange.to as Date).toLocaleDateString() : '—'}</div>
               </div>
             </div>
           </div>
@@ -708,7 +729,7 @@ export function PatientCalendarView() {
                     const typeName = getAppointmentTypeName(apt.type, apt.customType);
                     const colors = getColorForType(typeName);
                     return (
-                      <Card key={apt.id} className={`overflow-hidden hover:shadow-md transition-shadow cursor-pointer ${apt.paymentStatus === 'unpaid' ? 'bg-orange-50/20 border-dashed border-orange-200' : ''}`} onClick={() => { setSelectedAppointment(apt); }}>
+                      <Card key={apt.id} className={`overflow-hidden hover:shadow-md transition-shadow cursor-pointer ${apt.paymentStatus === 'unpaid' ? 'bg-orange-50/20 border-dashed border-orange-200' : ''}`} onClick={() => { openBookingForAppointment(apt); }}>
                         <div className={`h-1 ${colors.bg.replace('bg-', 'bg-').split(' ')[0]}`} />
                         <CardContent className="p-4">
                           <div className="flex justify-between items-start mb-2">
@@ -816,7 +837,7 @@ export function PatientCalendarView() {
                     <div
                       key={apt.id}
                       className={`text-[10px] p-1 rounded truncate border-l-2 ${colors.bg} ${colors.text} ${colors.border} ${apt.paymentStatus === 'unpaid' ? 'opacity-75 border-dashed' : ''} flex items-center justify-between gap-2`}
-                      onClick={(e) => { e.stopPropagation(); setSelectedAppointment(apt); }}
+                      onClick={(e) => { e.stopPropagation(); openBookingForAppointment(apt); }}
                     >
                       <div className="flex items-center gap-2 min-w-0">
                         <div className="flex-shrink-0">
@@ -909,67 +930,34 @@ export function PatientCalendarView() {
               </Popover>
             </div>
 
-            <div className="flex items-center space-x-2 bg-gray-100 p-1 rounded-lg border border-gray-200">
-              <Button 
-                variant={activeFilter === 'scheduled' ? 'secondary' : 'ghost'} 
-                size="sm" 
-                onClick={() => { setActiveFilter('scheduled'); }}
-                className={`h-8 px-4 font-semibold rounded-md transition-all ${activeFilter === 'scheduled' ? 'bg-white shadow-sm text-violet-600' : 'text-gray-500 hover:text-gray-700'}`}
-              >
-                Scheduled
-              </Button>
-              <Button 
-                variant={activeFilter === 'cart' ? 'secondary' : 'ghost'} 
-                size="sm" 
-                onClick={() => {
-                  setActiveFilter('cart');
-                  // We don't change viewMode here, but we ensure the list view is shown
-                }}
-                className={`h-8 px-4 font-semibold rounded-md transition-all ${activeFilter === 'cart' ? 'bg-white shadow-sm text-violet-600' : 'text-gray-500 hover:text-gray-700'}`}
-              >
-                Cart
-              </Button>
+            <div className="flex items-center gap-2">
+              {(['month','week','day'] as const).map(mode => (
+                <button
+                  key={mode}
+                  onClick={() => setViewMode(mode)}
+                  className={`px-4 py-2 text-xs font-black uppercase tracking-wider rounded-lg transition-all ${viewMode === mode ? 'bg-white text-violet-600 shadow-sm scale-[1.02]' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  {mode}
+                </button>
+              ))}
             </div>
           </div>
         </CardContent>
       </Card>
-
+ 
       <Card className="shadow-xl border-none overflow-hidden bg-white">
         <CardContent className="p-0">
             {isLoading || isLoadingView ? (
-              <div className="flex justify-center items-center min-h-[400px]">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-violet-600"></div>
-              </div>
+               <div className="flex justify-center items-center min-h-[400px]">
+                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-violet-600"></div>
+               </div>
             ) : (
-              activeFilter === "cart" ? (
-                <div className="p-4 bg-white">
-                  <AllAppointmentsView 
-                    appointments={filteredAppointments} 
-                    isLoading={isLoading || isLoadingView}
-                    onPay={handlePay}
-                    onDelete={handleDelete}
-                    isCart={true}
-                  />
-                </div>
-              ) :
               viewMode === "day" ? renderDayView() : 
               viewMode === "week" ? renderWeekView() : 
-              viewMode === "month" ? renderMonthView() : 
-              viewMode === "all" ? (
-                <div className="p-4 bg-white">
-                  <AllAppointmentsView 
-                    appointments={filteredAppointments} 
-                    isLoading={isLoading || isLoadingView}
-                    onPay={handlePay}
-                    onDelete={handleDelete}
-                    isCart={false}
-                  />
-                </div>
-              ) :
-              renderCustomView()
+              renderMonthView()
             )}
-        </CardContent>
-      </Card>
+         </CardContent>
+       </Card>
       
       <ConfirmDialog
         open={isConfirmOpen}
@@ -1086,7 +1074,7 @@ export function PatientCalendarView() {
                                 disabled={isProcessing}
                               >
                                 <Trash2 className="h-4 w-4" />
-                                Delete
+                                Cancel
                               </Button>
                             );
                           }
@@ -1119,6 +1107,18 @@ export function PatientCalendarView() {
         </DialogContent>
       </Dialog>
 
+      <BookingModal 
+        open={bookingModalOpen} 
+        onOpenChange={setBookingModalOpen} 
+        defaultDate={bookingDefaultDate}
+        defaultTime={bookingDefaultTime}
+        appointmentToEdit={appointmentToEditLocal}
+        title={user?.role === 'patient' && appointmentToEditLocal ? 'View Appointment' : undefined}
+        onBooked={(appt) => {
+          setAppointmentToEditLocal(null);
+          refreshAppointments(filters);
+        }}
+      />
     </div>
   );
 }

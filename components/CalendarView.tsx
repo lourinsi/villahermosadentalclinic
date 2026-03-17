@@ -20,6 +20,7 @@ import {
   ListFilter
 } from "lucide-react";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { APPOINTMENT_STATUSES } from "@/lib/appointment-statuses";
 import { Appointment, AppointmentFilters } from "../hooks/useAppointments";
 import { Badge } from "./ui/badge";
 import { EditAppointmentModal } from "./EditAppointmentModal";
@@ -46,7 +47,8 @@ const appointmentColors: Record<string, { bg: string; text: string; border: stri
   "Other": { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200" },
 };
 
-const APPOINTMENT_STATUSES = ["all", "scheduled", "completed"];
+// Status filter defaults - will be supplemented by backend statuses
+const DEFAULT_STATUS_FILTERS = ["all", "scheduled", "completed"];
 
 
 export function CalendarView({ portal = 'admin' }: { portal?: 'admin' | 'doctor' | 'patient' }) {
@@ -920,7 +922,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                   </SelectTrigger>
                   <SelectContent>
                     {APPOINTMENT_STATUSES.map((status) => (
-                      <SelectItem key={status} value={status} className="capitalize">{status === 'all' ? 'All Statuses' : status}</SelectItem>
+                      <SelectItem key={status.key} value={status.value} className="capitalize">{status.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>

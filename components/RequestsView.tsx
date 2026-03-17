@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { APPOINTMENT_STATUSES } from "@/lib/appointment-statuses";
 import { Badge } from "./ui/badge";
 import { toast } from "sonner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
@@ -58,6 +59,18 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     refreshAppointments();
   }, [refreshAppointments]);
 
+  // Normalize status strings to canonical backend keys for reliable comparisons
+  const canonicalStatus = (s?: string) => {
+    if (!s) return "";
+    return String(s).toLowerCase().trim();
+  };
+
+  // Requests are those with pending, reserved, or scheduled statuses (not yet completed/cancelled)
+  const isRequestStatus = (s?: string) => {
+    const k = canonicalStatus(s);
+    return k === "pending" || k === "reserved" || k === "scheduled";
+  };
+
   // Pending filters state
   const [pendingSearchTerm, setPendingSearchTerm] = useState("");
   const [pendingStatusFilter, setPendingStatusFilter] = useState("all");
@@ -79,10 +92,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
 
   const requests = useMemo(() => {
     return appointments.filter((apt) => {
-      const isRequestStatus = ["pending", "tentative", "To Pay"].includes(apt.status);
-      const matchesDoctor = !doctorFilter || apt.doctor.toLowerCase() === doctorFilter.toLowerCase();
-      
-      if (!isRequestStatus || !matchesDoctor) return false;
+      const matchesDoctor = !doctorFilter || (apt.doctor || "").toLowerCase() === doctorFilter.toLowerCase();
+      if (!isRequestStatus(apt.status) || !matchesDoctor) return false;
 
       // Search filter
       if (pendingSearchTerm && !apt.patientName.toLowerCase().includes(pendingSearchTerm.toLowerCase()) && 
@@ -90,8 +101,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         return false;
       }
       
-      // Status filter
-      if (pendingStatusFilter !== "all" && apt.status !== pendingStatusFilter) {
+      // Status filter (compare canonical keys so UI filters like 'To Pay' or 'tentative' still match backend values)
+      if (pendingStatusFilter !== "all" && canonicalStatus(apt.status) !== canonicalStatus(pendingStatusFilter)) {
         return false;
       }
 
@@ -112,11 +123,9 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const history = useMemo(() => {
     return appointments
       .filter((apt) => {
-        const isRequestStatus = ["pending", "tentative", "To Pay"].includes(apt.status);
-        const matchesDoctor = !doctorFilter || apt.doctor.toLowerCase() === doctorFilter.toLowerCase();
-        
+        const matchesDoctor = !doctorFilter || (apt.doctor || "").toLowerCase() === doctorFilter.toLowerCase();
         // In history, we show non-request statuses
-        if (isRequestStatus || !matchesDoctor) return false;
+        if (isRequestStatus(apt.status) || !matchesDoctor) return false;
         
         // Search filter
         if (historySearchTerm && !apt.patientName.toLowerCase().includes(historySearchTerm.toLowerCase()) && 
@@ -124,8 +133,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
           return false;
         }
         
-        // Status filter
-        if (historyStatusFilter !== "all" && apt.status !== historyStatusFilter) {
+        // Status filter (use canonical comparison)
+        if (historyStatusFilter !== "all" && canonicalStatus(apt.status) !== canonicalStatus(historyStatusFilter)) {
           return false;
         }
         
@@ -145,7 +154,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
 
   const handleApprove = async (appointment: Appointment) => {
     try {
-      const newStatus = appointment.status === "tentative" ? "confirmed" : "scheduled";
+      // Approve any pending/reserved request to scheduled
+      const newStatus = appointment.status === "pending" || appointment.status === "reserved" ? "scheduled" : "scheduled";
       await updateAppointment(appointment.id, { status: newStatus });
       toast.success(`Appointment for ${appointment.patientName} approved`);
     } catch {
@@ -162,8 +172,9 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     }
   };
 
-  const handleStatusChangeRequest = (appointment: Appointment, newStatus: Appointment['status']) => {
-    setPendingStatusChange({ appointment, newStatus });
+  const handleStatusChangeRequest = (appointment: Appointment, statusKey: string) => {
+    // statusKey comes from the select dropdown and directly maps to backend status values
+    setPendingStatusChange({ appointment, newStatus: statusKey as Appointment['status'] });
     setIsConfirmOpen(true);
   };
 
@@ -183,15 +194,12 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   };
 
   const getStatusBadge = (status: string) => {
-    switch (status) {
+    const k = canonicalStatus(status);
+    switch (k) {
       case "pending":
         return <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">Pending</Badge>;
-      case "tentative":
-        return <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">Tentative (Partial)</Badge>;
-      case "To Pay":
-        return <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200">To Pay at Clinic</Badge>;
-      case "confirmed":
-        return <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">Confirmed</Badge>;
+      case "reserved":
+        return <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">Reserved</Badge>;
       case "scheduled":
         return <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">Scheduled</Badge>;
       case "completed":
@@ -255,8 +263,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
             bVal = b.doctor.toLowerCase();
             break;
           case "status":
-            aVal = a.status.toLowerCase();
-            bVal = b.status.toLowerCase();
+            aVal = canonicalStatus(a.status);
+            bVal = canonicalStatus(b.status);
             break;
           case "booked":
             aVal = new Date(a.createdAt || 0).getTime();
@@ -294,8 +302,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
             bVal = getAppointmentTypeName(b.type, b.customType).toLowerCase();
             break;
           case "status":
-            aVal = a.status.toLowerCase();
-            bVal = b.status.toLowerCase();
+            aVal = canonicalStatus(a.status);
+            bVal = canonicalStatus(b.status);
             break;
           default:
             return 0;
@@ -366,9 +374,9 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Statuses</SelectItem>
-                      <SelectItem value="pending">Pending</SelectItem>
-                      <SelectItem value="tentative">Tentative</SelectItem>
-                      <SelectItem value="To Pay">To Pay</SelectItem>
+                      {APPOINTMENT_STATUSES.map(opt => (
+                        <SelectItem key={opt.key} value={opt.value}>{opt.label}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   {!doctorFilter && (
@@ -495,7 +503,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                               <AlertCircle className="h-3 w-3 mr-1" />
                               Partial
                             </div>
-                          ) : request.status === "To Pay" ? (
+                          ) : canonicalStatus(request.status) === "to_pay" ? (
                             <div className="flex items-center text-orange-600 text-sm">
                               <DollarSign className="h-3 w-3 mr-1" />
                               Clinic
@@ -527,7 +535,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                               variant="ghost" 
                               size="sm" 
                               className="text-green-600 hover:text-green-700 hover:bg-green-50"
-                              onClick={() => handleStatusChangeRequest(request, request.status === "tentative" ? "confirmed" : "scheduled")}
+                              onClick={() => handleStatusChangeRequest(request, "scheduled")}
                               title="Approve"
                             >
                               <CheckCircle className="h-4 w-4" />
@@ -583,15 +591,14 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Statuses</SelectItem>
-                      <SelectItem value="confirmed">Confirmed</SelectItem>
-                      <SelectItem value="scheduled">Scheduled</SelectItem>
-                      <SelectItem value="completed">Completed</SelectItem>
-                      <SelectItem value="cancelled">Cancelled</SelectItem>
+                      {APPOINTMENT_STATUSES.map(opt => (
+                        <SelectItem key={opt.key} value={opt.value}>{opt.label}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <Button 
-                    variant="outline" 
-                    size="icon" 
+                    variant="outline"
+                    size="icon"
                     onClick={() => {
                       setHistorySearchTerm("");
                       setHistoryStatusFilter("all");
@@ -654,17 +661,16 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                         <TableCell>{getStatusBadge(item.status)}</TableCell>
                         <TableCell className="text-right pr-6">
                           <Select 
-                            value={item.status} 
+                            value={canonicalStatus(item.status)} 
                             onValueChange={(val) => handleStatusChangeRequest(item, val as Appointment['status'])}
                           >
                             <SelectTrigger className="h-8 w-[140px] ml-auto text-xs">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="confirmed">Confirmed</SelectItem>
-                              <SelectItem value="scheduled">Scheduled</SelectItem>
-                              <SelectItem value="completed">Completed</SelectItem>
-                              <SelectItem value="cancelled">Cancelled</SelectItem>
+                              {APPOINTMENT_STATUSES.map(opt => (
+                                <SelectItem key={opt.key} value={opt.value}>{opt.label}</SelectItem>
+                              ))}
                             </SelectContent>
                           </Select>
                         </TableCell>
