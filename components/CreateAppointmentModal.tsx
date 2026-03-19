@@ -123,8 +123,19 @@ export function CreateAppointmentModal() {
   const fetchPatients = useCallback(async (page: number) => {
     setIsLoadingPatients(true);
     try {
-      const doctorFilter = user?.role === "doctor" ? `&doctor=${encodeURIComponent(user.username || "")}` : "";
-      const res = await fetch(`http://localhost:3001/api/patients?page=${page}&limit=20${doctorFilter}`);
+      let url = `http://localhost:3001/api/patients?page=${page}&limit=20`;
+      
+      // If user is a doctor, filter by their patients only
+      if (user?.role === "doctor" && user?.username) {
+        url += `&doctor=${encodeURIComponent(user.username)}`;
+      }
+      
+      console.log("CreateAppointmentModal: fetchPatients", { url, role: user?.role, username: user?.username });
+      const res = await fetch(url, {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include"
+      });
       const json = await res.json();
       if (json?.success && Array.isArray(json.data)) {
         const list: PatientSelectItem[] = json.data.map((p: ApiPatient) => ({ 
@@ -134,16 +145,6 @@ export function CreateAppointmentModal() {
 
         setPatients(prev => {
           const newList = page === 1 ? list : [...prev, ...list];
-          // preserve selected patient at front if not present
-          if (formData.patientId) {
-            const isSelectedPatientInList = newList.some(p => p.id === formData.patientId);
-            if (!isSelectedPatientInList) {
-              const selectedPatient = prev.find(p => p.id === formData.patientId);
-              if (selectedPatient) {
-                return [selectedPatient, ...newList];
-              }
-            }
-          }
           return newList.filter((patient: PatientSelectItem, index: number, self: PatientSelectItem[]) => 
             index === self.findIndex((p: PatientSelectItem) => p.id === patient.id)
           );
@@ -161,7 +162,7 @@ export function CreateAppointmentModal() {
     } finally {
       setIsLoadingPatients(false);
     }
-  }, [user?.role, user?.username, formData.patientId]);
+  }, [user?.role, user?.username]);
 
   useEffect(() => {
     console.log("CreateAppointmentModal: useEffect(isCreateModalOpen) - entered", { isCreateModalOpen, role: user?.role });
@@ -208,10 +209,12 @@ export function CreateAppointmentModal() {
       setShowNewPatient(false);
       setShowCustomTypeInput(false);
       setStep(1);
-      console.log("CreateAppointmentModal: setStep(1) on modal open");
+      setPatientPage(1);
+      setPatients([]);
+      console.log("CreateAppointmentModal: setStep(1) on modal open, starting patient fetch");
       reloadDoctors();
 
-      // Prefetch patients
+      // Prefetch patients for step 2
       fetchPatients(1);
     }
     prevOpenRef.current = isCreateModalOpen;
@@ -235,7 +238,11 @@ export function CreateAppointmentModal() {
         return;
       }
       try {
-        const response = await fetch(`http://localhost:3001/api/appointments?startDate=${formData.date}&endDate=${formData.date}`);
+        const response = await fetch(`http://localhost:3001/api/appointments?startDate=${formData.date}&endDate=${formData.date}`, {
+          method: "GET",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include"
+        });
         const result = await response.json();
         if (result.success) {
           setDateAppointments(result.data || []);
@@ -624,7 +631,13 @@ export function CreateAppointmentModal() {
               placeholder="Search or select a patient..."
               value={patientInputValue}
               onChange={(e) => { setPatientInputValue(e.target.value); setPatientSearch(e.target.value); setOpen(true); }}
-              onFocus={() => { setOpen(true); if (patients.length === 0) { setPatientPage(1); fetchPatients(1); } }}
+              onFocus={() => { 
+                setOpen(true); 
+                if (patients.length === 0) { 
+                  setPatientPage(1); 
+                  fetchPatients(1); 
+                } 
+              }}
               className="w-full"
             />
             <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
@@ -637,7 +650,7 @@ export function CreateAppointmentModal() {
                   {(() => {
                     const filteredPatients = sortedPatients.filter((p) => p.name.toLowerCase().includes(patientSearch.toLowerCase()));
                     const isSearching = patientSearch !== "";
-                    const hasNoResults = isSearching && filteredPatients.length === 0;
+                    const hasNoResults = isSearching && filteredPatients.length === 0 && !isLoadingPatients;
 
                     return (
                       <>
@@ -931,6 +944,7 @@ export function CreateAppointmentModal() {
           await fetch("http://localhost:3001/api/payments", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            credentials: "include",
             body: JSON.stringify({
               appointmentId: newApt?.id || (newApt && newApt.id),
               patientId: patientId || patientName,

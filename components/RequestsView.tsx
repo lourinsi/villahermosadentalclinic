@@ -317,6 +317,17 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     return sorted;
   }, [history, historySortColumn, historySortDirection]);
 
+  // Build status options dynamically from backend appointments (preserve a representative 'raw' value)
+  const statusOptions = useMemo(() => {
+    const map = new Map<string, string>(); // key -> raw
+    appointments.forEach(a => {
+      const raw = String(a.status || "").trim();
+      const key = canonicalStatus(raw) || raw;
+      if (!map.has(key)) map.set(key, raw || key);
+    });
+    return Array.from(map.entries()).map(([key, raw]) => ({ key, raw, label: (raw || key).toString().replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) }));
+  }, [appointments]);
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">

@@ -36,6 +36,7 @@ import CalendarPopover from "./CalendarPopover";
 
 import ViewMode from "./viewMode";
 import { useRouter, useSearchParams } from 'next/navigation';
+import BookingModal from "@/components/BookingModal";
 
 const appointmentColors: Record<string, { bg: string; text: string; border: string }> = {
   "Routine Cleaning": { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" },
@@ -57,8 +58,8 @@ export function CalendarView({ portal = 'admin' }: { portal?: 'admin' | 'doctor'
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedDoctor, setSelectedDoctor] = useState("all");
   const [selectedType, setSelectedType] = useState("all");
-  // Default to showing scheduled appointments only (remove cart/pending filters)
-  const [selectedStatus, setSelectedStatus] = useState("scheduled");
+  // For patient portal, only show scheduled/reserved appointments
+  const [selectedStatus, setSelectedStatus] = useState(portal === 'patient' ? "scheduled" : "scheduled");
   const [isLoadingView, setIsLoadingView] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
@@ -77,6 +78,12 @@ export function CalendarView({ portal = 'admin' }: { portal?: 'admin' | 'doctor'
   const { doctors, isLoadingDoctors } = useDoctors();
   const router = useRouter();
   const searchParams = useSearchParams();
+  
+  // Booking modal state
+  const [bookingModalOpen, setBookingModalOpen] = useState(false);
+  const [bookingDefaultDate, setBookingDefaultDate] = useState<Date | undefined>(undefined);
+  const [bookingDefaultTime, setBookingDefaultTime] = useState<string | undefined>(undefined);
+  const [appointmentToEditLocal, setAppointmentToEditLocal] = useState<Appointment | null>(null);
 
   useEffect(() => {
     const doctorId = searchParams.get("doctor");
@@ -208,7 +215,6 @@ export function CalendarView({ portal = 'admin' }: { portal?: 'admin' | 'doctor'
   };
 
   const navigateDate = (direction: 'prev' | 'next') => {
-    setSearchTerm("");
     const newDate = new Date(selectedDate);
     if (viewMode === 'day') {
       newDate.setDate(selectedDate.getDate() + (direction === 'next' ? 1 : -1));
@@ -433,7 +439,10 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                       }}
                       onClick={(e) => {
                         e.stopPropagation();
-                        openEditModal(appointment, portal === 'patient');
+                        setAppointmentToEditLocal(appointment);
+                        setBookingDefaultDate(selectedDate);
+                        setBookingDefaultTime(appointment.time);
+                        setBookingModalOpen(true);
                       }}
                     >
                       <div className="flex flex-col h-full">
@@ -599,7 +608,10 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                               }}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                openEditModal(appointment, portal === 'patient');
+                                setAppointmentToEditLocal(appointment);
+                                setBookingDefaultDate(day);
+                                setBookingDefaultTime(appointment.time);
+                                setBookingModalOpen(true);
                               }}
                             >
                               <div className="flex justify-between items-start">
@@ -684,8 +696,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
               className={`min-h-[120px] p-2 border-r border-b border-gray-200 transition-colors cursor-pointer ${
                 item.currentMonth ? 'bg-white hover:bg-gray-50' : 'bg-gray-50/50 text-gray-400'
               }`}
-              onClick={(e) => {
-                e.stopPropagation();
+              onClick={() => {
                 setSelectedDate(item.date);
                 setViewMode("day");
               }}
@@ -706,18 +717,26 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                 {sortedDayAppointments.slice(0, 3).map((apt: Appointment) => {
                   const typeName = getAppointmentTypeName(apt.type, apt.customType);
                   const colors = getColorForType(typeName);
-                  const avatarSrc = (apt as any).patientProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(String(apt.patientName || apt.patientId || 'patient'))}`;
+                  const doc = doctors.find(d => String(d.name) === String(apt.doctor) || String(d.id) === String(apt.doctor));
+                  const doctorSrc = doc?.profilePicture || (apt as any).doctorProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${apt.doctor}`;
                   return (
                     <div
                       key={apt.id}
-                      className={`text-[10px] p-1 rounded truncate border-l-2 ${colors.bg} ${colors.text} ${colors.border} ${apt.status === "tentative" ? "border-dashed opacity-80" : apt.status === "To Pay" ? "border-orange-400" : ""} flex items-center gap-2`}
+                      className={`text-[10px] p-1 rounded truncate border-l-2 ${colors.bg} ${colors.text} ${colors.border} ${apt.status === "tentative" ? "border-dashed opacity-80" : apt.status === "To Pay" ? "border-orange-400" : ""} flex items-center gap-2 cursor-pointer hover:shadow-sm transition-all`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setAppointmentToEditLocal(apt);
+                        setBookingDefaultDate(item.date);
+                        setBookingDefaultTime(apt.time);
+                        setBookingModalOpen(true);
+                      }}
                     >
                       <Avatar className="h-5 w-5 border border-gray-100 flex-shrink-0">
-                        <AvatarImage src={avatarSrc} alt={apt.patientName} />
-                        <AvatarFallback>{String((apt.patientName || String(apt.patientId || '')).substring(0,2)).toUpperCase()}</AvatarFallback>
+                        <AvatarImage src={doctorSrc} alt={apt.doctor} />
+                        <AvatarFallback>{String(apt.doctor || '').substring(0,2).toUpperCase()}</AvatarFallback>
                       </Avatar>
                       <div className="truncate">
-                        {apt.time} {apt.patientName}
+                        {apt.time} • Dr. {apt.doctor}
                         {apt.status === "tentative" && " (R)"}
                         {apt.status === "To Pay" && " (P)"}
                       </div>
@@ -725,7 +744,13 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                   )
                 })}
                 {dayAppointments.length > 3 && (
-                  <div className="text-[10px] text-muted-foreground pl-1 font-medium">
+                  <div className="text-[10px] text-muted-foreground pl-1 font-medium cursor-pointer hover:text-muted-foreground/80"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedDate(item.date);
+                      setViewMode("day");
+                    }}
+                  >
                     + {dayAppointments.length - 3} more
                   </div>
                 )}
@@ -763,7 +788,12 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
               const typeName = getAppointmentTypeName(apt.type, apt.customType);
               const colors = getColorForType(typeName);
               return (
-                <Card key={apt.id} className="overflow-hidden hover:shadow-md transition-shadow cursor-pointer" onClick={() => { openEditModal(apt); }}>
+                <Card key={apt.id} className="overflow-hidden hover:shadow-md transition-shadow cursor-pointer" onClick={() => { 
+                  setAppointmentToEditLocal(apt);
+                  setBookingDefaultDate(parseBackendDateToLocal(apt.date));
+                  setBookingDefaultTime(apt.time);
+                  setBookingModalOpen(true);
+                }}>
                   <div className={`h-1 ${colors.bg.replace('bg-', 'bg-').split(' ')[0]}`} />
                   <CardContent className="p-4">
                     <div className="flex justify-between items-start mb-2">
@@ -801,45 +831,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
   };
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Appointment Calendar</h1>
-          <p className="text-muted-foreground">Manage clinic schedules and patient bookings</p>
-        </div>
-        <div className="flex items-center space-x-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input
-              type="text"
-              placeholder="Search appointments..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-9 pr-9 w-64 h-10 shadow-sm"
-            />
-            {searchTerm && (
-              <button 
-                onClick={() => setSearchTerm("")}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-          {portal === 'patient' ? (
-            <Button variant="brand" onClick={() => router.push('/patient/doctors')} className="h-10">
-              <Plus className="h-4 w-4 mr-2" />
-              Find Doctors
-            </Button>
-          ) : (
-            <Button variant="brand" onClick={() => openCreateModal(selectedDate)} className="h-10">
-              <Plus className="h-4 w-4 mr-2" />
-              New Appointment
-            </Button>
-          )}
-        </div>
-      </div>
-
+    <div className="space-y-6">
       <Card className="shadow-sm border-none bg-white">
         <CardContent className="p-4">
           <div className="flex items-center justify-between flex-wrap gap-4">
@@ -882,56 +874,83 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                 </PopoverContent>
               </Popover>
             </div>
-            
-            <div className="flex items-center space-x-3">
+
+            <div className="flex items-center gap-4 flex-wrap">
+              {/* Filters - visible only for admin/doctor */}
               {portal !== 'patient' && (
-                <div className="flex items-center gap-2">
-                  <Users className="h-4 w-4 text-gray-400" />
-                  <Select value={selectedDoctor} onValueChange={setSelectedDoctor}>
-                    <SelectTrigger className="w-[180px] h-10 shadow-sm">
-                      <SelectValue placeholder={isLoadingDoctors ? "Loading..." : "Filter by doctor"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Doctors</SelectItem>
-                      {doctors.map((doctor) => (
-                        <SelectItem key={doctor.id} value={doctor.name}>{doctor.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div className="flex items-center space-x-3">
+                  {portal !== 'patient' && (
+                    <div className="flex items-center gap-2">
+                      <Users className="h-4 w-4 text-gray-400" />
+                      <Select value={selectedDoctor} onValueChange={setSelectedDoctor}>
+                        <SelectTrigger className="w-[180px] h-10 shadow-sm">
+                          <SelectValue placeholder={isLoadingDoctors ? "Loading..." : "Filter by doctor"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Doctors</SelectItem>
+                          {doctors.map((doctor) => (
+                            <SelectItem key={doctor.id} value={doctor.name}>{doctor.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  {portal !== 'patient' && (
+                    <div className="flex items-center gap-2">
+                      <ListFilter className="h-4 w-4 text-gray-400" />
+                      <Select value={selectedType} onValueChange={setSelectedType}>
+                        <SelectTrigger className="w-[180px] h-10 shadow-sm">
+                          <SelectValue placeholder="Filter by type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Types</SelectItem>
+                          {APPOINTMENT_TYPES.map((type, index) => (
+                            <SelectItem key={index} value={String(index)}>{type}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  {portal !== 'patient' && (
+                    <div className="flex items-center gap-2">
+                      <ListFilter className="h-4 w-4 text-gray-400" />
+                      <Select value={selectedStatus} onValueChange={setSelectedStatus}>
+                        <SelectTrigger className="w-[180px] h-10 shadow-sm">
+                          <SelectValue placeholder="Filter by status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {APPOINTMENT_STATUSES.map((status) => (
+                            <SelectItem key={status.key} value={status.value} className="capitalize">{status.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
                 </div>
               )}
-              <div className="flex items-center gap-2">
-                <ListFilter className="h-4 w-4 text-gray-400" />
-                <Select value={selectedType} onValueChange={setSelectedType}>
-                  <SelectTrigger className="w-[180px] h-10 shadow-sm">
-                    <SelectValue placeholder="Filter by type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Types</SelectItem>
-                    {APPOINTMENT_TYPES.map((type, index) => (
-                      <SelectItem key={index} value={String(index)}>{type}</SelectItem>
+
+              {/* View Mode Buttons and Status Badge - always on right */}
+              <div className="flex items-center gap-3">
+                {/* View Mode Buttons - only for patient */}
+                {portal === 'patient' && (
+                  <div className="flex items-center gap-2">
+                    {(['month','week','day'] as const).map(mode => (
+                      <button
+                        key={mode}
+                        onClick={() => setViewMode(mode)}
+                        className={`px-4 py-2 text-xs font-black uppercase tracking-wider rounded-lg transition-all ${viewMode === mode ? 'text-violet-600' : 'text-gray-500 hover:text-gray-700'}`}
+                      >
+                        {mode}
+                      </button>
                     ))}
-                  </SelectContent>
-                </Select>
+                  </div>
+                )}
+
+                <Badge variant="secondary" className="bg-violet-50 text-violet-700 border-violet-100 h-10 px-4 rounded-lg font-semibold flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-violet-600 animate-pulse" />
+                  {searchTerm !== "" ? "Search Results" : (viewMode === "day" ? "Day View" : viewMode === "week" ? "Week View" : viewMode === "month" ? "Month View" : viewMode === "custom" ? "Custom Range" : "All Appointments")}
+                </Badge>
               </div>
-              <div className="flex items-center gap-2">
-                <ListFilter className="h-4 w-4 text-gray-400" />
-                <Select value={selectedStatus} onValueChange={setSelectedStatus}>
-                  <SelectTrigger className="w-[180px] h-10 shadow-sm">
-                    <SelectValue placeholder="Filter by status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {APPOINTMENT_STATUSES.map((status) => (
-                      <SelectItem key={status.key} value={status.value} className="capitalize">{status.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              
-              <Badge variant="secondary" className="bg-violet-50 text-violet-700 border-violet-100 h-10 px-4 rounded-lg font-semibold flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-violet-600 animate-pulse" />
-                {searchTerm !== "" ? "Search Results" : (viewMode === "day" ? "Day View" : viewMode === "week" ? "Week View" : viewMode === "month" ? "Month View" : viewMode === "custom" ? "Custom Range" : "All Appointments")}
-              </Badge>
             </div>
           </div>
         </CardContent>
@@ -992,7 +1011,17 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
         </CardContent>
       </Card>
 
-      <EditAppointmentModal />
+      <BookingModal 
+        open={bookingModalOpen} 
+        onOpenChange={setBookingModalOpen} 
+        defaultDate={bookingDefaultDate}
+        defaultTime={bookingDefaultTime}
+        appointmentToEdit={appointmentToEditLocal}
+        onBooked={(appt) => {
+          setAppointmentToEditLocal(null);
+          refreshAppointments({});
+        }}
+      />
 
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <DialogContent className="max-w-md">
