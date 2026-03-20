@@ -398,7 +398,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Statuses</SelectItem>
-                      {APPOINTMENT_STATUSES.map(opt => (
+                      {APPOINTMENT_STATUSES.filter(opt => opt.value && opt.value.trim()).map(opt => (
                         <SelectItem key={opt.key} value={opt.value}>{opt.label}</SelectItem>
                       ))}
                     </SelectContent>
@@ -623,7 +623,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Statuses</SelectItem>
-                      {APPOINTMENT_STATUSES.map(opt => (
+                      {APPOINTMENT_STATUSES.filter(opt => opt.value && opt.value.trim()).map(opt => (
                         <SelectItem key={opt.key} value={opt.value}>{opt.label}</SelectItem>
                       ))}
                     </SelectContent>
@@ -700,7 +700,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              {APPOINTMENT_STATUSES.map(opt => (
+                              {APPOINTMENT_STATUSES.filter(opt => opt.value && opt.value.trim()).map(opt => (
                                 <SelectItem key={opt.key} value={opt.value}>{opt.label}</SelectItem>
                               ))}
                             </SelectContent>

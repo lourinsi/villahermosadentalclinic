@@ -11,9 +11,23 @@ import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { Calendar as CalendarIcon, Clock, Award, Loader2, CheckCircle2, CreditCard, Banknote, Stethoscope, Trash2, ChevronLeft } from "lucide-react";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { formatTimeTo12h } from "@/lib/time-slots";
-import { APPOINTMENT_PRICES } from "@/lib/appointment-types";
+import { APPOINTMENT_PRICES, APPOINTMENT_TYPES, getAppointmentTypeName } from "@/lib/appointmentTypes";
 import { Dialog as SmallDialog, DialogContent as SmallDialogContent, DialogFooter as SmallDialogFooter } from "@/components/ui/dialog";
 import { toast } from 'sonner';
+
+// Helper function to get appointment type index from name
+const getAppointmentTypeIndex = (typeName: string): number => {
+  const typeMap: Record<string, number> = {
+    "Routine Cleaning": 0,
+    "Checkup": 1,
+    "Filling": 2,
+    "Root Canal": 3,
+    "Extraction": 4,
+    "Whitening": 5,
+    "Other": 6,
+  };
+  return typeMap[typeName] ?? 6;
+};
 
 interface BookingModalProps {
   open: boolean;
@@ -36,8 +50,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [isLoadingPatients, setIsLoadingPatients] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState<string>("");
   const [appointmentType, setAppointmentType] = useState<string>("");
+  const [customAppointmentTypeName, setCustomAppointmentTypeName] = useState<string>("");
   const [duration, setDuration] = useState<string>("30");
   const [discount, setDiscount] = useState<string>("0");
+  const [customPrice, setCustomPrice] = useState<string>("0");
   const [notes, setNotes] = useState<string>("");
   const [selectedDate, setSelectedDate] = useState<Date>(defaultDate ?? new Date());
   const [selectedTime, setSelectedTime] = useState<string>(defaultTime ?? "");
@@ -78,9 +94,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     setSelectedTime(defaultTime ?? "");
   }, [defaultTime]);
 
-  // Price calculations
-  const basePrice = APPOINTMENT_PRICES[appointmentType] || 0;
-  const finalPrice = Math.max(0, basePrice - (Number(discount) || 0));
+  // Price calculations - handle custom types
+  const basePrice = appointmentType === "Other" ? Number(customPrice) : (APPOINTMENT_PRICES[appointmentType] || 0);
+  const finalPrice = appointmentType === "Other" ? basePrice : Math.max(0, basePrice - (Number(discount) || 0));
 
   // Log appointment type changes with price
   useEffect(() => {
@@ -119,7 +135,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         
         if (json?.success && Array.isArray(json.data)) {
           const list = json.data.map((p: any) => ({ id: String(p.id), name: `${p.firstName} ${p.lastName}`, ...p }));
-          console.log('BookingModal: patients loaded', { count: list.length, patients: list, source: user?.role === 'patient' ? 'server-filtered' : 'admin-fetch' });
+          console.log('BookingModal: patients loaded', { 
+            count: list.length, 
+            source: user?.role === 'patient' ? 'server-filtered' : 'admin-fetch',
+            allIds: list.slice(0, 3).map((p: any) => ({ id: p.id, type: typeof p.id, name: p.name }))
+          });
           try { window.dispatchEvent(new CustomEvent('bookingmodal:patients', { detail: { source: user?.role === 'patient' ? 'server-filtered' : 'admin-fetch', count: list.length, patients: list } })); } catch (e) {}
           setPatients(list);
           // preselect first patient if available
@@ -144,8 +164,45 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   // When an appointment is provided for editing, prefill the form
   useEffect(() => {
     if (appointmentToEdit) {
+      console.log('[BookingModal] 📂 OPENING APPOINTMENT FOR EDITING:', {
+        appointmentId: appointmentToEdit.id,
+        patientId: appointmentToEdit.patientId,
+        patientName: appointmentToEdit.patientName,
+        date: appointmentToEdit.date,
+        time: appointmentToEdit.time,
+        type: appointmentToEdit.type,
+        customType: appointmentToEdit.customType,
+        duration: appointmentToEdit.duration,
+        price: appointmentToEdit.price,
+        status: appointmentToEdit.status,
+        paymentStatus: appointmentToEdit.paymentStatus,
+        totalPaid: appointmentToEdit.totalPaid,
+        balance: appointmentToEdit.balance,
+        doctor: appointmentToEdit.doctor,
+        notes: appointmentToEdit.notes,
+        timestamp: new Date().toISOString()
+      });
+
       setSelectedPatient(String(appointmentToEdit.patientId || appointmentToEdit.patientId));
-      setAppointmentType(appointmentToEdit.customType || appointmentToEdit.type || '');
+      // Use getAppointmentTypeName to convert type index to string name
+      // This handles both standard types (0-5) and custom type (6 with customType)
+      const typeName = getAppointmentTypeName(appointmentToEdit.type, appointmentToEdit.customType);
+      console.log('[BookingModal Edit] Converted appointment type:', {
+        type: appointmentToEdit.type,
+        customType: appointmentToEdit.customType,
+        convertedTypeName: typeName
+      });
+
+      // If it's a custom type (type 6), set appointmentType to "Other"
+      // This ensures the Select matches "Other" and custom fields are shown
+      if (appointmentToEdit.type === 6) {
+        setAppointmentType("Other");
+        setCustomAppointmentTypeName(appointmentToEdit.customType || "");
+        setCustomPrice(String(appointmentToEdit.price || 0));
+      } else {
+        setAppointmentType(typeName);
+      }
+      
       setDuration(String(appointmentToEdit.duration || 30));
       setDiscount(String(0));
       setNotes(appointmentToEdit.notes || '');
@@ -161,8 +218,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       // Reset form when creating new appointment
       setSelectedPatient(patients.length > 0 ? patients[0].id : '');
       setAppointmentType('');
+      setCustomAppointmentTypeName('');
       setDuration('30');
       setDiscount('0');
+      setCustomPrice('0');
       setNotes('');
       setSelectedDate(defaultDate ?? new Date());
       setSelectedTime(defaultTime ?? '');
@@ -251,7 +310,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           doctor: appointmentToEdit.doctor || doctorName || '',
           date: dateStr,
           time: selectedTime,
-          customType: appointmentType,
+          type: getAppointmentTypeIndex(appointmentType),
+          customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
           duration: Number(duration) || 30,
           price: finalPrice,
           notes,
@@ -329,8 +389,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           doctor: doctorName || '',
           date: dateStr,
           time: selectedTime,
-          type: 0,
-          customType: appointmentType,
+          type: getAppointmentTypeIndex(appointmentType),
+          customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
           duration: Number(duration) || 30,
           price: finalPrice,
           notes,
@@ -394,6 +454,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const handleClose = () => {
     setModalStep("details");
     setAmountToPay("");
+    setCustomAppointmentTypeName("");
+    setCustomPrice("0");
     onOpenChange(false);
   };
 
@@ -484,10 +546,24 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                           <SelectItem value="Root Canal">Root Canal</SelectItem>
                           <SelectItem value="Extraction">Extraction</SelectItem>
                           <SelectItem value="Whitening">Whitening</SelectItem>
-                          <SelectItem value="Other">Other</SelectItem>
+                          <SelectItem value="Other">{customAppointmentTypeName || "Other"}</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
+
+                    {appointmentType === "Other" && (
+                      <div className="space-y-2">
+                        <Label className="text-sm font-bold text-gray-700">Custom Appointment Type Name *</Label>
+                        <Input 
+                          type="text"
+                          value={customAppointmentTypeName} 
+                          onChange={(e: any) => setCustomAppointmentTypeName(e.target.value)} 
+                          placeholder="e.g., Denture Fitting, Implant Consultation" 
+                          className="h-11 rounded-lg border-gray-200" 
+                          disabled={isPatientReadonly}
+                        />
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
@@ -495,19 +571,24 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                         <Input type="number" value={duration} onChange={(e: any) => setDuration(e.target.value)} placeholder="30" className="h-11 rounded-lg border-gray-200" disabled={isPatientReadonly} />
                         {user?.role === 'patient' && <p className="text-xs text-gray-500">Set based on appointment type</p>}
                       </div>
-                      {user?.role !== 'patient' && (
+                      {appointmentType === "Other" ? (
+                        <div className="space-y-2">
+                          <Label className="text-sm font-bold text-gray-700">Price ($)</Label>
+                          <Input type="number" min="0" step="0.01" value={customPrice} onChange={(e: any) => setCustomPrice(e.target.value)} placeholder="0.00" className="h-11 rounded-lg border-gray-200" disabled={isPatientReadonly} />
+                        </div>
+                      ) : user?.role !== 'patient' ? (
                         <div className="space-y-2">
                           <Label className="text-sm font-bold text-gray-700">Discount</Label>
                           <Input type="number" value={discount} onChange={(e: any) => setDiscount(e.target.value)} placeholder="0" className="h-11 rounded-lg border-gray-200" disabled={isPatientReadonly} />
                         </div>
-                      )}
+                      ) : null}
                     </div>
 
                     <div className="space-y-2">
                       <Label className="text-sm font-bold text-gray-700">Total Price</Label>
                       <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
                         <div className="text-lg font-bold text-blue-700">₱{finalPrice.toLocaleString()}</div>
-                        <p className="text-xs text-gray-500 mt-1">Base price for {appointmentType || 'selected type'}</p>
+                        <p className="text-xs text-gray-500 mt-1">Base price for {appointmentType === "Other" ? (customAppointmentTypeName || "Other") : (appointmentType || 'selected type')}</p>
                       </div>
                     </div>
                   </div>
@@ -566,7 +647,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 <div className="bg-gray-50 p-4 rounded-lg space-y-3">
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-500">Service:</span>
-                    <span className="font-medium">{appointmentType || 'Other'}</span>
+                    <span className="font-medium">{appointmentType === "Other" ? customAppointmentTypeName : appointmentType || 'Other'}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-500">Date:</span>

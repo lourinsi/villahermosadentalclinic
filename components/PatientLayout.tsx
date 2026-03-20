@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth.tsx";
 import { Button } from "@/components/ui/button";
-import { LogOut, User, Home, Users, Calendar, Search, ShoppingBag, ShoppingCart, Bell } from "lucide-react";
+import { LogOut, User, Home, Users, Calendar, Search, ShoppingBag, ShoppingCart, Bell, LayoutDashboard } from "lucide-react";
 import { toast } from "sonner";
 import { NotificationsOpened } from "./notificationsOpened";
 import { useNotifications } from "@/hooks/useNotifications";
@@ -59,6 +59,7 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
   };
 
   const navItems = [
+    { href: "/patient/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/patient/account", label: "My Account", icon: Home },
     { href: "/patient/family", label: "Family Members", icon: Users },
     { href: "/patient/appointments", label: "My Appointments", icon: Calendar },

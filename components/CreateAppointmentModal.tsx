@@ -15,6 +15,7 @@ import { APPOINTMENT_TYPES, getAppointmentPrice } from "@/lib/appointment-types"
 import { TIME_SLOTS, formatTimeTo12h } from "@/lib/time-slots";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { Appointment } from "@/hooks/useAppointments";
+import { APPOINTMENT_PRICES, getAppointmentTypeName } from "@/lib/appointmentTypes";
 import { ChevronsUpDown, Calendar, Clock, User, Check, ChevronRight, ChevronLeft, Loader2, Stethoscope, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DoctorCalendar } from "@/components/DoctorCalendar";
@@ -47,6 +48,20 @@ interface PatientSelectItem {
   id: string;
   name: string;
 }
+
+// Helper function to get appointment type index from name
+const getAppointmentTypeIndex = (typeName: string): number => {
+  const typeMap: Record<string, number> = {
+    "Routine Cleaning": 0,
+    "Checkup": 1,
+    "Filling": 2,
+    "Root Canal": 3,
+    "Extraction": 4,
+    "Whitening": 5,
+    "Other": 6,
+  };
+  return typeMap[typeName] ?? 0;
+};
 
 export function CreateAppointmentModal() {
   const router = useRouter();
@@ -561,7 +576,7 @@ export function CreateAppointmentModal() {
                 value={String(formData.type)}
                 onValueChange={(value) => {
                   const typeIndex = parseInt(value);
-                  const price = getAppointmentPrice(typeIndex);
+                  const price = APPOINTMENT_PRICES[APPOINTMENT_TYPES[typeIndex]] || 0;
                   setFormData(prev => ({ ...prev, type: typeIndex, customType: "", price, balance: recalcBalance(price, prev.discount ?? 0) }));
                   setShowCustomTypeInput(typeIndex === APPOINTMENT_TYPES.length - 1);
                 }}
@@ -758,10 +773,9 @@ export function CreateAppointmentModal() {
                <SelectContent>
                  <SelectItem value="scheduled">Scheduled</SelectItem>
                  <SelectItem value="pending">Pending</SelectItem>
-                 <SelectItem value="tentative">Tentative</SelectItem>
+                 <SelectItem value="reserved">Reserved</SelectItem>
                  <SelectItem value="completed">Completed</SelectItem>
                  <SelectItem value="cancelled">Cancelled</SelectItem>
-                 <SelectItem value="To Pay">To Pay</SelectItem>
                </SelectContent>
              </Select>
            </div>
@@ -929,11 +943,11 @@ export function CreateAppointmentModal() {
         time: formData.time,
         duration: formData.duration,
         type: formData.type,
-        customType: formData.customType,
+        customType: formData.type === 6 ? formData.customType : undefined,
         price: formData.price,
         doctor: formData.doctor,
         notes: formData.notes,
-        status: formData.status as "scheduled" | "pending" | "tentative" | "completed" | "cancelled" | "To Pay",
+        status: formData.status as "scheduled" | "pending" | "reserved" | "completed" | "cancelled",
         paymentStatus: formData.paymentStatus,
         balance: formData.balance
       });

@@ -33,7 +33,7 @@ import ViewMode from "@/components/viewMode";
 import { toast } from "sonner";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { Input } from "@/components/ui/input";
-import { APPOINTMENT_PRICES } from "@/lib/appointment-types";
+import { APPOINTMENT_PRICES } from "@/lib/appointmentTypes";
 
 // Map numeric type IDs to appointment type strings
 const APPOINTMENT_TYPE_MAP: { [key: number]: string } = {
