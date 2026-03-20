@@ -34,9 +34,9 @@ import {
   Bell,
   User as UserIcon
 } from "lucide-react";
-import { EditAppointmentModal } from "./EditAppointmentModal";
 import { EditPaymentModal } from "./EditPaymentModal";
 import ConfirmDialog from "./ConfirmDialog";
+import BookingModal from "./BookingModal";
 import { Appointment } from "../hooks/useAppointments";
 import { RecentTransaction } from "../lib/finance-types";
 import { DentalChart } from "./DentalChart";
@@ -121,6 +121,10 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   const [confirmAction, setConfirmAction] = useState<null | (() => Promise<void>)>(null);
   const [confirmTitle, setConfirmTitle] = useState<string>("");
   const [confirmMessage, setConfirmMessage] = useState<string>("");
+
+  // Booking Modal state
+  const [bookingModalOpen, setBookingModalOpen] = useState(false);
+  const [selectedAppointmentToEdit, setSelectedAppointmentToEdit] = useState<any>(null);
 
   // State to hold doctor's appointments (for filtering patients by doctor)
   const [doctorAppointments, setDoctorAppointments] = useState<Appointment[]>([]);
@@ -605,7 +609,6 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
         </DialogContent>
       </Dialog>
 
-      <EditAppointmentModal />
       <EditPaymentModal />
 
       <Dialog open={isPatientDeleteDialogOpen} onOpenChange={setIsPatientDeleteDialogOpen}>
@@ -733,6 +736,20 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <BookingModal
+        open={bookingModalOpen}
+        onOpenChange={setBookingModalOpen}
+        appointmentToEdit={selectedAppointmentToEdit}
+        onBooked={() => {
+          setSelectedAppointmentToEdit(null);
+          refreshPatients();
+        }}
+        onDeleted={() => {
+          setSelectedAppointmentToEdit(null);
+          refreshPatients();
+        }}
+      />
     </div>
   );
 }

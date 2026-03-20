@@ -8,7 +8,6 @@ import { Toaster } from "sonner";
 import { CreateAppointmentModal } from "@/components/CreateAppointmentModal";
 import { ScheduleAppointmentModal } from "@/components/ScheduleAppointmentModal";
 import { AddPatientModal } from "@/components/AddPatientModal";
-import { EditAppointmentModal } from "@/components/EditAppointmentModal";
 import { RecordPaymentModal } from "@/components/RecordPaymentModal";
 import { PatientPaymentModal } from "@/components/PatientPaymentModal";
 import { PatientBookingModal } from "@/components/PatientBookingModal";
@@ -46,7 +45,6 @@ export default function RootLayout({
               <CreateAppointmentModal />
               <ScheduleAppointmentModal />
               <AddPatientModal />
-              <EditAppointmentModal />
               <RecordPaymentModal />
               <PatientPaymentModal />
               <PatientBookingModal />

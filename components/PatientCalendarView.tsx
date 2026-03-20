@@ -24,8 +24,8 @@ export function PatientCalendarView() {
         </Button>
       </div>
       
-      {/* Shared Calendar */}
-      <CalendarView portal="patient" />
+      {/* Shared Calendar - filtered to show only reserved and scheduled */}
+      <CalendarView portal="patient" defaultStatusFilter={["reserved", "scheduled"]} />
     </div>
   );
 }

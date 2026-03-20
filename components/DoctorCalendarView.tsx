@@ -5,7 +5,11 @@ import { Plus } from "lucide-react";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { CalendarView } from "./CalendarView";
 
-export function DoctorCalendarView() {
+interface DoctorCalendarViewProps {
+  doctorName?: string;
+}
+
+export function DoctorCalendarView({ doctorName }: DoctorCalendarViewProps = {}) {
   const { openCreateModal } = useAppointmentModal();
 
   return (
@@ -22,8 +26,8 @@ export function DoctorCalendarView() {
         </Button>
       </div>
       
-      {/* Shared Calendar */}
-      <CalendarView portal="doctor" />
+      {/* Shared Calendar - shows only logged-in doctor's appointments */}
+      <CalendarView portal="doctor" defaultDoctorFilter={doctorName} />
     </div>
   );
 }

@@ -11,7 +11,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { EditAppointmentModal } from "@/components/EditAppointmentModal";
+
 import BookingModal from "@/components/BookingModal";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import {
@@ -819,8 +819,18 @@ const AdminBookAppointmentPage = () => {
         }}
       />
 
-      {/* Edit Appointment Modal - using component */}
-      <EditAppointmentModal />
+      {/* Edit Appointment Modal - using BookingModal component */}
+      <BookingModal
+        open={isEditModalOpen}
+        onOpenChange={() => {}}
+        appointmentToEdit={selectedAppointment}
+        onBooked={() => {
+          router.push("/admin/calendar");
+        }}
+        onDeleted={() => {
+          router.push("/admin/calendar");
+        }}
+      />
 
       <style jsx global>{`
         .custom-scrollbar::-webkit-scrollbar {

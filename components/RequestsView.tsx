@@ -8,6 +8,7 @@ import { APPOINTMENT_STATUSES } from "@/lib/appointment-statuses";
 import { Badge } from "./ui/badge";
 import { toast } from "sonner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
+import BookingModal from "./BookingModal";
 import { 
   Clock, 
   CheckCircle, 
@@ -55,6 +56,11 @@ interface RequestsViewProps {
 export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const { appointments, isLoading, updateAppointment, openEditModal, refreshAppointments } = useAppointmentModal();
   
+  // Booking Modal state
+  const [bookingModalOpen, setBookingModalOpen] = useState(false);
+  const [selectedAppointmentToEdit, setSelectedAppointmentToEdit] = useState<any>(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  
   useEffect(() => {
     refreshAppointments();
   }, [refreshAppointments]);
@@ -65,10 +71,16 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     return String(s).toLowerCase().trim();
   };
 
-  // Requests are those with pending, reserved, or scheduled statuses (not yet completed/cancelled)
-  const isRequestStatus = (s?: string) => {
-    const k = canonicalStatus(s);
-    return k === "pending" || k === "reserved" || k === "scheduled";
+  // Requests are those with unpaid or half-paid payment status
+  const isRequestPaymentStatus = (paymentStatus?: string) => {
+    const k = canonicalStatus(paymentStatus);
+    return k === "unpaid" || k === "half-paid";
+  };
+
+  // History shows completed appointments (not pending payments)
+  const isHistoryStatus = (status?: string) => {
+    const k = canonicalStatus(status);
+    return k === "scheduled" || k === "completed" || k === "cancelled";
   };
 
   // Pending filters state
@@ -93,9 +105,10 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const requests = useMemo(() => {
     return appointments.filter((apt) => {
       const matchesDoctor = !doctorFilter || (apt.doctor || "").toLowerCase() === doctorFilter.toLowerCase();
-      if (!isRequestStatus(apt.status) || !matchesDoctor) return false;
+      // Requests are those that are NOT in history (i.e., not scheduled, completed, or cancelled)
+      if (isHistoryStatus(apt.status) || !matchesDoctor) return false;
 
-      // Search filter
+      // ...existing code...
       if (pendingSearchTerm && !apt.patientName.toLowerCase().includes(pendingSearchTerm.toLowerCase()) && 
           !getAppointmentTypeName(apt.type, apt.customType).toLowerCase().includes(pendingSearchTerm.toLowerCase())) {
         return false;
@@ -118,14 +131,14 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
 
       return true;
     });
-  }, [appointments, doctorFilter, pendingSearchTerm, pendingStatusFilter, pendingDoctorFilter, pendingDateFilter]);
+  }, [appointments, doctorFilter, pendingSearchTerm, pendingStatusFilter, pendingDoctorFilter, pendingDateFilter, refreshTrigger]);
 
   const history = useMemo(() => {
     return appointments
       .filter((apt) => {
         const matchesDoctor = !doctorFilter || (apt.doctor || "").toLowerCase() === doctorFilter.toLowerCase();
-        // In history, we show non-request statuses
-        if (isRequestStatus(apt.status) || !matchesDoctor) return false;
+        // In history, we show only scheduled, completed, or cancelled appointments
+        if (!isHistoryStatus(apt.status) || !matchesDoctor) return false;
         
         // Search filter
         if (historySearchTerm && !apt.patientName.toLowerCase().includes(historySearchTerm.toLowerCase()) && 
@@ -150,7 +163,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         if (a.date !== b.date) return b.date.localeCompare(a.date);
         return b.time.localeCompare(a.time);
       });
-  }, [appointments, doctorFilter, historySearchTerm, historyStatusFilter, historyDateFilter]);
+  }, [appointments, doctorFilter, historySearchTerm, historyStatusFilter, historyDateFilter, refreshTrigger]);
 
   const handleApprove = async (appointment: Appointment) => {
     try {
@@ -509,8 +522,13 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                         {!doctorFilter && <TableCell>{request.doctor}</TableCell>}
                         <TableCell>{getStatusBadge(request.status)}</TableCell>
                         <TableCell>
-                          {request.paymentStatus === "half-paid" ? (
-                            <div className="flex items-center text-yellow-600 text-sm">
+                          {request.paymentStatus?.toLowerCase() === "paid" ? (
+                            <div className="flex items-center text-emerald-600 text-sm font-medium">
+                              <CheckCircle className="h-3 w-3 mr-1" />
+                              Paid
+                            </div>
+                          ) : request.paymentStatus?.toLowerCase() === "half-paid" ? (
+                            <div className="flex items-center text-yellow-600 text-sm font-medium">
                               <AlertCircle className="h-3 w-3 mr-1" />
                               Partial
                             </div>
@@ -539,7 +557,10 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                         </TableCell>
                         <TableCell className="text-right pr-6">
                           <div className="flex justify-end gap-2">
-                            <Button variant="ghost" size="sm" onClick={() => openEditModal(request)} title="View Details">
+                            <Button variant="ghost" size="sm" onClick={() => {
+                              setSelectedAppointmentToEdit(request);
+                              setBookingModalOpen(true);
+                            }} title="View Details">
                               <Eye className="h-4 w-4" />
                             </Button>
                             <Button 
@@ -712,6 +733,33 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <BookingModal
+        open={bookingModalOpen}
+        onOpenChange={(open) => {
+          setBookingModalOpen(open);
+          // When modal closes, refresh to pick up any changes
+          if (!open) {
+            setTimeout(() => {
+              refreshAppointments({});
+              setRefreshTrigger(prev => prev + 1);
+            }, 500);
+          }
+        }}
+        appointmentToEdit={selectedAppointmentToEdit}
+        onBooked={() => {
+          setSelectedAppointmentToEdit(null);
+          // Force a complete refresh to ensure all data is updated
+          refreshAppointments({});
+          setRefreshTrigger(prev => prev + 1);
+        }}
+        onDeleted={() => {
+          setSelectedAppointmentToEdit(null);
+          // Force a complete refresh to ensure all data is updated
+          refreshAppointments({});
+          setRefreshTrigger(prev => prev + 1);
+        }}
+      />
     </div>
   );
 }

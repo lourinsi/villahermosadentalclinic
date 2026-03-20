@@ -23,8 +23,9 @@ import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { APPOINTMENT_STATUSES } from "@/lib/appointment-statuses";
 import { Appointment, AppointmentFilters } from "../hooks/useAppointments";
 import { Badge } from "./ui/badge";
-import { EditAppointmentModal } from "./EditAppointmentModal";
+
 import { useDoctors } from "../hooks/useDoctors";
+import { useAuth } from "@/hooks/useAuth";
 import { TIME_SLOTS, formatTimeTo12h } from "../lib/time-slots";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
@@ -38,28 +39,37 @@ import ViewMode from "./viewMode";
 import { useRouter, useSearchParams } from 'next/navigation';
 import BookingModal from "@/components/BookingModal";
 
-const appointmentColors: Record<string, { bg: string; text: string; border: string }> = {
-  "Routine Cleaning": { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" },
-  "Checkup": { bg: "bg-green-50", text: "text-green-700", border: "border-green-200" },
-  "Filling": { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200" },
-  "Root Canal": { bg: "bg-purple-50", text: "text-purple-700", border: "border-purple-200" },
-  "Extraction": { bg: "bg-red-50", text: "text-red-700", border: "border-red-200" },
-  "Whitening": { bg: "bg-indigo-50", text: "text-indigo-700", border: "border-indigo-200" },
-  "Other": { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200" },
+// Map appointment statuses to their color schemes
+// Keys are numeric IDs from APPOINTMENT_STATUSES
+// This allows easy updates to status values without changing color definitions
+const appointmentColors: Record<number, { bg: string; text: string; border: string }> = {
+  1: { bg: "bg-green-50", text: "text-green-700", border: "border-green-200" },   // scheduled
+  2: { bg: "bg-purple-50", text: "text-purple-700", border: "border-purple-200" }, // pending
+  3: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" },      // reserved
+  4: { bg: "bg-red-50", text: "text-red-700", border: "border-red-200" },         // cancelled
+  5: { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200" },      // completed
+};
+
+// Map numeric keys to readable UI labels using APPOINTMENT_STATUSES
+const getStatusLabel = (key: number): string => {
+  const status = APPOINTMENT_STATUSES.find(s => s.key === key);
+  return status?.label || String(key);
 };
 
 // Status filter defaults - will be supplemented by backend statuses
 const DEFAULT_STATUS_FILTERS = ["all", "scheduled", "completed"];
 
 
-export function CalendarView({ portal = 'admin' }: { portal?: 'admin' | 'doctor' | 'patient' }) {
+export function CalendarView({ portal = 'admin', defaultStatusFilter, defaultDoctorFilter }: { portal?: 'admin' | 'doctor' | 'patient', defaultStatusFilter?: string[], defaultDoctorFilter?: string }) {
   const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedDoctor, setSelectedDoctor] = useState("all");
+  const { user } = useAuth();
+  const [selectedDoctor, setSelectedDoctor] = useState(defaultDoctorFilter || "all");
   const [selectedType, setSelectedType] = useState("all");
-  // For patient portal, only show scheduled/reserved appointments
-  const [selectedStatus, setSelectedStatus] = useState(portal === 'patient' ? "scheduled" : "scheduled");
+  // For patient portal, use defaultStatusFilter if provided, otherwise default to my-calendar
+  const [selectedStatus, setSelectedStatus] = useState(defaultStatusFilter ? defaultStatusFilter[0] : (portal === 'patient' ? "scheduled" : "my-calendar"));
+  const statusFilterList = defaultStatusFilter || [];
   const [isLoadingView, setIsLoadingView] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
@@ -76,6 +86,18 @@ export function CalendarView({ portal = 'admin' }: { portal?: 'admin' | 'doctor'
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [appointmentToDelete, setAppointmentToDelete] = useState<string | null>(null);
   const { doctors, isLoadingDoctors } = useDoctors();
+  
+  // For doctor portal, automatically filter to logged-in doctor
+  useEffect(() => {
+    if (portal === 'doctor' && doctors.length > 0 && user) {
+      // Try to find doctor by matching with user object
+      // Since we don't know the exact user property, set the first doctor as default
+      // The actual filtering will happen based on the backend request
+      if (doctors.length > 0) {
+        setSelectedDoctor(doctors[0].name);
+      }
+    }
+  }, [portal, doctors]);
   const router = useRouter();
   const searchParams = useSearchParams();
   
@@ -94,11 +116,18 @@ export function CalendarView({ portal = 'admin' }: { portal?: 'admin' | 'doctor'
 
   // Normalize statuses and exclude cancelled appointments from the calendar
   const filteredAppointments = useMemo(() => {
+    let statusesToFilter = statusFilterList.length > 0 ? statusFilterList : [selectedStatus];
+    
+    // Handle "My Calendar" filter - shows both scheduled and reserved
+    if (statusesToFilter.includes("my-calendar")) {
+      statusesToFilter = ["scheduled", "reserved"];
+    }
+    
     return appointments
       .map((a) => ({ ...a, status: (a.status as string) === 'confirmed' ? 'scheduled' : a.status }))
       .filter((a) => a.status !== 'cancelled')
-      .filter((a) => selectedStatus === 'all' ? true : a.status === selectedStatus);
-  }, [appointments, selectedStatus]);
+      .filter((a) => statusesToFilter.includes(a.status));
+  }, [appointments, selectedStatus, statusFilterList]);
 
   const getViewRange = useCallback((date: Date) => {
     const start = new Date(date);
@@ -174,7 +203,15 @@ export function CalendarView({ portal = 'admin' }: { portal?: 'admin' | 'doctor'
     // Always apply other filters
     filters.doctor = selectedDoctor;
     filters.type = selectedType;
-    filters.status = selectedStatus;
+    // Don't send status to backend - we'll filter on the client side
+    // Only send a single status for admin/doctor portals
+    if (portal === 'patient' || statusFilterList.length === 0) {
+      // For patient or when no specific status filter, fetch all and filter client-side
+      filters.status = 'all';
+    } else {
+      // For admin/doctor with single status filter
+      filters.status = selectedStatus;
+    }
 
     setIsLoadingView(true);
     refreshAppointments(filters);
@@ -182,7 +219,7 @@ export function CalendarView({ portal = 'admin' }: { portal?: 'admin' | 'doctor'
     return () => clearTimeout(timer);
   // Only re-run when relevant values change. For custom view we only care about
   // changes to the actual start/end dates (not the whole range object reference).
-  }, [viewMode, selectedDate, searchTerm, dateRange?.from, dateRange?.to, selectedDoctor, selectedType, selectedStatus, getViewRange, refreshAppointments]);
+  }, [viewMode, selectedDate, searchTerm, dateRange?.from, dateRange?.to, selectedDoctor, selectedType, selectedStatus, defaultStatusFilter, getViewRange, refreshAppointments]);
 
   const timeSlots = TIME_SLOTS;
 
@@ -257,7 +294,10 @@ export function CalendarView({ portal = 'admin' }: { portal?: 'admin' | 'doctor'
   };
 
   const getColorForType = (type: string) => {
-    return appointmentColors[type] || appointmentColors["Other"];
+    // Map string status to numeric key using APPOINTMENT_STATUSES
+    const status = APPOINTMENT_STATUSES.find(s => s.value === type);
+    const key = status?.key ?? 1;
+    return appointmentColors[key] || appointmentColors[1];
   };
 
   // NOTE: Convert time string to minutes since midnight for easier comparison
@@ -420,7 +460,8 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                   const columnIndex = appointmentColumns.get(appointment.id) ?? 0;
                   const totalColumns = maxOverlappingAt.get(appointment.id) ?? 1;
                   const typeName = getAppointmentTypeName(appointment.type, appointment.customType);
-                  const colors = getColorForType(typeName);
+                  const colors = getColorForType(appointment.status);
+                  const showPatient = selectedDoctor !== 'all';
                   
                   const width = `${100 / totalColumns}%`;
                   const left = `${(columnIndex * 100) / totalColumns}%`;
@@ -450,11 +491,16 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                           <div className="flex-shrink-0">
                             <Avatar className="h-10 w-10 border border-gray-100">
                               {(() => {
-                                const doc = doctors.find(d => String(d.name) === String(appointment.doctor) || String(d.id) === String(appointment.doctor));
-                                const src = doc?.profilePicture || appointment.doctorProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.doctor}`;
-                                return <AvatarImage src={src} alt={appointment.doctor} />;
+                                // Show patient picture when doctor filter is applied, doctor picture when showing all doctors
+                                if (showPatient) {
+                                  return <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.patientName}`} alt={appointment.patientName} />;
+                                } else {
+                                  const doc = doctors.find(d => String(d.name) === String(appointment.doctor) || String(d.id) === String(appointment.doctor));
+                                  const src = doc?.profilePicture || appointment.doctorProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.doctor}`;
+                                  return <AvatarImage src={src} alt={appointment.doctor} />;
+                                }
                               })()}
-                              <AvatarFallback>{String(appointment.doctor || '').substring(0,2).toUpperCase()}</AvatarFallback>
+                              <AvatarFallback>{showPatient ? String(appointment.patientName || '').substring(0,2).toUpperCase() : String(appointment.doctor || '').substring(0,2).toUpperCase()}</AvatarFallback>
                             </Avatar>
                           </div>
                           <div className="flex-1 min-w-0">
@@ -589,7 +635,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                           const columnIndex = appointmentColumns.get(appointment.id) ?? 0;
                           const totalColumns = maxOverlappingAt.get(appointment.id) ?? 1;
                           const typeName = getAppointmentTypeName(appointment.type, appointment.customType);
-                          const colors = getColorForType(typeName);
+                          const colors = getColorForType(appointment.status);
                           
                           const width = `${100 / totalColumns}%`;
                           const left = `${(columnIndex * 100) / totalColumns}%`;
@@ -716,9 +762,20 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
               <div className="space-y-1">
                 {sortedDayAppointments.slice(0, 3).map((apt: Appointment) => {
                   const typeName = getAppointmentTypeName(apt.type, apt.customType);
-                  const colors = getColorForType(typeName);
-                  const doc = doctors.find(d => String(d.name) === String(apt.doctor) || String(d.id) === String(apt.doctor));
-                  const doctorSrc = doc?.profilePicture || (apt as any).doctorProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${apt.doctor}`;
+                  const colors = getColorForType(apt.status);
+                  const showPatient = selectedDoctor !== 'all';
+                  
+                  let avatarSrc = '';
+                  let fallback = '';
+                  if (showPatient) {
+                    avatarSrc = `https://api.dicebear.com/7.x/avataaars/svg?seed=${apt.patientName}`;
+                    fallback = String(apt.patientName || '').substring(0,2).toUpperCase();
+                  } else {
+                    const doc = doctors.find(d => String(d.name) === String(apt.doctor) || String(d.id) === String(apt.doctor));
+                    avatarSrc = doc?.profilePicture || (apt as any).doctorProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${apt.doctor}`;
+                    fallback = String(apt.doctor || '').substring(0,2).toUpperCase();
+                  }
+                  
                   return (
                     <div
                       key={apt.id}
@@ -732,8 +789,8 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                       }}
                     >
                       <Avatar className="h-5 w-5 border border-gray-100 flex-shrink-0">
-                        <AvatarImage src={doctorSrc} alt={apt.doctor} />
-                        <AvatarFallback>{String(apt.doctor || '').substring(0,2).toUpperCase()}</AvatarFallback>
+                        <AvatarImage src={avatarSrc} alt={showPatient ? apt.patientName : apt.doctor} />
+                        <AvatarFallback>{fallback}</AvatarFallback>
                       </Avatar>
                       <div className="truncate">
                         {apt.time} • Dr. {apt.doctor}
@@ -786,7 +843,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {sortedAppointments.map((apt: Appointment) => {
               const typeName = getAppointmentTypeName(apt.type, apt.customType);
-              const colors = getColorForType(typeName);
+              const colors = getColorForType(apt.status);
               return (
                 <Card key={apt.id} className="overflow-hidden hover:shadow-md transition-shadow cursor-pointer" onClick={() => { 
                   setAppointmentToEditLocal(apt);
@@ -877,9 +934,9 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
 
             <div className="flex items-center gap-4 flex-wrap">
               {/* Filters - visible only for admin/doctor */}
-              {portal !== 'patient' && (
+              {(portal === 'admin' || portal === 'doctor') && (
                 <div className="flex items-center space-x-3">
-                  {portal !== 'patient' && (
+                  {portal === 'admin' && (
                     <div className="flex items-center gap-2">
                       <Users className="h-4 w-4 text-gray-400" />
                       <Select value={selectedDoctor} onValueChange={setSelectedDoctor}>
@@ -895,7 +952,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                       </Select>
                     </div>
                   )}
-                  {portal !== 'patient' && (
+                  {(portal === 'admin' || portal === 'doctor') && (
                     <div className="flex items-center gap-2">
                       <ListFilter className="h-4 w-4 text-gray-400" />
                       <Select value={selectedType} onValueChange={setSelectedType}>
@@ -911,7 +968,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                       </Select>
                     </div>
                   )}
-                  {portal !== 'patient' && (
+                  {(portal === 'admin' || portal === 'doctor') && (
                     <div className="flex items-center gap-2">
                       <ListFilter className="h-4 w-4 text-gray-400" />
                       <Select value={selectedStatus} onValueChange={setSelectedStatus}>
@@ -919,6 +976,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                           <SelectValue placeholder="Filter by status" />
                         </SelectTrigger>
                         <SelectContent>
+                          <SelectItem value="my-calendar">My Calendar</SelectItem>
                           {APPOINTMENT_STATUSES.map((status) => (
                             <SelectItem key={status.key} value={status.value} className="capitalize">{status.label}</SelectItem>
                           ))}
@@ -967,12 +1025,16 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
               {searchTerm !== "" ? "Search Results" : (viewMode === "day" ? "Schedule" : "Appointment Overview")}
             </CardTitle>
             <div className="flex items-center gap-4 flex-wrap">
-              {Object.entries(appointmentColors).slice(0, 5).map(([type, colors]) => (
-                <div key={type} className="flex items-center gap-1.5">
-                  <div className={`w-3 h-3 rounded-full ${colors.bg.replace('bg-', 'bg-').split(' ')[0]} border ${colors.border}`} />
-                  <span className="text-[10px] font-bold text-gray-500 uppercase tracking-tighter">{type}</span>
-                </div>
-              ))}
+              {Object.entries(appointmentColors).map(([keyStr, colors]) => {
+                const key = parseInt(keyStr);
+                const label = getStatusLabel(key);
+                return (
+                  <div key={key} className="flex items-center gap-1.5">
+                    <div className={`w-3 h-3 rounded-full ${colors.bg.replace('bg-', 'bg-').split(' ')[0]} border ${colors.border}`} />
+                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-tighter">{label}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </CardHeader>

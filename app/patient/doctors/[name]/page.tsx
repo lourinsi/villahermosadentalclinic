@@ -27,7 +27,6 @@ import { Badge } from "@/components/ui/badge";
 import { Appointment } from "@/hooks/useAppointments";
 import ViewMode from "@/components/viewMode";
 import BookingModal from "@/components/BookingModal";
-import { EditAppointmentModal } from "@/components/EditAppointmentModal";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
@@ -663,9 +662,6 @@ export default function DoctorAvailabilityPage() {
           window.dispatchEvent(new CustomEvent('appointments:updated', { detail: { from: 'patient-page', deleted: id } }));
         }}
       />
-
-      {/* Edit Appointment Modal (shared) */}
-      <EditAppointmentModal />
 
       <style jsx global>{`
         .custom-scrollbar::-webkit-scrollbar {
