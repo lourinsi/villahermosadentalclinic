@@ -10,6 +10,7 @@ import { Badge } from "./ui/badge";
 import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal } from "../lib/utils";
+import BookingModal from "./BookingModal";
 
 const revenueData = [
   { month: "Jan", revenue: 42000, appointments: 180 },
@@ -23,11 +24,13 @@ const revenueData = [
 // Derive appointment types/counts from real appointments
 const colorPalette = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4", "#f97316"];
 
-export function Dashboard() {
+export function Dashboard({ portal }: { portal?: string }) {
   const { openCreateModal, openAddPatientModal, appointments, refreshTrigger, openEditModal } = useAppointmentModal();
   const [viewMode, setViewMode] = useState<"day" | "week" | "month">("day");
   const [totalPatients, setTotalPatients] = useState(0);
   const [isLoadingView, setIsLoadingView] = useState(false);
+  const [bookingModalOpen, setBookingModalOpen] = useState(false);
+  const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
 
   // Fetch total patients from backend
   useEffect(() => {
@@ -298,7 +301,10 @@ export function Dashboard() {
                   <div 
                     key={appointment.id} 
                     className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
-                    onClick={() => openEditModal(appointment)}
+                    onClick={() => {
+                      setSelectedAppointment(appointment);
+                      setBookingModalOpen(true);
+                    }}
                   >
                     <div className="flex items-center space-x-3">
                       <div className="text-sm font-medium text-violet-600 min-w-[60px]">
@@ -379,6 +385,17 @@ export function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Booking Modal */}
+      <BookingModal
+        open={bookingModalOpen}
+        onOpenChange={setBookingModalOpen}
+        appointmentToEdit={selectedAppointment}
+        onBooked={() => {
+          setSelectedAppointment(null);
+          setBookingModalOpen(false);
+        }}
+      />
     </div>
   );
 }

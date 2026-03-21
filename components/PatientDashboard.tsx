@@ -10,12 +10,15 @@ import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal } from "../lib/utils";
 import { useAuth } from "@/hooks/useAuth";
+import BookingModal from "./BookingModal";
 
 export function PatientDashboard() {
   const { openCreateModal, appointments, openEditModal } = useAppointmentModal();
   const { user } = useAuth();
   const [viewMode, setViewMode] = useState<"upcoming" | "past">("upcoming");
   const [isLoadingView, setIsLoadingView] = useState(false);
+  const [bookingModalOpen, setBookingModalOpen] = useState(false);
+  const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
 
   // Show loading when view mode changes
   useEffect(() => {
@@ -187,7 +190,10 @@ export function PatientDashboard() {
                   <div 
                     key={appointment.id} 
                     className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
-                    onClick={() => openEditModal(appointment)}
+                    onClick={() => {
+                      setSelectedAppointment(appointment);
+                      setBookingModalOpen(true);
+                    }}
                   >
                     <div className="flex items-center space-x-3 flex-1">
                       <div className="text-sm font-medium text-violet-600 min-w-[80px]">
@@ -290,6 +296,17 @@ export function PatientDashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Booking Modal */}
+      <BookingModal
+        open={bookingModalOpen}
+        onOpenChange={setBookingModalOpen}
+        appointmentToEdit={selectedAppointment}
+        onBooked={() => {
+          setSelectedAppointment(null);
+          setBookingModalOpen(false);
+        }}
+      />
     </div>
   );
 }

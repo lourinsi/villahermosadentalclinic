@@ -10,12 +10,16 @@ import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal } from "../lib/utils";
 import { useAuth } from "@/hooks/useAuth.tsx";
+import BookingModal from "./BookingModal";
+import { Dashboard } from "./Dashboard";
 
 export function DoctorDashboard() {
   const { openCreateModal, openAddPatientModal, appointments, openEditModal } = useAppointmentModal();
   const { user } = useAuth();
   const [viewMode, setViewMode] = useState<"day" | "week" | "month">("day");
   const [isLoadingView, setIsLoadingView] = useState(false);
+  const [bookingModalOpen, setBookingModalOpen] = useState(false);
+  const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
 
   // Filter appointments to only show this doctor's appointments
   const doctorName = user?.username || "";
@@ -211,7 +215,10 @@ export function DoctorDashboard() {
                   <div 
                     key={appointment.id} 
                     className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
-                    onClick={() => openEditModal(appointment)}
+                    onClick={() => {
+                      setSelectedAppointment(appointment);
+                      setBookingModalOpen(true);
+                    }}
                   >
                     <div className="flex items-center space-x-3">
                       <div className="text-sm font-medium text-violet-600 min-w-[60px]">
@@ -307,6 +314,19 @@ export function DoctorDashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Booking Modal */}
+      <BookingModal
+        open={bookingModalOpen}
+        onOpenChange={setBookingModalOpen}
+        appointmentToEdit={selectedAppointment}
+        onBooked={() => {
+          setSelectedAppointment(null);
+          setBookingModalOpen(false);
+        }}
+      />
     </div>
   );
 }
+
+export default DoctorDashboard;

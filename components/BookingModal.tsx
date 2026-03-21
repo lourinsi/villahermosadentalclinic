@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
@@ -39,9 +40,10 @@ interface BookingModalProps {
   appointmentToEdit?: any; // optional appointment object to edit
   onDeleted?: (id?: string) => void;
   title?: string; // optional override for dialog title
+  isReschedule?: boolean; // new prop to indicate if this is a reschedule
 }
 
-export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, onBooked, appointmentToEdit, onDeleted, title }: BookingModalProps) {
+export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, onBooked, appointmentToEdit, onDeleted, title, isReschedule }: BookingModalProps) {
   const { user } = useAuth();
   const { addAppointment, deleteAppointment, updateAppointment } = useAppointmentModal();
   const { openPatientPaymentFor } = usePaymentModal();
@@ -64,10 +66,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [paymentMethod, setPaymentMethod] = useState<string>("");
   const [amountToPay, setAmountToPay] = useState<string>("");
   const [appointmentStatus, setAppointmentStatus] = useState<string>("scheduled");
+  const [statusChangedByUser, setStatusChangedByUser] = useState<number>(0);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isConfirmSummaryOpen, setIsConfirmSummaryOpen] = useState(false);
 
   // read-only for patient viewing their own booked/reserved appointment: only notes editable
   const isPatientReadonly = Boolean(appointmentToEdit && user?.role === 'patient');
+  const isEditMode = Boolean(appointmentToEdit);
 
   // Map appointment types to default durations (in minutes)
   const appointmentTypeDurations: Record<string, number> = {
@@ -212,6 +217,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setAmountToPay('');
       setAppointmentStatus(appointmentToEdit.status || 'scheduled');
       setPaymentMethod(appointmentToEdit.paymentMethod || '');
+      // Reset the flag when opening for edit
+      setStatusChangedByUser(0);
       // ensure we start on details step when opening
       setModalStep('details');
     } else {
@@ -228,6 +235,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setAmountToPay('');
       setAppointmentStatus('scheduled');
       setPaymentMethod('');
+      // Reset the flag when opening for new appointment
+      setStatusChangedByUser(0);
       setModalStep('details');
     }
   }, [appointmentToEdit, defaultDate, defaultTime, patients]);
@@ -239,6 +248,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   // Calculate remaining balance for display in payment step
   const previouslyPaidAmount = appointmentToEdit?.totalPaid || 0;
   const remainingBalance = Math.max(0, finalPrice - previouslyPaidAmount);
+
+  // Handler for status changes that sets the flag
+  const handleStatusChange = (newStatus: string) => {
+    setAppointmentStatus(newStatus);
+    setStatusChangedByUser(1);
+  };
 
   // First step: validate details and move to payment
   const handleConfirmBooking = async () => {
@@ -254,10 +269,46 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     }
   };
 
-  // Second step: confirm payment and create or update appointment
+  // Second step: show summary confirmation before saving
   const handleConfirmPayment = async () => {
     if (!selectedPatient || !appointmentType) return;
+    setIsConfirmSummaryOpen(true);
+  };
+
+  // Calculate what the final status will be for display in summary
+  const getProjectedStatus = () => {
+    const amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
+    const amountPaid = parseFloat(amountPaidRaw) || 0;
+    
+    if (appointmentToEdit) {
+      const previouslyPaid = appointmentToEdit.totalPaid || 0;
+      const newTotalPaid = amountPaid > 0 ? previouslyPaid + amountPaid : previouslyPaid;
+      const newBalance = Math.max(0, finalPrice - newTotalPaid);
+
+      if (newBalance <= 0) {
+        return statusChangedByUser === 1 ? appointmentStatus : 'scheduled';
+      } else if (newTotalPaid > 0) {
+        return statusChangedByUser === 1 ? appointmentStatus : 'reserved';
+      } else {
+        return statusChangedByUser === 1 ? appointmentStatus : 'reserved';
+      }
+    } else {
+      const newBalance = Math.max(0, finalPrice - amountPaid);
+      if (amountPaid >= finalPrice) {
+        return 'scheduled';
+      } else if (amountPaid > 0) {
+        return 'reserved';
+      } else {
+        return 'reserved';
+      }
+    }
+  };
+
+  // Final step: save after confirmation
+  const handleConfirmSummary = async () => {
+    if (!selectedPatient || !appointmentType) return;
     setIsBooking(true);
+    setIsConfirmSummaryOpen(false);
     try {
       const dateStr = formatDateToYYYYMMDD(selectedDate);
       const amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
@@ -295,13 +346,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
         if (newBalance <= 0) {
           updatePaymentStatus = 'paid';
-          updateAppointmentStatus = 'scheduled';
+          // If fully paid and user hasn't manually changed status, set to scheduled
+          updateAppointmentStatus = statusChangedByUser === 1 ? appointmentStatus : 'scheduled';
         } else if (newTotalPaid > 0) {
           updatePaymentStatus = 'half-paid';
-          updateAppointmentStatus = 'reserved';
+          updateAppointmentStatus = statusChangedByUser === 1 ? appointmentStatus : 'reserved';
         } else {
           updatePaymentStatus = 'unpaid';
-          updateAppointmentStatus = 'reserved';
+          updateAppointmentStatus = statusChangedByUser === 1 ? appointmentStatus : 'reserved';
         }
 
         const updated = await updateAppointment(appointmentToEdit.id, {
@@ -315,7 +367,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           duration: Number(duration) || 30,
           price: finalPrice,
           notes,
-          status: updateAppointmentStatus as any,
+          status: updateAppointmentStatus,
           paymentStatus: updatePaymentStatus,
           totalPaid: newTotalPaid,
           balance: newBalance,
@@ -601,11 +653,37 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                           <CalendarIcon className="h-4 w-4 text-violet-500" />
                           <div className="font-medium">{selectedDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</div>
                         </div>
-                        <div>
-                          <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-black ${displayStatus === 'scheduled' ? 'bg-emerald-100 text-emerald-700' : displayStatus === 'reserved' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-700'}`}>
-                            {String(displayStatus).toUpperCase()}
+                        {/* Status - Dropdown for Admin/Doctor, Badge for Patient */}
+                        {user?.role === "admin" || user?.role === "doctor" ? (
+                          <Select value={appointmentStatus} onValueChange={handleStatusChange}>
+                            <SelectTrigger className={`h-8 px-3 rounded-full text-xs font-bold border-0 w-auto ${
+                              appointmentStatus === 'scheduled' ? 'bg-emerald-100 text-emerald-700' :
+                              appointmentStatus === 'reserved' ? 'bg-amber-100 text-amber-700' :
+                              appointmentStatus === 'completed' ? 'bg-blue-100 text-blue-700' :
+                              appointmentStatus === 'cancelled' ? 'bg-red-100 text-red-700' :
+                              'bg-gray-100 text-gray-700'
+                            }`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="scheduled">Scheduled</SelectItem>
+                              <SelectItem value="reserved">Reserved</SelectItem>
+                              <SelectItem value="completed">Completed</SelectItem>
+                              <SelectItem value="cancelled">Cancelled</SelectItem>
+                              <SelectItem value="pending">Pending</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold ${
+                            appointmentStatus === 'scheduled' ? 'bg-emerald-100 text-emerald-700' :
+                            appointmentStatus === 'reserved' ? 'bg-amber-100 text-amber-700' :
+                            appointmentStatus === 'completed' ? 'bg-blue-100 text-blue-700' :
+                            appointmentStatus === 'cancelled' ? 'bg-red-100 text-red-700' :
+                            'bg-gray-100 text-gray-700'
+                          }`}>
+                            {String(appointmentStatus).charAt(0).toUpperCase() + String(appointmentStatus).slice(1)}
                           </span>
-                        </div>
+                        )}
                       </div>
 
                       <div className="flex items-center justify-between gap-3">
@@ -714,6 +792,44 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                     </Button>
                   </div>
                 </div>
+
+                {/* Status Field - Only for Admin/Doctor in Edit Mode */}
+                {isEditMode && (user?.role === "admin" || user?.role === "doctor") && (
+                  <div className="space-y-2">
+                    <Label htmlFor="appointmentStatus">Appointment Status</Label>
+                    <Select value={appointmentStatus} onValueChange={setAppointmentStatus}>
+                      <SelectTrigger id="appointmentStatus">
+                        <SelectValue placeholder="Select appointment status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="scheduled">Scheduled</SelectItem>
+                        <SelectItem value="reserved">Reserved</SelectItem>
+                        <SelectItem value="completed">Completed</SelectItem>
+                        <SelectItem value="cancelled">Cancelled</SelectItem>
+                        <SelectItem value="pending">Pending</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {/* Status Display - Read-only for Patient */}
+                {isEditMode && user?.role === "patient" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="appointmentStatusReadonly">Appointment Status</Label>
+                    <div className="p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-between">
+                      <span className="text-sm font-medium text-gray-700">Status:</span>
+                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold ${
+                        appointmentStatus === 'scheduled' ? 'bg-emerald-100 text-emerald-700' :
+                        appointmentStatus === 'reserved' ? 'bg-amber-100 text-amber-700' :
+                        appointmentStatus === 'completed' ? 'bg-blue-100 text-blue-700' :
+                        appointmentStatus === 'cancelled' ? 'bg-red-100 text-red-700' :
+                        'bg-gray-100 text-gray-700'
+                      }`}>
+                        {appointmentStatus.charAt(0).toUpperCase() + appointmentStatus.slice(1)}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <DialogFooter className="flex gap-3 pt-6 border-t">
@@ -766,6 +882,80 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               await handleCancel();
             }} disabled={isBooking} className="flex-1">
               {isBooking ? "Canceling..." : "Yes, Cancel"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Summary confirmation dialog */}
+      <Dialog open={isConfirmSummaryOpen} onOpenChange={setIsConfirmSummaryOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Confirm Appointment Details</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 space-y-3">
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Patient:</span>
+                  <span className="font-semibold">{patients.find(p => p.id === selectedPatient)?.name || selectedPatient}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Service:</span>
+                  <span className="font-semibold">{appointmentType === "Other" ? customAppointmentTypeName : appointmentType}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Date:</span>
+                  <span className="font-semibold">{selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Time:</span>
+                  <span className="font-semibold">{selectedTime ? formatTimeTo12h(selectedTime) : '—'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Doctor:</span>
+                  <span className="font-semibold">Dr. {displayDoctor}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Status:</span>
+                  <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-bold ${
+                    getProjectedStatus() === 'scheduled' ? 'bg-emerald-100 text-emerald-700' :
+                    getProjectedStatus() === 'reserved' ? 'bg-amber-100 text-amber-700' :
+                    getProjectedStatus() === 'completed' ? 'bg-blue-100 text-blue-700' :
+                    getProjectedStatus() === 'cancelled' ? 'bg-red-100 text-red-700' :
+                    'bg-gray-100 text-gray-700'
+                  }`}>
+                    {getProjectedStatus().charAt(0).toUpperCase() + getProjectedStatus().slice(1)}
+                  </span>
+                </div>
+                <div className="border-t border-blue-100 pt-2 mt-2">
+                  <div className="flex justify-between font-bold">
+                    <span>Total Price:</span>
+                    <span className="text-blue-700">₱{finalPrice.toLocaleString()}</span>
+                  </div>
+                </div>
+                {(parseFloat(amountToPay) || 0) > 0 && (
+                  <>
+                    <div className="flex justify-between text-green-700 font-semibold">
+                      <span>Amount to Pay:</span>
+                      <span>₱{(parseFloat(amountToPay) || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between text-blue-700 font-semibold">
+                      <span>Balance Left:</span>
+                      <span>₱{Math.max(0, finalPrice - (previouslyPaidAmount + (parseFloat(amountToPay) || 0))).toLocaleString()}</span>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setIsConfirmSummaryOpen(false)} disabled={isBooking} className="flex-1">
+              Back
+            </Button>
+            <Button className="bg-green-600 hover:bg-green-700 text-white flex-1" onClick={handleConfirmSummary} disabled={isBooking}>
+              {isBooking ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Confirm & Save
             </Button>
           </DialogFooter>
         </DialogContent>
