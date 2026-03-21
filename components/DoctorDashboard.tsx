@@ -11,7 +11,7 @@ import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal } from "../lib/utils";
 import { useAuth } from "@/hooks/useAuth.tsx";
 import BookingModal from "./BookingModal";
-import { Dashboard } from "./Dashboard";
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from "recharts";
 
 export function DoctorDashboard() {
   const { openCreateModal, openAddPatientModal, appointments, openEditModal } = useAppointmentModal();
@@ -250,12 +250,71 @@ export function DoctorDashboard() {
           </CardContent>
         </Card>
 
+        {/* Appointment Types Pie Chart */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Appointment Types</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {(() => {
+              const typeCounts = appointmentsByDate.reduce<Record<string, number>>((acc, apt) => {
+                const key = getAppointmentTypeName(apt.type, apt.customType);
+                acc[key] = (acc[key] || 0) + 1;
+                return acc;
+              }, {});
+
+              const total = Object.values(typeCounts).reduce((s, v) => s + v, 0) || 1;
+              const chartData = Object.keys(typeCounts).map((name, idx) => ({
+                name,
+                value: Math.round((typeCounts[name] / total) * 100),
+                color: ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4", "#f97316"][idx % 7]
+              }));
+
+              return (
+                <>
+                  <ResponsiveContainer width="100%" height={250}>
+                    <PieChart>
+                      <Pie
+                        data={chartData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={50}
+                        outerRadius={80}
+                        paddingAngle={5}
+                        dataKey="value"
+                      >
+                        {chartData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(value: number) => [`${value}%`, 'Percentage']} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="space-y-2 mt-4">
+                    {chartData.map((type, index) => (
+                      <div key={index} className="flex items-center justify-between text-sm">
+                        <div className="flex items-center space-x-2">
+                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: type.color }} />
+                          <span className="text-xs truncate">{type.name}</span>
+                        </div>
+                        <span className="font-medium text-xs">{type.value}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              );
+            })()}
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6">
         {/* Quick Actions */}
         <Card>
           <CardHeader>
             <CardTitle>Quick Actions</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Button
               variant="outline"
               className="w-full p-4 text-left h-auto transform transition-all duration-200 hover:scale-105 hover:shadow-lg hover:bg-violet-50 active:scale-95"

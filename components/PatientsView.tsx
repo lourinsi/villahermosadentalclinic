@@ -604,6 +604,10 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
               isModified={isPatientDetailsModified}
               setIsModified={setIsPatientDetailsModified}
               doctorFilter={doctorFilter}
+              onOpenBookingModal={(appointment) => {
+                setSelectedAppointmentToEdit(appointment);
+                setBookingModalOpen(true);
+              }}
             />
           )}
         </DialogContent>
@@ -763,12 +767,14 @@ const PatientDetails = React.forwardRef<{
   isModified: boolean;
   setIsModified: (isModified: boolean) => void;
   doctorFilter?: string;
+  onOpenBookingModal?: (appointment: Appointment) => void;
 }>(({
   patient,
   onDeletePatient,
   isModified,
   setIsModified,
-  doctorFilter
+  doctorFilter,
+  onOpenBookingModal
 }, ref) => {
   const { openEditModal, refreshPatients, appointments } = useAppointmentModal();
   const { openPaymentModal, openEditPaymentModal, openPaymentFor } = usePaymentModal();
@@ -1746,9 +1752,10 @@ const PatientDetails = React.forwardRef<{
                                                         variant="outline" 
                                                         size="sm"
                                                         onClick={() => {
-                                                          // find original appointment object by id
                                                           const original = patientAppointments.find((x: Appointment) => x.id === appointment.id);
-                                                          if (original) openEditModal(original, true);
+                                                          if (original && onOpenBookingModal) {
+                                                            onOpenBookingModal(original);
+                                                          }
                                                         }}
                                                       >
                           <Eye className="h-4 w-4 mr-2" />

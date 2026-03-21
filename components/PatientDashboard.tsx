@@ -228,12 +228,46 @@ export function PatientDashboard() {
           </CardContent>
         </Card>
 
+        {/* Summary Card - Single column */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Summary</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+              <div className="text-xs text-blue-600 font-medium mb-1">Total Appointments</div>
+              <div className="text-2xl font-bold text-blue-900">{totalAppointments}</div>
+              <div className="text-xs text-blue-600 mt-1">All time</div>
+            </div>
+
+            <div className="p-3 bg-green-50 rounded-lg border border-green-200">
+              <div className="text-xs text-green-600 font-medium mb-1">Completed</div>
+              <div className="text-2xl font-bold text-green-900">{completedAppointments}</div>
+              <div className="text-xs text-green-600 mt-1">Finished visits</div>
+            </div>
+
+            <div className="p-3 bg-purple-50 rounded-lg border border-purple-200">
+              <div className="text-xs text-purple-600 font-medium mb-1">Amount Paid</div>
+              <div className="text-2xl font-bold text-purple-900">${totalSpent.toFixed(2)}</div>
+              <div className="text-xs text-purple-600 mt-1">Total spent</div>
+            </div>
+
+            <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
+              <div className="text-xs text-amber-600 font-medium mb-1">Outstanding Balance</div>
+              <div className="text-2xl font-bold text-amber-900">${pendingBalance.toFixed(2)}</div>
+              <div className="text-xs text-amber-600 mt-1">Due soon</div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6">
         {/* Quick Actions */}
         <Card>
           <CardHeader>
             <CardTitle>Quick Actions</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {nextAppointment && (
               <div className="p-4 bg-violet-50 rounded-lg border border-violet-200">
                 <div className="text-sm font-medium text-violet-900 mb-1">Next Appointment</div>
@@ -254,7 +288,7 @@ export function PatientDashboard() {
             )}
 
             <Button 
-              className="w-full p-4 text-left h-auto bg-violet-600 hover:bg-violet-700 text-white transform transition-all duration-200 hover:scale-105 hover:shadow-lg active:scale-95"
+              className="p-4 h-auto bg-violet-600 hover:bg-violet-700 text-white transform transition-all duration-200 hover:scale-105 hover:shadow-lg active:scale-95"
               onClick={() => openCreateModal()}
             >
               <div className="flex items-center space-x-3">
@@ -268,7 +302,7 @@ export function PatientDashboard() {
 
             <Button
               variant="outline"
-              className="w-full p-4 text-left h-auto transform transition-all duration-200 hover:scale-105 hover:shadow-lg hover:bg-blue-50 active:scale-95"
+              className="p-4 h-auto transform transition-all duration-200 hover:scale-105 hover:shadow-lg hover:bg-blue-50 active:scale-95"
               onClick={() => window.location.href = "/patient/medical-records"}
             >
               <div className="flex items-center space-x-3">
@@ -282,7 +316,7 @@ export function PatientDashboard() {
 
             <Button
               variant="outline"
-              className="w-full p-4 text-left h-auto transform transition-all duration-200 hover:scale-105 hover:shadow-lg hover:bg-green-50 active:scale-95"
+              className="p-4 h-auto transform transition-all duration-200 hover:scale-105 hover:shadow-lg hover:bg-green-50 active:scale-95"
               onClick={() => window.location.href = "/patient/billing"}
             >
               <div className="flex items-center space-x-3">

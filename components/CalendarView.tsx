@@ -123,11 +123,18 @@ export function CalendarView({ portal = 'admin', defaultStatusFilter, defaultDoc
       statusesToFilter = ["scheduled", "reserved"];
     }
     
-    return appointments
+    let filtered = appointments
       .map((a) => ({ ...a, status: (a.status as string) === 'confirmed' ? 'scheduled' : a.status }))
       .filter((a) => a.status !== 'cancelled')
       .filter((a) => statusesToFilter.includes(a.status));
-  }, [appointments, selectedStatus, statusFilterList]);
+    
+    // For patient portal, only show appointments for the logged-in patient
+    if (portal === 'patient' && user && (user as any).patientId) {
+      filtered = filtered.filter((a) => String(a.patientId) === String((user as any).patientId));
+    }
+    
+    return filtered;
+  }, [appointments, selectedStatus, statusFilterList, portal, user]);
 
   const getViewRange = useCallback((date: Date) => {
     const start = new Date(date);
@@ -505,7 +512,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="font-semibold text-sm truncate pr-2 flex items-center gap-2">
-                              {appointment.patientName}
+                              {showPatient ? appointment.patientName : `Dr. ${appointment.doctor}`}
                               {appointment.paymentStatus === 'unpaid' && (
                                 <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[8px] h-3 px-1 uppercase font-black">Unpaid</Badge>
                               )}
@@ -514,7 +521,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                               {typeName} • {appointment.duration || 30}min
                             </div>
                             <div className="text-xs opacity-80 mt-1 truncate flex items-center gap-2">
-                              <div className="text-[12px] font-medium">Dr. {appointment.doctor}</div>
+                              <div className="text-[12px] font-medium">{showPatient ? '' : appointment.patientName}</div>
                             </div>
                           </div>
                         </div>
@@ -636,6 +643,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                           const totalColumns = maxOverlappingAt.get(appointment.id) ?? 1;
                           const typeName = getAppointmentTypeName(appointment.type, appointment.customType);
                           const colors = getColorForType(appointment.status);
+                          const showPatient = selectedDoctor !== 'all';
                           
                           const width = `${100 / totalColumns}%`;
                           const left = `${(columnIndex * 100) / totalColumns}%`;
@@ -665,15 +673,19 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                                   <div className="flex-shrink-0">
                                     <Avatar className="h-7 w-7 border border-gray-100">
                                       {(() => {
-                                        const doc = doctors.find(d => String(d.name) === String(appointment.doctor) || String(d.id) === String(appointment.doctor));
-                                        const src = doc?.profilePicture || (appointment as any).doctorProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.doctor}`;
-                                        return <AvatarImage src={src} alt={appointment.doctor} />;
+                                        if (showPatient) {
+                                          return <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.patientName}`} alt={appointment.patientName} />;
+                                        } else {
+                                          const doc = doctors.find(d => String(d.name) === String(appointment.doctor) || String(d.id) === String(appointment.doctor));
+                                          const src = doc?.profilePicture || (appointment as any).doctorProfile || `https://api.dicebear.com/7.x/avataaars/svg?seed=${appointment.doctor}`;
+                                          return <AvatarImage src={src} alt={appointment.doctor} />;
+                                        }
                                       })()}
-                                      <AvatarFallback>{String(appointment.doctor || '').substring(0,2).toUpperCase()}</AvatarFallback>
+                                      <AvatarFallback>{showPatient ? String(appointment.patientName || '').substring(0,2).toUpperCase() : String(appointment.doctor || '').substring(0,2).toUpperCase()}</AvatarFallback>
                                     </Avatar>
                                   </div>
                                   <div className="font-semibold truncate flex items-center gap-1">
-                                    {appointment.patientName}
+                                    {showPatient ? appointment.patientName : `Dr. ${appointment.doctor}`}
                                     {appointment.status === "tentative" && (
                                       <Badge variant="outline" className="text-[7px] h-2.5 px-0.5 bg-yellow-100 border-yellow-300 text-yellow-700 leading-none">R</Badge>
                                     )}
@@ -684,7 +696,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                                 </div>
                               </div>
                               <div className="truncate opacity-90">{typeName}</div>
-                              <div className="truncate opacity-75 mt-0.5">{appointment.doctor}</div>
+                              <div className="truncate opacity-75 mt-0.5">{showPatient ? '' : appointment.patientName}</div>
                               {appointment.price != null && <div className="mt-1 font-medium">${appointment.price.toFixed(2)}</div>}
                             </div>
                           )
@@ -793,7 +805,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                         <AvatarFallback>{fallback}</AvatarFallback>
                       </Avatar>
                       <div className="truncate">
-                        {apt.time} • Dr. {apt.doctor}
+                        {showPatient ? apt.patientName : `${apt.time} • Dr. ${apt.doctor}`}
                         {apt.status === "tentative" && " (R)"}
                         {apt.status === "To Pay" && " (P)"}
                       </div>
