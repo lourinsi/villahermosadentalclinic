@@ -75,7 +75,10 @@ export function Dashboard({ portal }: DashboardProps) {
 
     // For patient portal, only show their appointments
     if (portal === "patient" && user?.username) {
+      // Extract patient name from email (part before @)
+      const emailPrefix = user.username.split('@')[0];
       filtered = filtered.filter((apt: Appointment) =>
+        apt.patientName.toLowerCase().includes(emailPrefix.toLowerCase()) ||
         apt.patientName.toLowerCase() === user.username.toLowerCase()
       );
     }
@@ -115,8 +118,7 @@ export function Dashboard({ portal }: DashboardProps) {
         .filter((apt: Appointment) => {
           const aptDate = parseBackendDateToLocal(apt.date);
           return aptDate >= monthStart && aptDate <= monthEnd;
-        })
-        .filter((apt: Appointment) => apt.status !== "pending");
+        });
     }
   }, [appointments, viewMode, portal, user]);
 
@@ -321,13 +323,15 @@ export function Dashboard({ portal }: DashboardProps) {
         subtitle: "Welcome back! Here's what's happening at your clinic today."
       };
     } else if (portal === "doctor") {
+      const firstName = user?.username ? user.username.split('@')[0] : "Doctor";
       return {
-        title: `Welcome, Dr. ${user?.username}!`,
+        title: `Welcome, Dr. ${firstName}!`,
         subtitle: `Here's your schedule overview for ${viewMode === "day" ? "today" : viewMode === "week" ? "this week" : "this month"}.`
       };
     } else {
+      const firstName = user?.username ? user.username.split('@')[0] : "there";
       return {
-        title: `Welcome, ${user?.username}!`,
+        title: `Welcome back, ${firstName}!`,
         subtitle: "Manage your dental appointments and track your health"
       };
     }
@@ -346,19 +350,27 @@ export function Dashboard({ portal }: DashboardProps) {
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {stats.map((stat, index) => (
-          <Card key={index} className="hover:shadow-md transition-shadow">
+          <Card key={index} className="relative overflow-hidden border-none shadow-md hover:shadow-xl transition-all duration-300 group">
+            <div className={`absolute top-0 right-0 w-32 h-32 -mr-8 -mt-8 rounded-full opacity-10 transition-transform duration-500 group-hover:scale-110 ${stat.bgColor}`} />
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
+              <CardTitle className="text-sm font-semibold text-gray-600 uppercase tracking-wider">
                 {stat.title}
               </CardTitle>
-              <div className={`p-2 rounded-lg ${stat.bgColor}`}>
-                <stat.icon className={`h-4 w-4 ${stat.color}`} />
+              <div className={`p-3 rounded-2xl shadow-sm transform transition-transform duration-300 group-hover:rotate-12 ${stat.bgColor} ${stat.color}`}>
+                <stat.icon className="h-5 w-5" />
               </div>
             </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stat.value}</div>
-              <p className="text-xs text-muted-foreground">
-                <span className={stat.title === "Pending Approvals" || stat.title === "Pending Balance" ? "text-amber-600 font-medium" : "text-green-600"}>{stat.change}</span>
+            <CardContent className="pt-4">
+              <div className="text-3xl font-extrabold tracking-tight text-gray-900 mb-1">{stat.value}</div>
+              <p className="text-sm font-medium flex items-center gap-1.5">
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold ${
+                  stat.title === "Pending Approvals" || stat.title === "Pending Balance" 
+                    ? "bg-amber-100 text-amber-700" 
+                    : "bg-emerald-100 text-emerald-700"
+                }`}>
+                  {stat.change}
+                </span>
+                <span className="text-gray-400 text-xs font-normal">vs last month</span>
               </p>
             </CardContent>
           </Card>
@@ -366,87 +378,229 @@ export function Dashboard({ portal }: DashboardProps) {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Revenue/Overview Chart */}
-        {(portal === "admin" || portal === "doctor") && (
-          <Card className="lg:col-span-2">
-            <CardHeader>
-              <CardTitle>{portal === "admin" ? "Revenue Overview" : "Appointment Trends"}</CardTitle>
+        {/* Main Chart Column - Revenue for Admin/Doctor, Schedule for Patient */}
+        {portal === "admin" || portal === "doctor" ? (
+          <Card className="lg:col-span-2 border-none shadow-md overflow-hidden bg-white">
+            <CardHeader className="flex flex-row items-center justify-between border-b border-gray-50 pb-4">
+              <div>
+                <CardTitle className="text-xl font-bold text-gray-800">
+                  {portal === "admin" ? "Revenue Overview" : "Appointment Trends"}
+                </CardTitle>
+                <p className="text-sm text-gray-500 mt-1">
+                  Monthly statistics for clinic growth
+                </p>
+              </div>
+              <div className="flex items-center space-x-2">
+                <div className="flex items-center space-x-1 px-2 py-1 bg-blue-50 text-blue-700 rounded-md text-xs font-semibold">
+                  <TrendingUp className="h-3 w-3" />
+                  <span>+12.5%</span>
+                </div>
+              </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-6">
               <ResponsiveContainer width="100%" height={300}>
                 <AreaChart data={revenueData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="month" />
-                  <YAxis />
-                  <Tooltip formatter={(value: number | string, name: string) => [
-                    name === 'revenue' ? `$${Number(value).toLocaleString()}` : value,
-                    name === 'revenue' ? 'Revenue' : 'Appointments'
-                  ]} />
-                  <Area type="monotone" dataKey="revenue" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.1} />
+                  <defs>
+                    <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.1}/>
+                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                  <XAxis 
+                    dataKey="month" 
+                    axisLine={false} 
+                    tickLine={false} 
+                    tick={{fill: '#94a3b8', fontSize: 12}}
+                    dy={10}
+                  />
+                  <YAxis 
+                    axisLine={false} 
+                    tickLine={false} 
+                    tick={{fill: '#94a3b8', fontSize: 12}}
+                  />
+                  <Tooltip 
+                    contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
+                    formatter={(value: number | string, name: string) => [
+                      name === 'revenue' ? `₱${Number(value).toLocaleString()}` : value,
+                      name === 'revenue' ? 'Revenue' : 'Appointments'
+                    ]} 
+                  />
+                  <Area 
+                    type="monotone" 
+                    dataKey="revenue" 
+                    stroke="#3b82f6" 
+                    strokeWidth={3}
+                    fillOpacity={1} 
+                    fill="url(#colorRevenue)" 
+                  />
                 </AreaChart>
               </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card className="lg:col-span-2 border-none shadow-md overflow-hidden bg-white">
+            <CardHeader className="flex flex-row items-center justify-between border-b border-gray-50 pb-4">
+              <div>
+                <CardTitle className="text-xl font-bold text-gray-800">Your Next Appointment</CardTitle>
+                <p className="text-sm text-gray-500 mt-1">Don't miss your upcoming visit</p>
+              </div>
+              <Button size="sm" variant="outline" onClick={() => window.location.href = "/patient/appointments"}>
+                View All
+              </Button>
+            </CardHeader>
+            <CardContent className="pt-6">
+              {filteredAppointments.length > 0 ? (
+                <div className="relative p-6 rounded-2xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-lg overflow-hidden">
+                  <div className="absolute top-0 right-0 p-4 opacity-10">
+                    <Calendar className="h-32 w-32" />
+                  </div>
+                  <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+                    <div className="space-y-4">
+                      <div className="flex items-center space-x-2 bg-white/20 w-fit px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-sm">
+                        <Clock className="h-3 w-3" />
+                        <span>Confirmed</span>
+                      </div>
+                      <div>
+                        <h3 className="text-2xl font-bold tracking-tight">
+                          {getAppointmentTypeName(filteredAppointments[0].type, filteredAppointments[0].customType)}
+                        </h3>
+                        <p className="text-violet-100 font-medium">with Dr. {filteredAppointments[0].doctor}</p>
+                      </div>
+                      <div className="flex flex-wrap gap-4 text-sm font-medium">
+                        <div className="flex items-center space-x-2 bg-white/10 px-3 py-2 rounded-xl backdrop-blur-sm">
+                          <Calendar className="h-4 w-4" />
+                          <span>{parseBackendDateToLocal(filteredAppointments[0].date).toLocaleDateString("en-US", { month: "long", day: "numeric" })}</span>
+                        </div>
+                        <div className="flex items-center space-x-2 bg-white/10 px-3 py-2 rounded-xl backdrop-blur-sm">
+                          <Clock className="h-4 w-4" />
+                          <span>{filteredAppointments[0].time}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <Button 
+                      className="bg-white text-indigo-600 hover:bg-violet-50 font-bold px-8 py-6 rounded-2xl h-auto w-full md:w-auto shadow-xl"
+                      onClick={() => {
+                        setSelectedAppointment(filteredAppointments[0]);
+                        setBookingModalOpen(true);
+                      }}
+                    >
+                      View Details
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-12 bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200">
+                  <div className="p-4 bg-white rounded-full shadow-sm mb-4">
+                    <Calendar className="h-8 w-8 text-gray-400" />
+                  </div>
+                  <p className="text-gray-900 font-semibold text-lg">No appointments yet</p>
+                  <p className="text-gray-500 mb-6 text-sm">Schedule your first visit with us today!</p>
+                  <Button 
+                    className="bg-violet-600 hover:bg-violet-700 text-white px-8"
+                    onClick={() => window.location.href = "/patient/doctors"}
+                  >
+                    Book Now
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
 
         {/* Appointment Types */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Appointment Types</CardTitle>
+        <Card className="border-none shadow-md bg-white">
+          <CardHeader className="border-b border-gray-50 pb-4">
+            <CardTitle className="text-lg font-bold text-gray-800">Visit Statistics</CardTitle>
           </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={appointmentTypes}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={100}
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  {appointmentTypes.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(value: number) => [`${value}%`, 'Percentage']} />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="space-y-2 mt-4">
-              {appointmentTypes.map((type, index) => (
-                <div key={index} className="flex items-center justify-between text-sm">
-                  <div className="flex items-center space-x-2">
-                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: type.color }} />
-                    <span>{type.name}</span>
+          <CardContent className="pt-6">
+            {(() => {
+              // Use all-time appointments if current view has no data
+              const appointmentsToAnalyze = filteredAppointments.length === 0 ? appointments : filteredAppointments;
+              const isAllTime = filteredAppointments.length === 0;
+              
+              if (appointmentsToAnalyze.length === 0) return null;
+
+              const typeCounts = appointmentsToAnalyze.reduce<Record<string, number>>((acc, apt: Appointment) => {
+                const key = getAppointmentTypeName(apt.type, apt.customType);
+                acc[key] = (acc[key] || 0) + 1;
+                return acc;
+              }, {});
+
+              const total = Object.values(typeCounts).reduce((s: number, v: number) => s + v, 0) || 1;
+              const chartData = Object.keys(typeCounts).map((name, idx) => ({
+                name,
+                value: Math.round((typeCounts[name] / total) * 100),
+                color: colorPalette[idx % colorPalette.length]
+              }));
+
+              const getTimeLabel = () => {
+                if (isAllTime) return "All Time";
+                if (viewMode === "day") return "Today";
+                if (viewMode === "week") return "This Week";
+                return "This Month";
+              };
+
+              return (
+                <>
+                  <div className="mb-3">
+                    <p className="text-xs font-semibold text-gray-600 mb-2">{getTimeLabel()}</p>
                   </div>
-                  <span className="font-medium">{type.value}%</span>
-                </div>
-              ))}
-            </div>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <PieChart>
+                      <Pie
+                        data={chartData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={100}
+                        paddingAngle={5}
+                        dataKey="value"
+                      >
+                        {chartData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(value: number) => [`${value}%`, 'Percentage']} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="space-y-2 mt-4">
+                    {chartData.map((type, index) => (
+                      <div key={index} className="flex items-center justify-between text-sm">
+                        <div className="flex items-center space-x-2">
+                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: type.color }} />
+                          <span>{type.name}</span>
+                        </div>
+                        <span className="font-medium">{type.value}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              );
+            })()}
           </CardContent>
         </Card>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Schedule View */}
-        <Card>
-          <CardHeader>
+        <Card className="border-none shadow-md bg-white overflow-hidden">
+          <CardHeader className="border-b border-gray-50 pb-4">
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle>Schedule</CardTitle>
+                <CardTitle className="text-xl font-bold text-gray-800">Recent Schedule</CardTitle>
                 <p className="text-sm text-gray-500 mt-1">{getViewTitle()}</p>
               </div>
-              <div className="flex items-center bg-gray-100 rounded-lg p-1">
+              <div className="flex items-center bg-gray-100/80 rounded-xl p-1 backdrop-blur-sm">
                 {(["day", "week", "month"] as const).map((mode) => (
                   <Button
                     key={mode}
                     size="sm"
                     variant="ghost"
-                    className={`px-3 py-1 text-xs font-medium rounded transition-all duration-200 ${
+                    className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all duration-300 ${
                       viewMode === mode
-                        ? "bg-black text-white shadow-sm hover:bg-gray-800"
-                        : "bg-transparent text-gray-600 hover:bg-gray-200 hover:text-gray-900"
+                        ? "bg-white text-violet-600 shadow-sm"
+                        : "bg-transparent text-gray-500 hover:text-gray-900"
                     }`}
                     onClick={() => setViewMode(mode)}
                   >
@@ -456,150 +610,184 @@ export function Dashboard({ portal }: DashboardProps) {
               </div>
             </div>
           </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
+          <CardContent className="p-0">
+            <div className="divide-y divide-gray-50">
               {isLoadingView ? (
-                <div className="text-center py-8">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-600 mx-auto mb-2"></div>
-                  <p className="text-sm text-muted-foreground">Loading schedule...</p>
+                <div className="flex flex-col items-center justify-center py-16">
+                  <div className="relative">
+                    <div className="h-12 w-12 rounded-full border-4 border-violet-100 border-t-violet-600 animate-spin"></div>
+                  </div>
+                  <p className="mt-4 text-sm font-medium text-gray-500">Updating schedule...</p>
                 </div>
               ) : filteredAppointments.length > 0 ? (
                 filteredAppointments.slice(0, 5).map((appointment: Appointment) => (
                   <div
                     key={appointment.id}
-                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
+                    className="group flex items-center justify-between p-4 hover:bg-violet-50/50 transition-all duration-300 cursor-pointer"
                     onClick={() => {
                       setSelectedAppointment(appointment);
                       setBookingModalOpen(true);
                     }}
                   >
-                    <div className="flex items-center space-x-3">
-                      <div className="text-sm font-medium text-violet-600 min-w-[60px]">
-                        <div>{appointment.time}</div>
-                        {viewMode !== "day" && (
-                          <div className="text-xs text-gray-500 mt-1">
+                    <div className="flex items-center space-x-4">
+                      <div className="flex flex-col items-center justify-center h-14 w-14 rounded-2xl bg-violet-50 text-violet-600 group-hover:bg-violet-600 group-hover:text-white transition-colors duration-300">
+                        <span className="text-sm font-bold">{appointment.time.split(':')[0]}:{appointment.time.split(':')[1].split(' ')[0]}</span>
+                        <span className="text-[10px] font-bold uppercase">{appointment.time.split(' ')[1]}</span>
+                      </div>
+                      <div className="flex-1">
+                        <div className="text-sm font-bold text-gray-900 group-hover:text-violet-700 transition-colors">
+                          {portal === "patient" ? `Dr. ${appointment.doctor}` : appointment.patientName}
+                        </div>
+                        <div className="text-xs font-medium text-gray-500 flex items-center space-x-2 mt-0.5">
+                          <span>{getAppointmentTypeName(appointment.type, appointment.customType)}</span>
+                          <span className="h-1 w-1 rounded-full bg-gray-300"></span>
+                          <span className={`capitalize ${
+                            appointment.status === 'scheduled' ? 'text-emerald-600' : 
+                            appointment.status === 'pending' ? 'text-blue-600' : 'text-gray-600'
+                          }`}>{appointment.status}</span>
+                        </div>
+                        {(viewMode === "week" || viewMode === "month") && (
+                          <div className="text-xs text-gray-400 mt-1">
                             {parseBackendDateToLocal(appointment.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                           </div>
                         )}
                       </div>
-                      <div>
-                        <div className="text-sm font-medium">{appointment.patientName}</div>
-                        <div className="text-xs text-muted-foreground flex items-center space-x-2">
-                          <span>{getAppointmentTypeName(appointment.type, appointment.customType)} • {appointment.doctor}</span>
-                          <Badge variant={appointment.status === "pending" ? "outline" : "secondary"}>
-                            {appointment.status}
-                          </Badge>
-                        </div>
-                      </div>
+                    </div>
+                    <div className="opacity-0 group-hover:opacity-100 transition-opacity transform translate-x-2 group-hover:translate-x-0">
+                      <Button size="sm" variant="ghost" className="h-8 w-8 p-0 rounded-full bg-white shadow-sm">
+                        <Users className="h-4 w-4 text-violet-600" />
+                      </Button>
                     </div>
                   </div>
                 ))
               ) : (
-                <div className="text-center py-8 text-gray-500">
-                  <Heart className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-                  <p>No appointments scheduled</p>
+                <div className="flex flex-col items-center justify-center py-16 text-gray-400">
+                  <div className="p-4 bg-gray-50 rounded-full mb-4">
+                    <Heart className="h-8 w-8 opacity-20" />
+                  </div>
+                  <p className="text-sm font-medium">No appointments scheduled</p>
                 </div>
               )}
             </div>
+            {filteredAppointments.length > 5 && (
+              <div className="p-4 bg-gray-50/50 text-center">
+                <Button variant="link" className="text-xs font-bold text-violet-600 hover:text-violet-700 p-0 h-auto">
+                  View {filteredAppointments.length - 5} more appointments
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
 
         {/* Quick Actions */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Quick Actions</CardTitle>
+        <Card className="border-none shadow-md bg-white overflow-hidden">
+          <CardHeader className="border-b border-gray-50 pb-4">
+            <CardTitle className="text-xl font-bold text-gray-800">Quick Actions</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            {portal === "admin" && (
-              <>
-                <Button
-                  variant="outline"
-                  className="w-full p-4 text-left h-auto hover:bg-blue-50"
-                  onClick={() => openCreateModal()}
-                >
-                  <div className="flex items-center space-x-3">
-                    <Calendar className="h-6 w-6 text-blue-600" />
-                    <div>
-                      <div className="font-medium">Schedule Appointment</div>
-                      <div className="text-sm text-muted-foreground">Book a new patient appointment</div>
+          <CardContent className="p-6">
+            <div className="grid grid-cols-1 gap-4">
+              {portal === "admin" && (
+                <>
+                  <Button
+                    variant="outline"
+                    className="group relative flex items-center justify-between p-6 h-auto border-gray-100 hover:border-blue-200 hover:bg-blue-50/50 rounded-2xl transition-all duration-300 overflow-hidden"
+                    onClick={() => openCreateModal()}
+                  >
+                    <div className="flex items-center space-x-4 relative z-10">
+                      <div className="p-3 rounded-xl bg-blue-100 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors duration-300">
+                        <Calendar className="h-6 w-6" />
+                      </div>
+                      <div className="text-left">
+                        <div className="font-bold text-gray-900">Schedule Appointment</div>
+                        <div className="text-xs text-gray-500">Book a new patient visit</div>
+                      </div>
                     </div>
-                  </div>
-                </Button>
-                <Button
-                  variant="brand"
-                  className="w-full p-4 text-left h-auto"
-                  onClick={() => openAddPatientModal()}
-                >
-                  <div className="flex items-center space-x-3">
-                    <Users className="h-6 w-6 text-white" />
-                    <div>
-                      <div className="font-medium text-white">Add New Patient</div>
-                      <div className="text-sm text-violet-100">Register a new patient</div>
+                    <div className="absolute right-0 top-0 h-full w-24 bg-gradient-to-l from-blue-100/20 to-transparent pointer-events-none" />
+                  </Button>
+                  <Button
+                    className="group relative flex items-center justify-between p-6 h-auto bg-violet-600 hover:bg-violet-700 text-white border-none rounded-2xl transition-all duration-300 shadow-lg hover:shadow-violet-200"
+                    onClick={() => openAddPatientModal()}
+                  >
+                    <div className="flex items-center space-x-4">
+                      <div className="p-3 rounded-xl bg-white/20 text-white">
+                        <Users className="h-6 w-6" />
+                      </div>
+                      <div className="text-left">
+                        <div className="font-bold">Add New Patient</div>
+                        <div className="text-xs text-violet-100">Register a new record</div>
+                      </div>
                     </div>
-                  </div>
-                </Button>
-              </>
-            )}
-            {portal === "doctor" && (
-              <>
-                <Button
-                  variant="outline"
-                  className="w-full p-4 text-left h-auto hover:bg-violet-50"
-                  onClick={() => openCreateModal()}
-                >
-                  <div className="flex items-center space-x-3">
-                    <Calendar className="h-6 w-6 text-violet-600" />
-                    <div>
-                      <div className="font-medium">Schedule Appointment</div>
-                      <div className="text-sm text-muted-foreground">Book a new patient appointment</div>
+                  </Button>
+                </>
+              )}
+              {portal === "doctor" && (
+                <>
+                  <Button
+                    variant="outline"
+                    className="group flex items-center justify-between p-6 h-auto border-gray-100 hover:border-violet-200 hover:bg-violet-50/50 rounded-2xl transition-all duration-300"
+                    onClick={() => openCreateModal()}
+                  >
+                    <div className="flex items-center space-x-4">
+                      <div className="p-3 rounded-xl bg-violet-100 text-violet-600 group-hover:bg-violet-600 group-hover:text-white transition-colors duration-300">
+                        <Calendar className="h-6 w-6" />
+                      </div>
+                      <div className="text-left">
+                        <div className="font-bold text-gray-900">Book Appointment</div>
+                        <div className="text-xs text-gray-500">Schedule a patient visit</div>
+                      </div>
                     </div>
-                  </div>
-                </Button>
-                <Button
-                  variant="outline"
-                  className="w-full p-4 text-left h-auto hover:bg-blue-50"
-                  onClick={() => window.location.href = "/doctor/calendar"}
-                >
-                  <div className="flex items-center space-x-3">
-                    <Clock className="h-6 w-6 text-blue-600" />
-                    <div>
-                      <div className="font-medium">View Full Calendar</div>
-                      <div className="text-sm text-muted-foreground">See your complete schedule</div>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="group flex items-center justify-between p-6 h-auto border-gray-100 hover:border-blue-200 hover:bg-blue-50/50 rounded-2xl transition-all duration-300"
+                    onClick={() => window.location.href = "/doctor/calendar"}
+                  >
+                    <div className="flex items-center space-x-4">
+                      <div className="p-3 rounded-xl bg-blue-100 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors duration-300">
+                        <Clock className="h-6 w-6" />
+                      </div>
+                      <div className="text-left">
+                        <div className="font-bold text-gray-900">Full Calendar</div>
+                        <div className="text-xs text-gray-500">See complete schedule</div>
+                      </div>
                     </div>
-                  </div>
-                </Button>
-              </>
-            )}
-            {portal === "patient" && (
-              <>
-                <Button
-                  variant="outline"
-                  className="w-full p-4 text-left h-auto hover:bg-blue-50"
-                  onClick={() => window.location.href = "/patient/doctors"}
-                >
-                  <div className="flex items-center space-x-3">
-                    <Calendar className="h-6 w-6 text-blue-600" />
-                    <div>
-                      <div className="font-medium">Book Appointment</div>
-                      <div className="text-sm text-muted-foreground">Find doctors and book a new appointment</div>
+                  </Button>
+                </>
+              )}
+              {portal === "patient" && (
+                <>
+                  <Button
+                    className="group relative flex items-center justify-between p-6 h-auto bg-indigo-600 hover:bg-indigo-700 text-white border-none rounded-2xl transition-all duration-300 shadow-lg hover:shadow-indigo-200"
+                    onClick={() => window.location.href = "/patient/doctors"}
+                  >
+                    <div className="flex items-center space-x-4">
+                      <div className="p-3 rounded-xl bg-white/20 text-white">
+                        <Calendar className="h-6 w-6" />
+                      </div>
+                      <div className="text-left">
+                        <div className="font-bold">Book Appointment</div>
+                        <div className="text-xs text-indigo-100">Find doctors & book online</div>
+                      </div>
                     </div>
-                  </div>
-                </Button>
-                <Button
-                  variant="outline"
-                  className="w-full p-4 text-left h-auto hover:bg-purple-50"
-                  onClick={() => window.location.href = "/patient/appointments"}
-                >
-                  <div className="flex items-center space-x-3">
-                    <TrendingUp className="h-6 w-6 text-purple-600" />
-                    <div>
-                      <div className="font-medium">View All Appointments</div>
-                      <div className="text-sm text-muted-foreground">See your complete appointment history</div>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="group flex items-center justify-between p-6 h-auto border-gray-100 hover:border-violet-200 hover:bg-violet-50/50 rounded-2xl transition-all duration-300"
+                    onClick={() => window.location.href = "/patient/appointments"}
+                  >
+                    <div className="flex items-center space-x-4">
+                      <div className="p-3 rounded-xl bg-violet-100 text-violet-600 group-hover:bg-violet-600 group-hover:text-white transition-colors duration-300">
+                        <TrendingUp className="h-6 w-6" />
+                      </div>
+                      <div className="text-left">
+                        <div className="font-bold text-gray-900">My Appointments</div>
+                        <div className="text-xs text-gray-500">View visit history</div>
+                      </div>
                     </div>
-                  </div>
-                </Button>
-              </>
-            )}
+                  </Button>
+                </>
+              )}
+            </div>
           </CardContent>
         </Card>
       </div>

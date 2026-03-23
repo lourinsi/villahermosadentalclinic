@@ -13,6 +13,7 @@ import { Calendar as CalendarIcon, Clock, Award, Loader2, CheckCircle2, CreditCa
 import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import { APPOINTMENT_PRICES, APPOINTMENT_TYPES, getAppointmentTypeName } from "@/lib/appointmentTypes";
+import { APPOINTMENT_STATUSES, getStatusLabel } from "@/lib/appointment-statuses";
 import { Dialog as SmallDialog, DialogContent as SmallDialogContent, DialogFooter as SmallDialogFooter } from "@/components/ui/dialog";
 import { toast } from 'sonner';
 
@@ -666,11 +667,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="scheduled">Scheduled</SelectItem>
-                              <SelectItem value="reserved">Reserved</SelectItem>
-                              <SelectItem value="completed">Completed</SelectItem>
-                              <SelectItem value="cancelled">Cancelled</SelectItem>
-                              <SelectItem value="pending">Pending</SelectItem>
+                              {APPOINTMENT_STATUSES.map((status) => (
+                                <SelectItem key={status.value} value={status.value}>
+                                  {status.label}
+                                </SelectItem>
+                              ))}
                             </SelectContent>
                           </Select>
                         ) : (
@@ -681,7 +682,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                             appointmentStatus === 'cancelled' ? 'bg-red-100 text-red-700' :
                             'bg-gray-100 text-gray-700'
                           }`}>
-                            {String(appointmentStatus).charAt(0).toUpperCase() + String(appointmentStatus).slice(1)}
+                            {getStatusLabel(appointmentStatus)}
                           </span>
                         )}
                       </div>
@@ -802,11 +803,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                         <SelectValue placeholder="Select appointment status" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="scheduled">Scheduled</SelectItem>
-                        <SelectItem value="reserved">Reserved</SelectItem>
-                        <SelectItem value="completed">Completed</SelectItem>
-                        <SelectItem value="cancelled">Cancelled</SelectItem>
-                        <SelectItem value="pending">Pending</SelectItem>
+                        {APPOINTMENT_STATUSES.map((status) => (
+                          <SelectItem key={status.value} value={status.value}>
+                            {status.label}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>

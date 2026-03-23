@@ -20,6 +20,9 @@ export function PatientDashboard() {
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
 
+  // Extract first name from user
+  const firstName = user?.username ? user.username.split('@')[0] : "there";
+
   // Show loading when view mode changes
   useEffect(() => {
     setIsLoadingView(true);
@@ -120,7 +123,7 @@ export function PatientDashboard() {
   return (
     <div className="p-6 space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-gray-900">Welcome back!</h1>
+        <h1 className="text-2xl font-semibold text-gray-900">Welcome back, {firstName}!</h1>
         <p className="text-muted-foreground">Here's your appointments and health records overview.</p>
       </div>
 
@@ -147,13 +150,15 @@ export function PatientDashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Appointments */}
+        {/* Appointments - 2 columns */}
         <Card className="lg:col-span-2">
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle>My Appointments</CardTitle>
-                <p className="text-sm text-gray-500 mt-1">{viewMode === "upcoming" ? "Upcoming visits" : "Past visits"}</p>
+                <CardTitle>Schedule</CardTitle>
+                <p className="text-sm text-gray-500 mt-1">
+                  {viewMode === "upcoming" ? "Upcoming visits" : "Past visits"}
+                </p>
               </div>
               <div className="flex items-center bg-gray-100 rounded-lg p-1">
                 {(["upcoming", "past"] as const).map((mode) => (
@@ -228,35 +233,51 @@ export function PatientDashboard() {
           </CardContent>
         </Card>
 
-        {/* Summary Card - Single column */}
+        {/* Appointment Types Chart - 1 column */}
         <Card>
           <CardHeader>
-            <CardTitle>Summary</CardTitle>
+            <CardTitle>Appointment Types</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
-              <div className="text-xs text-blue-600 font-medium mb-1">Total Appointments</div>
-              <div className="text-2xl font-bold text-blue-900">{totalAppointments}</div>
-              <div className="text-xs text-blue-600 mt-1">All time</div>
-            </div>
+          <CardContent>
+            {(() => {
+              const appointmentsToAnalyze = displayAppointments.length === 0 ? appointments : displayAppointments;
+              
+              if (appointmentsToAnalyze.length === 0) return null;
 
-            <div className="p-3 bg-green-50 rounded-lg border border-green-200">
-              <div className="text-xs text-green-600 font-medium mb-1">Completed</div>
-              <div className="text-2xl font-bold text-green-900">{completedAppointments}</div>
-              <div className="text-xs text-green-600 mt-1">Finished visits</div>
-            </div>
+              const typeCounts = appointmentsToAnalyze.reduce<Record<string, number>>((acc, apt) => {
+                const key = getAppointmentTypeName(apt.type, apt.customType);
+                acc[key] = (acc[key] || 0) + 1;
+                return acc;
+              }, {});
 
-            <div className="p-3 bg-purple-50 rounded-lg border border-purple-200">
-              <div className="text-xs text-purple-600 font-medium mb-1">Amount Paid</div>
-              <div className="text-2xl font-bold text-purple-900">${totalSpent.toFixed(2)}</div>
-              <div className="text-xs text-purple-600 mt-1">Total spent</div>
-            </div>
-
-            <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
-              <div className="text-xs text-amber-600 font-medium mb-1">Outstanding Balance</div>
-              <div className="text-2xl font-bold text-amber-900">${pendingBalance.toFixed(2)}</div>
-              <div className="text-xs text-amber-600 mt-1">Due soon</div>
-            </div>
+              const total = Object.values(typeCounts).reduce((s, v) => s + v, 0) || 1;
+              const colorPalette = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4", "#f97316"];
+              
+              return (
+                <div className="space-y-4">
+                  <div className="text-xs font-semibold text-gray-700">
+                    {displayAppointments.length === 0 ? "Appointment Types (All Time)" : "Appointment Types"}
+                  </div>
+                  <div className="space-y-2">
+                    {Object.keys(typeCounts).map((name, idx) => {
+                      const percentage = Math.round((typeCounts[name] / total) * 100);
+                      return (
+                        <div key={name} className="flex items-center justify-between text-xs">
+                          <div className="flex items-center space-x-2">
+                            <div 
+                              className="w-3 h-3 rounded-full" 
+                              style={{ backgroundColor: colorPalette[idx % colorPalette.length] }}
+                            />
+                            <span className="text-gray-600">{name}</span>
+                          </div>
+                          <span className="font-medium text-gray-900">{percentage}%</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
           </CardContent>
         </Card>
       </div>
@@ -269,21 +290,54 @@ export function PatientDashboard() {
           </CardHeader>
           <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {nextAppointment && (
-              <div className="p-4 bg-violet-50 rounded-lg border border-violet-200">
-                <div className="text-sm font-medium text-violet-900 mb-1">Next Appointment</div>
-                <div className="text-xs text-violet-700 mb-3">
-                  {parseBackendDateToLocal(nextAppointment.date).toLocaleDateString("en-US", { 
-                    weekday: "short", 
-                    month: "short", 
-                    day: "numeric" 
-                  })} at {nextAppointment.time}
+              <div className="relative p-6 rounded-2xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-lg overflow-hidden group">
+                <div className="absolute top-0 right-0 p-4 opacity-10">
+                  <Calendar className="h-32 w-32" />
                 </div>
-                <div className="text-xs text-violet-600 mb-3">
-                  Dr. {nextAppointment.doctor} • {getAppointmentTypeName(nextAppointment.type, nextAppointment.customType)}
+                <div className="relative z-10">
+                  <div className="mb-4">
+                    <div className="flex items-center space-x-2 bg-white/20 w-fit px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-sm mb-3">
+                      <Clock className="h-3 w-3" />
+                      <span>Confirmed</span>
+                    </div>
+                    <h3 className="text-lg font-bold tracking-tight mb-1">
+                      {getAppointmentTypeName(nextAppointment.type, nextAppointment.customType)}
+                    </h3>
+                    <p className="text-violet-100 font-medium">with Dr. {nextAppointment.doctor}</p>
+                  </div>
+                  
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="space-y-2 flex-1">
+                      <div className="flex items-center space-x-2 bg-white/10 px-3 py-1.5 rounded-lg backdrop-blur-sm w-fit text-xs font-medium">
+                        <Calendar className="h-3 w-3" />
+                        <span>{parseBackendDateToLocal(nextAppointment.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                      </div>
+                      <div className="flex items-center space-x-2 bg-white/10 px-3 py-1.5 rounded-lg backdrop-blur-sm w-fit text-xs font-medium">
+                        <Clock className="h-3 w-3" />
+                        <span>{nextAppointment.time}</span>
+                      </div>
+                    </div>
+                    <div className="h-16 w-16 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center flex-shrink-0 ml-3 border-2 border-white/30">
+                      <div className="text-center">
+                        <div className="text-2xl font-bold">
+                          {nextAppointment.doctor.split(' ')[0].charAt(0)}{nextAppointment.doctor.split(' ').pop()?.charAt(0)}
+                        </div>
+                        <div className="text-[10px] font-semibold text-violet-100">Dr.</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Button 
+                    size="sm"
+                    className="w-full bg-white text-violet-600 hover:bg-violet-50 font-bold py-2 rounded-lg h-auto"
+                    onClick={() => {
+                      setSelectedAppointment(nextAppointment);
+                      setBookingModalOpen(true);
+                    }}
+                  >
+                    View Details
+                  </Button>
                 </div>
-                <Button size="sm" variant="outline" className="w-full text-violet-600 border-violet-200 hover:bg-violet-100">
-                  View Details
-                </Button>
               </div>
             )}
 

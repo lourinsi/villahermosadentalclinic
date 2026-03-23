@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
-import { Users, Calendar, Clock, CheckCircle, AlertCircle, Plus } from "lucide-react";
+import { Users, Calendar, Clock, CheckCircle, AlertCircle, Plus, TrendingUp, Heart } from "lucide-react";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { Badge } from "./ui/badge";
 import { Appointment } from "../hooks/useAppointments";
@@ -11,7 +11,7 @@ import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal } from "../lib/utils";
 import { useAuth } from "@/hooks/useAuth.tsx";
 import BookingModal from "./BookingModal";
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from "recharts";
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend, AreaChart, Area } from "recharts";
 
 export function DoctorDashboard() {
   const { openCreateModal, openAddPatientModal, appointments, openEditModal } = useAppointmentModal();
@@ -142,29 +142,40 @@ export function DoctorDashboard() {
     }
   };
 
+  // Extract first name from username
+  const firstName = doctorName ? doctorName.split('@')[0] : "Doctor";
+
   return (
     <div className="p-6 space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-gray-900">Welcome, Dr. {doctorName}</h1>
+        <h1 className="text-4xl font-bold text-gray-900">Welcome, Dr. {firstName}</h1>
         <p className="text-muted-foreground">Here&apos;s your schedule overview for {viewMode === "day" ? "today" : viewMode === "week" ? "this week" : "this month"}.</p>
       </div>
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {dynamicStats.map((stat, index) => (
-          <Card key={index} className="hover:shadow-md transition-shadow">
+          <Card key={index} className="relative overflow-hidden border-none shadow-md hover:shadow-xl transition-all duration-300 group">
+            <div className={`absolute top-0 right-0 w-32 h-32 -mr-8 -mt-8 rounded-full opacity-10 transition-transform duration-500 group-hover:scale-110 ${stat.bgColor || 'bg-gray-50'}`} />
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
+              <CardTitle className="text-sm font-semibold text-gray-600 uppercase tracking-wider">
                 {stat.title}
               </CardTitle>
-              <div className={`p-2 rounded-lg ${stat.bgColor}`}>
-                <stat.icon className={`h-4 w-4 ${stat.color}`} />
+              <div className={`p-3 rounded-2xl shadow-sm transform transition-transform duration-300 group-hover:rotate-12 ${stat.bgColor || 'bg-gray-50'} ${stat.color}`}>
+                <stat.icon className="h-5 w-5" />
               </div>
             </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stat.value}</div>
-              <p className="text-xs text-muted-foreground">
-                {stat.description}
+            <CardContent className="pt-4">
+              <div className="text-3xl font-extrabold tracking-tight text-gray-900 mb-1">{stat.value}</div>
+              <p className="text-sm font-medium flex items-center gap-1.5">
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold ${
+                  stat.title === "Tentative Patients" 
+                    ? "bg-amber-100 text-amber-700" 
+                    : "bg-emerald-100 text-emerald-700"
+                }`}>
+                  {stat.title === "Tentative Patients" ? "Action Required" : "Updated"}
+                </span>
+                <span className="text-gray-400 text-xs font-normal">{stat.description}</span>
               </p>
             </CardContent>
           </Card>
@@ -173,26 +184,24 @@ export function DoctorDashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Today's Schedule / Appointments */}
-        <Card className="lg:col-span-2">
-          <CardHeader>
+        <Card className="lg:col-span-2 border-none shadow-md bg-white overflow-hidden">
+          <CardHeader className="border-b border-gray-50 pb-4">
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle>My Schedule</CardTitle>
+                <CardTitle className="text-xl font-bold text-gray-800">My Schedule</CardTitle>
                 <p className="text-sm text-gray-500 mt-1">{getViewTitle()}</p>
               </div>
-              <div className="flex items-center bg-gray-100 rounded-lg p-1">
+              <div className="flex items-center bg-gray-100/80 rounded-xl p-1 backdrop-blur-sm">
                 {(["day", "week", "month"] as const).map((mode) => (
                   <Button
                     key={mode}
                     size="sm"
                     variant="ghost"
-                    className={`
-                      px-3 py-1 text-xs font-medium rounded transition-all duration-200
-                      ${viewMode === mode
-                        ? "bg-violet-600 text-white shadow-sm hover:bg-violet-700"
-                        : "bg-transparent text-gray-600 hover:bg-gray-200 hover:text-gray-900"
-                      }
-                    `}
+                    className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all duration-300 ${
+                      viewMode === mode
+                        ? "bg-white text-violet-600 shadow-sm"
+                        : "bg-transparent text-gray-500 hover:text-gray-900"
+                    }`}
                     onClick={() => setViewMode(mode)}
                   >
                     {mode.charAt(0).toUpperCase() + mode.slice(1)}
@@ -201,49 +210,62 @@ export function DoctorDashboard() {
               </div>
             </div>
           </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
+          <CardContent className="p-0">
+            <div className="divide-y divide-gray-50">
               {isLoadingView ? (
-                <div className="text-center py-8">
-                  <div className="inline-block">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-600 mx-auto mb-2"></div>
-                    <p className="text-sm text-muted-foreground">Loading schedule...</p>
+                <div className="flex flex-col items-center justify-center py-16">
+                  <div className="relative">
+                    <div className="h-12 w-12 rounded-full border-4 border-violet-100 border-t-violet-600 animate-spin"></div>
                   </div>
+                  <p className="mt-4 text-sm font-medium text-gray-500">Updating schedule...</p>
                 </div>
               ) : filteredAppointments.length > 0 ? (
                 filteredAppointments.map((appointment: Appointment) => (
-                  <div 
-                    key={appointment.id} 
-                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
+                  <div
+                    key={appointment.id}
+                    className="group flex items-center justify-between p-4 hover:bg-violet-50/50 transition-all duration-300 cursor-pointer"
                     onClick={() => {
                       setSelectedAppointment(appointment);
                       setBookingModalOpen(true);
                     }}
                   >
-                    <div className="flex items-center space-x-3">
-                      <div className="text-sm font-medium text-violet-600 min-w-[60px]">
-                        <div>{appointment.time}</div>
-                        {viewMode !== "day" && (
-                          <div className="text-xs text-gray-500 mt-1">
+                    <div className="flex items-center space-x-4">
+                      <div className="flex flex-col items-center justify-center h-14 w-14 rounded-2xl bg-violet-50 text-violet-600 group-hover:bg-violet-600 group-hover:text-white transition-colors duration-300">
+                        <span className="text-sm font-bold">{appointment.time.split(':')[0]}:{appointment.time.split(':')[1].split(' ')[0]}</span>
+                        <span className="text-[10px] font-bold uppercase">{appointment.time.split(' ')[1]}</span>
+                      </div>
+                      <div className="flex-1">
+                        <div className="text-sm font-bold text-gray-900 group-hover:text-violet-700 transition-colors">
+                          {appointment.patientName}
+                        </div>
+                        <div className="text-xs font-medium text-gray-500 flex items-center space-x-2 mt-0.5">
+                          <span>{getAppointmentTypeName(appointment.type, appointment.customType)}</span>
+                          <span className="h-1 w-1 rounded-full bg-gray-300"></span>
+                          <span className={`capitalize ${
+                            appointment.status === 'scheduled' ? 'text-emerald-600' : 
+                            appointment.status === 'pending' ? 'text-blue-600' : 'text-gray-600'
+                          }`}>{appointment.status}</span>
+                        </div>
+                        {(viewMode === "week" || viewMode === "month") && (
+                          <div className="text-xs text-gray-400 mt-1">
                             {parseBackendDateToLocal(appointment.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                           </div>
                         )}
                       </div>
-                      <div>
-                        <div className="text-sm font-medium">{appointment.patientName}</div>
-                        <div className="text-xs text-muted-foreground flex items-center space-x-2">
-                          <span>{getAppointmentTypeName(appointment.type, appointment.customType)} • {appointment.duration || 30} min</span>
-                          <Badge variant={appointment.status === "pending" ? "outline" : appointment.status === "confirmed" ? "secondary" : "default"}>
-                            {appointment.status}
-                          </Badge>
-                        </div>
-                      </div>
+                    </div>
+                    <div className="opacity-0 group-hover:opacity-100 transition-opacity transform translate-x-2 group-hover:translate-x-0">
+                      <Button size="sm" variant="ghost" className="h-8 w-8 p-0 rounded-full bg-white shadow-sm">
+                        <Users className="h-4 w-4 text-violet-600" />
+                      </Button>
                     </div>
                   </div>
                 ))
               ) : (
-                <div className="text-center py-8 text-gray-500">
-                  No appointments scheduled for {viewMode === "day" ? "today" : viewMode === "week" ? "this week" : "this month"}.
+                <div className="flex flex-col items-center justify-center py-16 text-gray-400">
+                  <div className="p-4 bg-gray-50 rounded-full mb-4">
+                    <Heart className="h-8 w-8 opacity-20" />
+                  </div>
+                  <p className="text-sm font-medium">No appointments scheduled</p>
                 </div>
               )}
             </div>
@@ -251,13 +273,19 @@ export function DoctorDashboard() {
         </Card>
 
         {/* Appointment Types Pie Chart */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Appointment Types</CardTitle>
+        <Card className="border-none shadow-md bg-white">
+          <CardHeader className="border-b border-gray-50 pb-4">
+            <CardTitle className="text-lg font-bold text-gray-800">Visit Statistics</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-6">
             {(() => {
-              const typeCounts = appointmentsByDate.reduce<Record<string, number>>((acc, apt) => {
+              // Use all-time appointments if current view has no data
+              const appointmentsToAnalyze = appointmentsByDate.length === 0 ? myAppointments : appointmentsByDate;
+              const isAllTime = appointmentsByDate.length === 0;
+              
+              if (appointmentsToAnalyze.length === 0) return null;
+
+              const typeCounts = appointmentsToAnalyze.reduce<Record<string, number>>((acc, apt) => {
                 const key = getAppointmentTypeName(apt.type, apt.customType);
                 acc[key] = (acc[key] || 0) + 1;
                 return acc;
@@ -270,8 +298,18 @@ export function DoctorDashboard() {
                 color: ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4", "#f97316"][idx % 7]
               }));
 
+              const getTimeLabel = () => {
+                if (isAllTime) return "All Time";
+                if (viewMode === "day") return "Today";
+                if (viewMode === "week") return "This Week";
+                return "This Month";
+              };
+
               return (
                 <>
+                  <div className="mb-3">
+                    <p className="text-xs font-semibold text-gray-600 mb-2">{getTimeLabel()}</p>
+                  </div>
                   <ResponsiveContainer width="100%" height={250}>
                     <PieChart>
                       <Pie
@@ -308,68 +346,131 @@ export function DoctorDashboard() {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Your Next Patient Card */}
+        {filteredAppointments.length > 0 && (
+          <div className="relative p-6 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg overflow-hidden group">
+            <div className="absolute top-0 right-0 p-4 opacity-10">
+              <Users className="h-32 w-32" />
+            </div>
+            <div className="relative z-10">
+              <div className="mb-4">
+                <div className="flex items-center space-x-2 bg-white/20 w-fit px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-sm mb-3">
+                  <Clock className="h-3 w-3" />
+                  <span>Confirmed</span>
+                </div>
+                <h3 className="text-2xl font-bold tracking-tight mb-1">
+                  {filteredAppointments[0].patientName}
+                </h3>
+                <p className="text-emerald-100 font-medium">{getAppointmentTypeName(filteredAppointments[0].type, filteredAppointments[0].customType)}</p>
+              </div>
+              
+              <div className="flex items-center justify-between mb-4">
+                <div className="space-y-2 flex-1">
+                  <div className="flex items-center space-x-2 bg-white/10 px-3 py-1.5 rounded-lg backdrop-blur-sm w-fit text-xs font-medium">
+                    <Calendar className="h-3 w-3" />
+                    <span>{parseBackendDateToLocal(filteredAppointments[0].date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                  </div>
+                  <div className="flex items-center space-x-2 bg-white/10 px-3 py-1.5 rounded-lg backdrop-blur-sm w-fit text-xs font-medium">
+                    <Clock className="h-3 w-3" />
+                    <span>{filteredAppointments[0].time}</span>
+                  </div>
+                </div>
+                <div className="h-20 w-20 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center flex-shrink-0 ml-3 border-2 border-white/30">
+                  <div className="text-center">
+                    <div className="text-3xl font-bold">
+                      {filteredAppointments[0].patientName.split(' ')[0].charAt(0)}{filteredAppointments[0].patientName.split(' ').pop()?.charAt(0)}
+                    </div>
+                    <div className="text-[10px] font-semibold text-emerald-100">Patient</div>
+                  </div>
+                </div>
+              </div>
+
+              <Button 
+                size="sm"
+                className="w-full bg-white text-emerald-600 hover:bg-emerald-50 font-bold py-2 rounded-lg h-auto"
+                onClick={() => {
+                  setSelectedAppointment(filteredAppointments[0]);
+                  setBookingModalOpen(true);
+                }}
+              >
+                View Details
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* Quick Actions */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Quick Actions</CardTitle>
+        <Card className="border-none shadow-md bg-white overflow-hidden lg:col-span-2">
+          <CardHeader className="border-b border-gray-50 pb-4">
+            <CardTitle className="text-xl font-bold text-gray-800">Quick Actions</CardTitle>
           </CardHeader>
-          <CardContent className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <Button
-              variant="outline"
-              className="w-full p-4 text-left h-auto transform transition-all duration-200 hover:scale-105 hover:shadow-lg hover:bg-violet-50 active:scale-95"
-              onClick={() => openCreateModal()}
-            >
-              <div className="flex items-center space-x-3">
-                <Calendar className="h-6 w-6 text-violet-600 transition-colors duration-200" />
-                <div>
-                  <div className="font-medium">Schedule Appointment</div>
-                  <div className="text-sm text-muted-foreground">Book a new patient appointment</div>
+          <CardContent className="p-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Button
+                variant="outline"
+                className="group relative flex items-center justify-between p-6 h-auto border-gray-100 hover:border-violet-200 hover:bg-violet-50/50 rounded-2xl transition-all duration-300 overflow-hidden"
+                onClick={() => openCreateModal()}
+              >
+                <div className="flex items-center space-x-4 relative z-10">
+                  <div className="p-3 rounded-xl bg-violet-100 text-violet-600 group-hover:bg-violet-600 group-hover:text-white transition-colors duration-300">
+                    <Calendar className="h-6 w-6" />
+                  </div>
+                  <div className="text-left">
+                    <div className="font-bold text-gray-900">Book Visit</div>
+                    <div className="text-xs text-gray-500">Schedule patient</div>
+                  </div>
                 </div>
-              </div>
-            </Button>
+              </Button>
 
-            <Button
-              variant="outline"
-              className="w-full p-4 text-left h-auto transform transition-all duration-200 hover:scale-105 hover:shadow-lg hover:bg-blue-50 active:scale-95"
-              onClick={() => window.location.href = "/doctor/calendar"}
-            >
-              <div className="flex items-center space-x-3">
-                <Clock className="h-6 w-6 text-blue-600" />
-                <div>
-                  <div className="font-medium">View Full Calendar</div>
-                  <div className="text-sm text-muted-foreground">See your complete schedule</div>
+              <Button
+                variant="outline"
+                className="group relative flex items-center justify-between p-6 h-auto border-gray-100 hover:border-blue-200 hover:bg-blue-50/50 rounded-2xl transition-all duration-300 overflow-hidden"
+                onClick={() => window.location.href = "/doctor/calendar"}
+              >
+                <div className="flex items-center space-x-4 relative z-10">
+                  <div className="p-3 rounded-xl bg-blue-100 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors duration-300">
+                    <Clock className="h-6 w-6" />
+                  </div>
+                  <div className="text-left">
+                    <div className="font-bold text-gray-900">Calendar</div>
+                    <div className="text-xs text-gray-500">Full schedule</div>
+                  </div>
                 </div>
-              </div>
-            </Button>
+              </Button>
 
-            <Button
-              variant="outline"
-              className="w-full p-4 text-left h-auto transform transition-all duration-200 hover:scale-105 hover:shadow-lg hover:bg-pink-50 active:scale-95"
-              onClick={() => openAddPatientModal()}
-            >
-              <div className="flex items-center space-x-3">
-                <Plus className="h-6 w-6 text-pink-600" />
-                <div>
-                  <div className="font-medium">Add Patient</div>
-                  <div className="text-sm text-muted-foreground">Create a new patient record</div>
+              <Button
+                variant="outline"
+                className="group relative flex items-center justify-between p-6 h-auto border-gray-100 hover:border-pink-200 hover:bg-pink-50/50 rounded-2xl transition-all duration-300 overflow-hidden"
+                onClick={() => openAddPatientModal()}
+              >
+                <div className="flex items-center space-x-4 relative z-10">
+                  <div className="p-3 rounded-xl bg-pink-100 text-pink-600 group-hover:bg-pink-600 group-hover:text-white transition-colors duration-300">
+                    <Plus className="h-6 w-6" />
+                  </div>
+                  <div className="text-left">
+                    <div className="font-bold text-gray-900">Add Patient</div>
+                    <div className="text-xs text-gray-500">New record</div>
+                  </div>
                 </div>
-              </div>
-            </Button>
+              </Button>
 
-            <Button
-              variant="outline"
-              className="w-full p-4 text-left h-auto transform transition-all duration-200 hover:scale-105 hover:shadow-lg hover:bg-green-50 active:scale-95"
-              onClick={() => window.location.href = "/doctor/patients"}
-            >
-              <div className="flex items-center space-x-3">
-                <Users className="h-6 w-6 text-green-600" />
-                <div>
-                  <div className="font-medium">View My Patients</div>
-                  <div className="text-sm text-muted-foreground">Browse your patient list</div>
+              <Button
+                variant="outline"
+                className="group relative flex items-center justify-between p-6 h-auto border-gray-100 hover:border-emerald-200 hover:bg-emerald-50/50 rounded-2xl transition-all duration-300 overflow-hidden"
+                onClick={() => window.location.href = "/doctor/patients"}
+              >
+                <div className="flex items-center space-x-4 relative z-10">
+                  <div className="p-3 rounded-xl bg-emerald-100 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors duration-300">
+                    <Users className="h-6 w-6" />
+                  </div>
+                  <div className="text-left">
+                    <div className="font-bold text-gray-900">My Patients</div>
+                    <div className="text-xs text-gray-500">Patient list</div>
+                  </div>
                 </div>
-              </div>
-            </Button>
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>

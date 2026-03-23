@@ -567,7 +567,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                               variant="ghost" 
                               size="sm" 
                               className="text-green-600 hover:text-green-700 hover:bg-green-50"
-                              onClick={() => handleStatusChangeRequest(request, "scheduled")}
+                              onClick={() => handleStatusChangeRequest(request, APPOINTMENT_STATUSES[0].value)}
                               title="Approve"
                             >
                               <CheckCircle className="h-4 w-4" />
@@ -576,7 +576,10 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                               variant="ghost" 
                               size="sm" 
                               className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                              onClick={() => handleStatusChangeRequest(request, "cancelled")}
+                              onClick={() => {
+                                const cancelledStatus = APPOINTMENT_STATUSES.find(s => s.value === 'cancelled');
+                                handleStatusChangeRequest(request, cancelledStatus?.value || 'cancelled');
+                              }}
                               title="Reject"
                             >
                               <XCircle className="h-4 w-4" />

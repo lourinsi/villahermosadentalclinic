@@ -12,6 +12,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useDoctors } from "@/hooks/useDoctors";
 import { toast } from "sonner";
 import { APPOINTMENT_TYPES, getAppointmentPrice } from "@/lib/appointment-types";
+import { APPOINTMENT_STATUSES } from "@/lib/appointment-statuses";
 import { TIME_SLOTS, formatTimeTo12h } from "@/lib/time-slots";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { Appointment } from "@/hooks/useAppointments";
@@ -771,11 +772,11 @@ export function CreateAppointmentModal() {
              <Select value={formData.status} onValueChange={(v) => setFormData(prev => ({ ...prev, status: String(v) }))}>
                <SelectTrigger className="h-11"><SelectValue /></SelectTrigger>
                <SelectContent>
-                 <SelectItem value="scheduled">Scheduled</SelectItem>
-                 <SelectItem value="pending">Pending</SelectItem>
-                 <SelectItem value="reserved">Reserved</SelectItem>
-                 <SelectItem value="completed">Completed</SelectItem>
-                 <SelectItem value="cancelled">Cancelled</SelectItem>
+                 {APPOINTMENT_STATUSES.map((status) => (
+                   <SelectItem key={status.value} value={status.value}>
+                     {status.label}
+                   </SelectItem>
+                 ))}
                </SelectContent>
              </Select>
            </div>
