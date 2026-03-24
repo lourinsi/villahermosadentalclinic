@@ -20,7 +20,7 @@ import {
   ListFilter
 } from "lucide-react";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
-import { APPOINTMENT_STATUSES } from "@/lib/appointment-statuses";
+import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
 import { Appointment, AppointmentFilters } from "../hooks/useAppointments";
 import { Badge } from "./ui/badge";
 
@@ -39,20 +39,10 @@ import ViewMode from "./viewMode";
 import { useRouter, useSearchParams } from 'next/navigation';
 import BookingModal from "@/components/BookingModal";
 
-// Map appointment statuses to their color schemes
-// Keys are numeric IDs from APPOINTMENT_STATUSES
-// This allows easy updates to status values without changing color definitions
-const appointmentColors: Record<number, { bg: string; text: string; border: string }> = {
-  1: { bg: "bg-green-50", text: "text-green-700", border: "border-green-200" },   // scheduled
-  2: { bg: "bg-purple-50", text: "text-purple-700", border: "border-purple-200" }, // pending
-  3: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" },      // reserved
-  4: { bg: "bg-red-50", text: "text-red-700", border: "border-red-200" },         // cancelled
-  5: { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200" },      // completed
-};
-
 // Map numeric keys to readable UI labels using APPOINTMENT_STATUSES
-const getStatusLabel = (key: number): string => {
-  const status = APPOINTMENT_STATUSES.find(s => s.key === key);
+// This will be moved inside the component since we need the hook
+const getStatusLabelHelper = (key: number, statuses: any[]): string => {
+  const status = statuses.find(s => s.key === key);
   return status?.label || String(key);
 };
 
@@ -74,6 +64,10 @@ export function CalendarView({ portal = 'admin', defaultStatusFilter, defaultDoc
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
   
+  const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
+  
+  // Define getStatusLabel inside the component so it can use the hook
+  const getStatusLabel = (key: number): string => getStatusLabelHelper(key, APPOINTMENT_STATUSES);
   const { 
     openCreateModal, 
     appointments, 
@@ -301,10 +295,20 @@ export function CalendarView({ portal = 'admin', defaultStatusFilter, defaultDoc
   };
 
   const getColorForType = (type: string) => {
-    // Map string status to numeric key using APPOINTMENT_STATUSES
+    // Map string status to colors using APPOINTMENT_STATUSES
     const status = APPOINTMENT_STATUSES.find(s => s.value === type);
-    const key = status?.key ?? 1;
-    return appointmentColors[key] || appointmentColors[1];
+    
+    // Return colors from status object if available, with fallback
+    if (status?.bgColor && status?.textColor) {
+      return {
+        bg: status.bgColor.replace('100', '50'),    // Convert bg-emerald-100 to bg-emerald-50
+        text: status.textColor,
+        border: status.bgColor.replace('100', '200').replace('bg-', 'border-')  // bg-emerald-100 -> border-emerald-200
+      };
+    }
+    
+    // Fallback colors
+    return { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200" };
   };
 
   // NOTE: Convert time string to minutes since midnight for easier comparison
@@ -1037,13 +1041,13 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
               {searchTerm !== "" ? "Search Results" : (viewMode === "day" ? "Schedule" : "Appointment Overview")}
             </CardTitle>
             <div className="flex items-center gap-4 flex-wrap">
-              {Object.entries(appointmentColors).map(([keyStr, colors]) => {
-                const key = parseInt(keyStr);
-                const label = getStatusLabel(key);
+              {APPOINTMENT_STATUSES.map((status) => {
+                const bgColor = status.bgColor?.replace('100', '50') || 'bg-gray-50';
+                const borderColor = status.bgColor?.replace('100', '200').replace('bg-', 'border-') || 'border-gray-200';
                 return (
-                  <div key={key} className="flex items-center gap-1.5">
-                    <div className={`w-3 h-3 rounded-full ${colors.bg.replace('bg-', 'bg-').split(' ')[0]} border ${colors.border}`} />
-                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-tighter">{label}</span>
+                  <div key={status.value} className="flex items-center gap-1.5">
+                    <div className={`w-3 h-3 rounded-full ${bgColor} border ${borderColor}`} />
+                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-tighter">{status.label}</span>
                   </div>
                 );
               })}

@@ -10,9 +10,9 @@ import { Textarea } from "./ui/textarea";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useAuth } from "@/hooks/useAuth";
 import { useDoctors } from "@/hooks/useDoctors";
+import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
 import { toast } from "sonner";
 import { APPOINTMENT_TYPES, getAppointmentPrice } from "@/lib/appointment-types";
-import { APPOINTMENT_STATUSES } from "@/lib/appointment-statuses";
 import { TIME_SLOTS, formatTimeTo12h } from "@/lib/time-slots";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { Appointment } from "@/hooks/useAppointments";
@@ -77,6 +77,7 @@ export function CreateAppointmentModal() {
   } = useAppointmentModal();
   const { user } = useAuth();
   const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors();
+  const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
 
   const [step, setStep] = useState(1);
   const [dateAppointments, setDateAppointments] = useState<Appointment[]>([]);

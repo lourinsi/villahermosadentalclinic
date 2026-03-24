@@ -1,7 +1,7 @@
 /**
  * Appointment Status Constants (Frontend)
  * 
- * Standardized appointment status system
+ * Standardized appointment status system with color definitions
  */
 
 export const APPOINTMENT_STATUSES = {
@@ -9,6 +9,7 @@ export const APPOINTMENT_STATUSES = {
   PENDING: 'pending',       // Awaiting confirmation
   RESERVED: 'reserved',     // Tentatively reserved
   CANCELLED: 'cancelled',   // Appointment cancelled
+  COMPLETED: 'completed',   // Appointment completed
 } as const;
 
 export type AppointmentStatus = typeof APPOINTMENT_STATUSES[keyof typeof APPOINTMENT_STATUSES];
@@ -21,6 +22,18 @@ export const STATUS_DESCRIPTIONS: Record<AppointmentStatus, string> = {
   [APPOINTMENT_STATUSES.PENDING]: 'Awaiting confirmation from patient or clinic',
   [APPOINTMENT_STATUSES.RESERVED]: 'Time slot is tentatively reserved',
   [APPOINTMENT_STATUSES.CANCELLED]: 'Appointment has been cancelled',
+  [APPOINTMENT_STATUSES.COMPLETED]: 'Appointment has been completed',
+} as const;
+
+/**
+ * Status Colors for UI display
+ */
+export const STATUS_COLORS: Record<AppointmentStatus, { bgColor: string; textColor: string }> = {
+  [APPOINTMENT_STATUSES.SCHEDULED]: { bgColor: 'bg-emerald-100', textColor: 'text-emerald-700' },
+  [APPOINTMENT_STATUSES.PENDING]: { bgColor: 'bg-purple-100', textColor: 'text-purple-700' },
+  [APPOINTMENT_STATUSES.RESERVED]: { bgColor: 'bg-amber-100', textColor: 'text-amber-700' },
+  [APPOINTMENT_STATUSES.CANCELLED]: { bgColor: 'bg-red-100', textColor: 'text-red-700' },
+  [APPOINTMENT_STATUSES.COMPLETED]: { bgColor: 'bg-blue-100', textColor: 'text-blue-700' },
 } as const;
 
 /**
@@ -31,4 +44,12 @@ export const getStatusOptions = () => [
   { label: 'Pending', value: APPOINTMENT_STATUSES.PENDING },
   { label: 'Reserved', value: APPOINTMENT_STATUSES.RESERVED },
   { label: 'Cancelled', value: APPOINTMENT_STATUSES.CANCELLED },
+  { label: 'Completed', value: APPOINTMENT_STATUSES.COMPLETED },
 ];
+
+/**
+ * Get color for a status value
+ */
+export const getStatusColor = (status: string): { bgColor: string; textColor: string } => {
+  return STATUS_COLORS[status as AppointmentStatus] || { bgColor: 'bg-gray-100', textColor: 'text-gray-700' };
+};

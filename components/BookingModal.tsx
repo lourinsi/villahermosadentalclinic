@@ -9,11 +9,12 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
+import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
+import { usePaymentStatuses } from "@/hooks/usePaymentStatuses";
 import { Calendar as CalendarIcon, Clock, Award, Loader2, CheckCircle2, CreditCard, Banknote, Stethoscope, Trash2, ChevronLeft } from "lucide-react";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import { APPOINTMENT_PRICES, APPOINTMENT_TYPES, getAppointmentTypeName } from "@/lib/appointmentTypes";
-import { APPOINTMENT_STATUSES, getStatusLabel } from "@/lib/appointment-statuses";
 import { Dialog as SmallDialog, DialogContent as SmallDialogContent, DialogFooter as SmallDialogFooter } from "@/components/ui/dialog";
 import { toast } from 'sonner';
 
@@ -29,6 +30,18 @@ const getAppointmentTypeIndex = (typeName: string): number => {
     "Other": 6,
   };
   return typeMap[typeName] ?? 6;
+};
+
+// Helper function to get status label from status array
+const getStatusLabel = (statusValue: string, statuses: any[]): string => {
+  const status = statuses.find(s => s.value === statusValue);
+  return status?.label || statusValue.charAt(0).toUpperCase() + statusValue.slice(1);
+};
+
+// Helper function to get payment status label from payment status array
+const getPaymentStatusLabel = (statusValue: string, statuses: any[]): string => {
+  const status = statuses.find(s => s.value === statusValue);
+  return status?.label || statusValue.charAt(0).toUpperCase() + statusValue.slice(1);
 };
 
 interface BookingModalProps {
@@ -48,6 +61,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const { user } = useAuth();
   const { addAppointment, deleteAppointment, updateAppointment } = useAppointmentModal();
   const { openPatientPaymentFor } = usePaymentModal();
+  const { statuses: appointmentStatuses, isLoading: isLoadingStatuses } = useAppointmentStatuses();
+  const { statuses: paymentStatuses, isLoading: isLoadingPaymentStatuses } = usePaymentStatuses();
 
   const [patients, setPatients] = useState<any[]>([]);
   const [isLoadingPatients, setIsLoadingPatients] = useState(false);
@@ -67,7 +82,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [paymentMethod, setPaymentMethod] = useState<string>("");
   const [amountToPay, setAmountToPay] = useState<string>("");
   const [appointmentStatus, setAppointmentStatus] = useState<string>("scheduled");
+  const [paymentStatus, setPaymentStatus] = useState<string>("unpaid");
   const [statusChangedByUser, setStatusChangedByUser] = useState<number>(0);
+  const [paymentStatusChangedByUser, setPaymentStatusChangedByUser] = useState<number>(0);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isConfirmSummaryOpen, setIsConfirmSummaryOpen] = useState(false);
 
@@ -217,9 +234,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       // For editing, initialize payment amount to empty so user enters NEW payment amount
       setAmountToPay('');
       setAppointmentStatus(appointmentToEdit.status || 'scheduled');
+      setPaymentStatus(appointmentToEdit.paymentStatus || 'unpaid');
       setPaymentMethod(appointmentToEdit.paymentMethod || '');
       // Reset the flag when opening for edit
       setStatusChangedByUser(0);
+      setPaymentStatusChangedByUser(0);
       // ensure we start on details step when opening
       setModalStep('details');
     } else {
@@ -235,9 +254,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setSelectedTime(defaultTime ?? '');
       setAmountToPay('');
       setAppointmentStatus('scheduled');
+      setPaymentStatus('unpaid');
       setPaymentMethod('');
       // Reset the flag when opening for new appointment
       setStatusChangedByUser(0);
+      setPaymentStatusChangedByUser(0);
       setModalStep('details');
     }
   }, [appointmentToEdit, defaultDate, defaultTime, patients]);
@@ -254,6 +275,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const handleStatusChange = (newStatus: string) => {
     setAppointmentStatus(newStatus);
     setStatusChangedByUser(1);
+  };
+
+  const handlePaymentStatusChange = (newStatus: string) => {
+    setPaymentStatus(newStatus as any);
+    setPaymentStatusChangedByUser(1);
   };
 
   // First step: validate details and move to payment
@@ -286,22 +312,49 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       const newTotalPaid = amountPaid > 0 ? previouslyPaid + amountPaid : previouslyPaid;
       const newBalance = Math.max(0, finalPrice - newTotalPaid);
 
+      if (statusChangedByUser === 1) {
+        return appointmentStatus;
+      }
+
       if (newBalance <= 0) {
-        return statusChangedByUser === 1 ? appointmentStatus : 'scheduled';
-      } else if (newTotalPaid > 0) {
-        return statusChangedByUser === 1 ? appointmentStatus : 'reserved';
+        // Only auto-transition from reserved to scheduled
+        if (appointmentStatus === 'reserved') return 'scheduled';
+        return appointmentStatus;
       } else {
-        return statusChangedByUser === 1 ? appointmentStatus : 'reserved';
+        return appointmentStatus;
       }
     } else {
-      const newBalance = Math.max(0, finalPrice - amountPaid);
+      if (statusChangedByUser === 1) {
+        return appointmentStatus;
+      }
+      
       if (amountPaid >= finalPrice) {
         return 'scheduled';
-      } else if (amountPaid > 0) {
-        return 'reserved';
       } else {
         return 'reserved';
       }
+    }
+  };
+
+  // Calculate what the final payment status will be for display in summary
+  const getProjectedPaymentStatus = () => {
+    const amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
+    const amountPaid = parseFloat(amountPaidRaw) || 0;
+    
+    if (paymentStatusChangedByUser === 1) {
+      return paymentStatus;
+    }
+
+    const previouslyPaid = appointmentToEdit?.totalPaid || 0;
+    const newTotalPaid = amountPaid > 0 ? previouslyPaid + amountPaid : previouslyPaid;
+    const newBalance = Math.max(0, finalPrice - newTotalPaid);
+
+    if (newBalance <= 0) {
+      return 'paid';
+    } else if (newTotalPaid > 0) {
+      return 'half-paid';
+    } else {
+      return 'unpaid';
     }
   };
 
@@ -341,21 +394,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           newBalance,
         });
 
-        // Determine payment status based on final balance
-        let updatePaymentStatus: 'paid' | 'unpaid' | 'half-paid' = 'unpaid';
-        let updateAppointmentStatus: string = 'reserved';
-
-        if (newBalance <= 0) {
-          updatePaymentStatus = 'paid';
-          // If fully paid and user hasn't manually changed status, set to scheduled
-          updateAppointmentStatus = statusChangedByUser === 1 ? appointmentStatus : 'scheduled';
-        } else if (newTotalPaid > 0) {
-          updatePaymentStatus = 'half-paid';
-          updateAppointmentStatus = statusChangedByUser === 1 ? appointmentStatus : 'reserved';
-        } else {
-          updatePaymentStatus = 'unpaid';
-          updateAppointmentStatus = statusChangedByUser === 1 ? appointmentStatus : 'reserved';
-        }
+        // Determine statuses based on final balance and user input
+        const updatePaymentStatus = getProjectedPaymentStatus();
+        const updateAppointmentStatus = getProjectedStatus();
 
         const updated = await updateAppointment(appointmentToEdit.id, {
           patientId: selectedPatient,
@@ -368,8 +409,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           duration: Number(duration) || 30,
           price: finalPrice,
           notes,
-          status: updateAppointmentStatus,
-          paymentStatus: updatePaymentStatus,
+          status: updateAppointmentStatus as any,
+          paymentStatus: updatePaymentStatus as any,
           totalPaid: newTotalPaid,
           balance: newBalance,
         });
@@ -404,23 +445,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         onOpenChange(false);
       } else {
         // create new appointment
-        // Map payment amount to appointment status and payment status:
-        // - Full payment => paymentStatus: paid, appointment status: scheduled
-        // - Partial payment (>0 && < total) => paymentStatus: half-paid, appointment status: reserved
-        // - No payment (0) => paymentStatus: unpaid, appointment status: reserved
-        let paymentStatus: 'paid' | 'unpaid' | 'half-paid' = 'unpaid';
-        let autoStatus: string = 'reserved';
-
-        if (amountPaid >= finalPrice) {
-          paymentStatus = 'paid';
-          autoStatus = 'scheduled';
-        } else if (amountPaid > 0) {
-          paymentStatus = 'half-paid';
-          autoStatus = 'reserved';
-        } else {
-          paymentStatus = 'unpaid';
-          autoStatus = 'reserved';
-        }
+        // Determine statuses based on payment and user input
+        const paymentStatus = getProjectedPaymentStatus();
+        const autoStatus = getProjectedStatus();
 
         console.log('[BookingModal Payment] Calculated status:', { paymentStatus, autoStatus, amountPaid, finalPrice });
 
@@ -447,8 +474,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           duration: Number(duration) || 30,
           price: finalPrice,
           notes,
-          status: newBalance <= 0 ? 'scheduled' : autoStatus as any,
-          paymentStatus: newBalance <= 0 ? 'paid' : paymentStatus,
+          status: autoStatus as any,
+          paymentStatus: paymentStatus as any,
           totalPaid: amountPaid,
           balance: newBalance,
         });
@@ -658,16 +685,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                         {user?.role === "admin" || user?.role === "doctor" ? (
                           <Select value={appointmentStatus} onValueChange={handleStatusChange}>
                             <SelectTrigger className={`h-8 px-3 rounded-full text-xs font-bold border-0 w-auto ${
-                              appointmentStatus === 'scheduled' ? 'bg-emerald-100 text-emerald-700' :
-                              appointmentStatus === 'reserved' ? 'bg-amber-100 text-amber-700' :
-                              appointmentStatus === 'completed' ? 'bg-blue-100 text-blue-700' :
-                              appointmentStatus === 'cancelled' ? 'bg-red-100 text-red-700' :
-                              'bg-gray-100 text-gray-700'
+                              appointmentStatuses.find(s => s.value === appointmentStatus)?.bgColor || 'bg-gray-100'
+                            } ${
+                              appointmentStatuses.find(s => s.value === appointmentStatus)?.textColor || 'text-gray-700'
                             }`}>
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              {APPOINTMENT_STATUSES.map((status) => (
+                              {appointmentStatuses.map((status: any) => (
                                 <SelectItem key={status.value} value={status.value}>
                                   {status.label}
                                 </SelectItem>
@@ -676,13 +701,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                           </Select>
                         ) : (
                           <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold ${
-                            appointmentStatus === 'scheduled' ? 'bg-emerald-100 text-emerald-700' :
-                            appointmentStatus === 'reserved' ? 'bg-amber-100 text-amber-700' :
-                            appointmentStatus === 'completed' ? 'bg-blue-100 text-blue-700' :
-                            appointmentStatus === 'cancelled' ? 'bg-red-100 text-red-700' :
-                            'bg-gray-100 text-gray-700'
+                            appointmentStatuses.find(s => s.value === appointmentStatus)?.bgColor || 'bg-gray-100'
+                          } ${
+                            appointmentStatuses.find(s => s.value === appointmentStatus)?.textColor || 'text-gray-700'
                           }`}>
-                            {getStatusLabel(appointmentStatus)}
+                            {getStatusLabel(appointmentStatus, appointmentStatuses)}
                           </span>
                         )}
                       </div>
@@ -795,15 +818,15 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 </div>
 
                 {/* Status Field - Only for Admin/Doctor in Edit Mode */}
-                {isEditMode && (user?.role === "admin" || user?.role === "doctor") && (
+                {/* {isEditMode && (user?.role === "admin" || user?.role === "doctor") && (
                   <div className="space-y-2">
                     <Label htmlFor="appointmentStatus">Appointment Status</Label>
-                    <Select value={appointmentStatus} onValueChange={setAppointmentStatus}>
+                    <Select value={appointmentStatus} onValueChange={handleStatusChange}>
                       <SelectTrigger id="appointmentStatus">
                         <SelectValue placeholder="Select appointment status" />
                       </SelectTrigger>
                       <SelectContent>
-                        {APPOINTMENT_STATUSES.map((status) => (
+                        {appointmentStatuses.map((status: any) => (
                           <SelectItem key={status.value} value={status.value}>
                             {status.label}
                           </SelectItem>
@@ -811,24 +834,40 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                       </SelectContent>
                     </Select>
                   </div>
-                )}
+                )} */}
 
-                {/* Status Display - Read-only for Patient */}
-                {isEditMode && user?.role === "patient" && (
+                {/* Payment Status Display - Read-only for Patient, Editable for Admin/Doctor */}
+                {isEditMode && (
                   <div className="space-y-2">
-                    <Label htmlFor="appointmentStatusReadonly">Appointment Status</Label>
-                    <div className="p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-between">
-                      <span className="text-sm font-medium text-gray-700">Status:</span>
-                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold ${
-                        appointmentStatus === 'scheduled' ? 'bg-emerald-100 text-emerald-700' :
-                        appointmentStatus === 'reserved' ? 'bg-amber-100 text-amber-700' :
-                        appointmentStatus === 'completed' ? 'bg-blue-100 text-blue-700' :
-                        appointmentStatus === 'cancelled' ? 'bg-red-100 text-red-700' :
-                        'bg-gray-100 text-gray-700'
-                      }`}>
-                        {appointmentStatus.charAt(0).toUpperCase() + appointmentStatus.slice(1)}
-                      </span>
-                    </div>
+                    <Label htmlFor="paymentStatus" className="text-sm font-semibold">Payment Status</Label>
+                    {user?.role === "patient" ? (
+                      <div className="p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-between">
+                        <span className="text-sm font-medium text-gray-700">Status:</span>
+                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold ${
+                          paymentStatus === 'paid' ? 'bg-emerald-100 text-emerald-700' :
+                          paymentStatus === 'unpaid' ? 'bg-red-100 text-red-700' :
+                          paymentStatus === 'half-paid' ? 'bg-amber-100 text-amber-700' :
+                          paymentStatus === 'overdue' ? 'bg-orange-100 text-orange-700' :
+                          paymentStatus === 'pay-at-clinic' ? 'bg-blue-100 text-blue-700' :
+                          'bg-gray-100 text-gray-700'
+                        }`}>
+                          {getPaymentStatusLabel(paymentStatus, paymentStatuses)}
+                        </span>
+                      </div>
+                    ) : (
+                      <Select value={paymentStatus} onValueChange={handlePaymentStatusChange}>
+                        <SelectTrigger id="paymentStatus">
+                          <SelectValue placeholder="Select payment status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {paymentStatuses.map((status: any) => (
+                            <SelectItem key={status.value} value={status.value}>
+                              {status.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
                   </div>
                 )}
               </div>
@@ -920,13 +959,22 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 <div className="flex justify-between">
                   <span className="text-gray-600">Status:</span>
                   <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-bold ${
-                    getProjectedStatus() === 'scheduled' ? 'bg-emerald-100 text-emerald-700' :
-                    getProjectedStatus() === 'reserved' ? 'bg-amber-100 text-amber-700' :
-                    getProjectedStatus() === 'completed' ? 'bg-blue-100 text-blue-700' :
-                    getProjectedStatus() === 'cancelled' ? 'bg-red-100 text-red-700' :
+                    appointmentStatuses.find(s => s.value === getProjectedStatus())?.bgColor || 'bg-gray-100'
+                  } ${
+                    appointmentStatuses.find(s => s.value === getProjectedStatus())?.textColor || 'text-gray-700'
+                  }`}>
+                    {getStatusLabel(getProjectedStatus(), appointmentStatuses)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Payment:</span>
+                  <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-bold ${
+                    getProjectedPaymentStatus() === 'paid' ? 'bg-emerald-100 text-emerald-700' :
+                    getProjectedPaymentStatus() === 'unpaid' ? 'bg-red-100 text-red-700' :
+                    getProjectedPaymentStatus() === 'half-paid' ? 'bg-amber-100 text-amber-700' :
                     'bg-gray-100 text-gray-700'
                   }`}>
-                    {getProjectedStatus().charAt(0).toUpperCase() + getProjectedStatus().slice(1)}
+                    {getPaymentStatusLabel(getProjectedPaymentStatus(), paymentStatuses)}
                   </span>
                 </div>
                 <div className="border-t border-blue-100 pt-2 mt-2">

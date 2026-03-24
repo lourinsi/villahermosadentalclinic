@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
-import { APPOINTMENT_STATUSES } from "@/lib/appointment-statuses";
+import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
 import { Badge } from "./ui/badge";
 import { toast } from "sonner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
@@ -55,6 +55,7 @@ interface RequestsViewProps {
 
 export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const { appointments, isLoading, updateAppointment, openEditModal, refreshAppointments } = useAppointmentModal();
+  const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
   
   // Booking Modal state
   const [bookingModalOpen, setBookingModalOpen] = useState(false);

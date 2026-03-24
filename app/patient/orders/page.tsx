@@ -3,13 +3,13 @@
 import { useEffect, useState, Suspense } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useAppointments, Appointment } from "@/hooks/useAppointments";
+import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Calendar, Clock, Briefcase, CreditCard, CheckCircle2, Search, X, ArrowUpDown } from "lucide-react";
 import { getAppointmentTypeName } from "@/lib/appointment-types";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import { parseBackendDateToLocal } from "@/lib/utils";
-import { APPOINTMENT_STATUSES, getStatusLabel } from "@/lib/appointment-statuses";
 import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
@@ -32,8 +32,15 @@ const OrdersContent = () => {
     
     const { user, isLoading: authLoading } = useAuth();
     const { appointments, isLoading: appointmentsLoading } = useAppointments(undefined, { patientId: user?.patientId });
+    const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
     const { openPatientPaymentFor } = usePaymentModal();
     const [sortedAppointments, setSortedAppointments] = useState<Appointment[]>([]);
+    
+    // Helper function to get status label
+    const getStatusLabel = (statusValue: string): string => {
+      const status = APPOINTMENT_STATUSES.find(s => s.value === statusValue);
+      return status?.label || statusValue.charAt(0).toUpperCase() + statusValue.slice(1);
+    };
     
     // Filter states
     const [searchQuery, setSearchQuery] = useState("");

@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Textarea } from "./ui/textarea";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { Appointment } from "../hooks/useAppointments";
-import { APPOINTMENT_STATUSES } from "@/lib/appointment-statuses";
+import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
 import {
   Users,
   UserPlus,
@@ -80,6 +80,8 @@ export function StaffView() {
   const [searchQuery, setSearchQuery] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
+  
   const [newStaff, setNewStaff] = useState({
     name: "",
     role: "",
