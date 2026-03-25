@@ -13,6 +13,8 @@ import { parseBackendDateToLocal } from "@/lib/utils";
 import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
+import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { ContextBookingModal } from "@/components/ContextBookingModal";
 import { Input } from "@/components/ui/input";
 import {
     Select,
@@ -33,7 +35,7 @@ const OrdersContent = () => {
     const { user, isLoading: authLoading } = useAuth();
     const { appointments, isLoading: appointmentsLoading } = useAppointments(undefined, { patientId: user?.patientId });
     const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
-    const { openPatientPaymentFor } = usePaymentModal();
+    const { openEditModal } = useAppointmentModal();
     const [sortedAppointments, setSortedAppointments] = useState<Appointment[]>([]);
     
     // Helper function to get status label
@@ -62,15 +64,15 @@ const OrdersContent = () => {
             });
             setSortedAppointments(sorted);
 
-            // If appointmentId is in URL, open payment dialog
+            // If appointmentId is in URL, open booking modal in edit mode
             if (appointmentIdParam) {
                 const apt = sorted.find(a => a.id === appointmentIdParam);
                 if (apt && apt.paymentStatus !== 'paid') {
-                    openPatientPaymentFor(apt);
+                    openEditModal(apt, true);
                 }
             }
         }
-    }, [appointments, appointmentIdParam, openPatientPaymentFor]);
+    }, [appointments, appointmentIdParam, openEditModal]);
 
     useEffect(() => {
         const onUpdated = (e: Event) => {
@@ -90,7 +92,15 @@ const OrdersContent = () => {
     }, []);
 
     const handleOpenPayment = (apt: Appointment) => {
-        openPatientPaymentFor(apt);
+        // Open BookingModal in view mode (patient readonly)
+        console.log('[Orders] Pay Now clicked:', { appointmentId: apt.id, doctor: apt.doctor, date: apt.date, time: apt.time });
+        try {
+            console.log('[Orders] Calling openEditModal with:', { appointmentId: apt.id, isPatientReadonly: true });
+            openEditModal(apt, true);
+            console.log('[Orders] openEditModal called successfully');
+        } catch (err) {
+            console.error('[Orders] Error calling openEditModal:', err);
+        }
     };
 
     const displayStatus = (s?: string) => {
@@ -485,10 +495,25 @@ const OrdersContent = () => {
                                             <CreditCard className="h-4 w-4" />
                                             Pay Now
                                         </Button>
+                                    ) : appointment.paymentStatus === 'paid' ? (
+                                        <div className="flex items-center gap-2">
+                                            <div className="flex items-center text-emerald-600 text-sm font-medium gap-2">
+                                                <CheckCircle2 className="h-5 w-5" />
+                                                Payment Complete
+                                            </div>
+                                            <Button 
+                                                onClick={() => handleOpenPayment(appointment)} 
+                                                variant="outline"
+                                                size="sm"
+                                                className="border-gray-300 text-gray-700 hover:bg-gray-100"
+                                            >
+                                                View
+                                            </Button>
+                                        </div>
                                     ) : (
-                                        <div className="flex items-center text-emerald-600 text-sm font-medium gap-2">
+                                        <div className="flex items-center text-red-600 text-sm font-medium gap-2">
                                             <CheckCircle2 className="h-5 w-5" />
-                                            {appointment.paymentStatus === 'paid' ? 'Payment Complete' : 'No Payment Required'}
+                                            Appointment Cancelled
                                         </div>
                                     )}
                                 </div>
@@ -498,6 +523,8 @@ const OrdersContent = () => {
                 </div>
             )}
 
+            {/* Context-connected BookingModal for viewing/editing appointments */}
+            <ContextBookingModal />
         </div>
     );
 };

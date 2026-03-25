@@ -6,7 +6,7 @@ import { Appointment } from "@/hooks/useAppointments";
 import { useAuth } from "@/hooks/useAuth";
 import { AllAppointmentsView } from "@/components/AllAppointmentsView";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
-import { usePaymentModal } from "@/hooks/usePaymentModal";
+import { ContextBookingModal } from "@/components/ContextBookingModal";
 import { toast } from "sonner";
 import { useState } from "react";
 import ConfirmDialog from "@/components/ConfirmDialog";
@@ -17,7 +17,6 @@ const CartPage = () => {
     const parentId = user?.patientId;
 
     const { appointments, isLoading, refreshAppointments, deleteAppointment, openEditModal } = useAppointmentModal();
-    const { openPatientPaymentFor } = usePaymentModal();
 
     // Use filters to fetch all appointments for this patient/family, including unpaid
     const filters = useMemo(() => ({
@@ -53,7 +52,7 @@ const CartPage = () => {
     }, [appointments]);
 
     const handlePay = (appointment: Appointment) => {
-        openPatientPaymentFor(appointment);
+        openEditModal(appointment, true);
     };
 
     const [isConfirmOpen, setIsConfirmOpen] = useState(false);
@@ -135,6 +134,9 @@ const CartPage = () => {
                 confirmLabel="Remove"
                 cancelLabel="Cancel"
             />
+            
+            {/* Context-connected BookingModal for viewing/editing appointments */}
+            <ContextBookingModal />
         </div>
     );
 };

@@ -239,8 +239,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       // Reset the flag when opening for edit
       setStatusChangedByUser(0);
       setPaymentStatusChangedByUser(0);
-      // ensure we start on details step when opening
-      setModalStep('details');
+      // For patient readonly view (Pay Now flow), skip to payment step
+      // For admin editing, start on details step
+      const isPatientReadonly = Boolean(appointmentToEdit && user?.role === 'patient');
+      setModalStep(isPatientReadonly ? 'payment' : 'details');
     } else {
       // Reset form when creating new appointment
       setSelectedPatient(patients.length > 0 ? patients[0].id : '');
@@ -338,6 +340,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // Calculate what the final payment status will be for display in summary
   const getProjectedPaymentStatus = () => {
+    // If payment method is "Pay at Clinic", return that status
+    if (paymentMethod === "Pay at Clinic") {
+      return 'pay-at-clinic';
+    }
+
     const amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
     const amountPaid = parseFloat(amountPaidRaw) || 0;
     
@@ -358,6 +365,34 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     }
   };
 
+  // Calculate the FINAL appointment status with override logic
+  const getFinalAppointmentStatus = () => {
+    const amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
+    const amountPaid = parseFloat(amountPaidRaw) || 0;
+    
+    // Calculate balance based on whether we're editing or creating
+    let balance: number;
+    if (appointmentToEdit) {
+      const previouslyPaid = appointmentToEdit.totalPaid || 0;
+      const newTotalPaid = amountPaid > 0 ? previouslyPaid + amountPaid : previouslyPaid;
+      balance = Math.max(0, finalPrice - newTotalPaid);
+    } else {
+      balance = Math.max(0, finalPrice - amountPaid);
+    }
+
+    // Get the projected status (without override)
+    let statusToReturn = getProjectedStatus();
+
+    // Apply override: if balance > 0 and status is not scheduled, set to reserved (unless user changed it)
+    if (balance > 0 && statusToReturn !== 'scheduled') {
+      if (statusChangedByUser !== 1) {
+        statusToReturn = 'reserved';
+      }
+    }
+
+    return statusToReturn;
+  };
+
   // Final step: save after confirmation
   const handleConfirmSummary = async () => {
     if (!selectedPatient || !appointmentType) return;
@@ -365,13 +400,19 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     setIsConfirmSummaryOpen(false);
     try {
       const dateStr = formatDateToYYYYMMDD(selectedDate);
-      const amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
+      
+      // Handle "Pay at Clinic" - set amount to pay as 0
+      let amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
+      if (paymentMethod === "Pay at Clinic") {
+        amountPaidRaw = '0';
+      }
       const amountPaid = parseFloat(amountPaidRaw) || 0;
 
       console.log('[BookingModal Payment] Payment confirmation:', {
         amountToPay,
         amountPaidRaw,
         amountPaid,
+        paymentMethod,
         finalPrice,
         parsing: {
           trimmed: amountToPay.trim(),
@@ -394,9 +435,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           newBalance,
         });
 
-        // Determine statuses based on final balance and user input
-        const updatePaymentStatus = getProjectedPaymentStatus();
-        const updateAppointmentStatus = getProjectedStatus();
+        // Determine payment status
+        let updatePaymentStatus = getProjectedPaymentStatus();
+        
+        // Determine appointment status using the new function that includes override logic
+        let updateAppointmentStatus = getFinalAppointmentStatus();
 
         const updated = await updateAppointment(appointmentToEdit.id, {
           patientId: selectedPatient,
@@ -436,6 +479,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
         if (amountPaid > 0) {
           toast.success(`Payment of ₱${amountPaid.toLocaleString()} recorded successfully!`);
+        } else if (paymentMethod === "Pay at Clinic") {
+          toast.success(`Appointment set to pay at clinic!`);
         } else {
           toast.success(`Appointment updated successfully!`);
         }
@@ -445,9 +490,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         onOpenChange(false);
       } else {
         // create new appointment
-        // Determine statuses based on payment and user input
-        const paymentStatus = getProjectedPaymentStatus();
-        const autoStatus = getProjectedStatus();
+        // Determine payment status
+        let paymentStatus = getProjectedPaymentStatus();
+        
+        // Determine appointment status using the new function that includes override logic
+        let autoStatus = getFinalAppointmentStatus();
 
         console.log('[BookingModal Payment] Calculated status:', { paymentStatus, autoStatus, amountPaid, finalPrice });
 
@@ -461,6 +508,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           newBalance,
           autoStatus,
           paymentStatus,
+          paymentMethod,
         });
 
         const newApt = await addAppointment({
@@ -497,7 +545,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           timestamp: new Date().toISOString(),
         });
 
-        toast.success(`Appointment booked with payment of ₱${amountPaid.toLocaleString()}!`);
+        if (paymentMethod === "Pay at Clinic") {
+          toast.success(`Appointment created (Pay at Clinic)!`);
+        } else if (amountPaid > 0) {
+          toast.success(`Appointment booked with payment of ₱${amountPaid.toLocaleString()}!`);
+        } else {
+          toast.success(`Appointment booked successfully!`);
+        }
         try { window.dispatchEvent(new CustomEvent('appointments:updated', { detail: { appointment: newApt } })); } catch (e) {}
         if (onBooked) onBooked(newApt);
         // close modal after creating
@@ -784,8 +838,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                     value={amountToPay}
                     onChange={(e: any) => setAmountToPay(e.target.value)}
                     className="font-bold text-lg h-12"
+                    disabled={paymentMethod === "Pay at Clinic"}
                   />
-                  <p className="text-[10px] text-gray-500">Leave blank or enter 0 to skip payment. Remaining balance: ₱{remainingBalance.toLocaleString()}</p>
+                  <p className="text-[10px] text-gray-500">{paymentMethod === "Pay at Clinic" ? "Amount will be paid at the clinic" : `Leave blank or enter 0 to skip payment. Remaining balance: ₱${remainingBalance.toLocaleString()}`}</p>
                 </div>
 
                 <div className="space-y-3">
@@ -959,11 +1014,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 <div className="flex justify-between">
                   <span className="text-gray-600">Status:</span>
                   <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-bold ${
-                    appointmentStatuses.find(s => s.value === getProjectedStatus())?.bgColor || 'bg-gray-100'
+                    appointmentStatuses.find(s => s.value === getFinalAppointmentStatus())?.bgColor || 'bg-gray-100'
                   } ${
-                    appointmentStatuses.find(s => s.value === getProjectedStatus())?.textColor || 'text-gray-700'
+                    appointmentStatuses.find(s => s.value === getFinalAppointmentStatus())?.textColor || 'text-gray-700'
                   }`}>
-                    {getStatusLabel(getProjectedStatus(), appointmentStatuses)}
+                    {getStatusLabel(getFinalAppointmentStatus(), appointmentStatuses)}
                   </span>
                 </div>
                 <div className="flex justify-between">
