@@ -2,25 +2,49 @@
 
 import { useState, useMemo } from "react";
 import { useDoctors } from "@/hooks/useDoctors";
+import { useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Loader2, Search, Calendar, Mail, Award } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
+import { Loader2, Search, Calendar, Mail, Award } from "lucide-react";
 
-const AdminFindDoctorsPage = () => {
+interface DoctorsGridProps {
+  portal: "admin" | "patient";
+}
+
+export function DoctorsGrid({ portal }: DoctorsGridProps) {
   const router = useRouter();
   const { doctors, isLoadingDoctors } = useDoctors();
   const [searchTerm, setSearchTerm] = useState("");
 
   const filteredDoctors = useMemo(() => {
-    return doctors.filter(doctor =>
-      doctor.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      doctor.specialization?.toLowerCase().includes(searchTerm.toLowerCase())
+    if (!doctors) return [];
+    return doctors.filter(
+      (doctor) =>
+        doctor.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        doctor.specialization?.toLowerCase().includes(searchTerm.toLowerCase())
     );
-  }, [searchTerm, doctors]);
+  }, [doctors, searchTerm]);
+
+  const handleDoctorClick = (doctor: any) => {
+    if (portal === "admin") {
+      router.push(`/admin/doctors/${encodeURIComponent(doctor.name)}`);
+    } else {
+      router.push(`/patient/doctors/${encodeURIComponent(doctor.name)}`);
+    }
+  };
+
+  const getButtonText = () => {
+    return portal === "admin" ? "Book Appointment" : "View Availability";
+  };
+
+  const getDescription = () => {
+    return portal === "admin"
+      ? "Meet our team of experienced professionals. Select a doctor to book an appointment for a patient."
+      : "Meet our team of experienced professionals dedicated to your oral health.";
+  };
 
   if (isLoadingDoctors) {
     return (
@@ -34,9 +58,7 @@ const AdminFindDoctorsPage = () => {
     <div className="space-y-8 p-4 md:p-8 max-w-7xl mx-auto">
       <div className="flex flex-col gap-4">
         <h1 className="text-3xl font-bold tracking-tight">Our Dental Specialists</h1>
-        <p className="text-muted-foreground text-lg">
-          Meet our team of experienced professionals. Select a doctor to book an appointment for a patient.
-        </p>
+        <p className="text-muted-foreground text-lg">{getDescription()}</p>
       </div>
 
       <div className="relative max-w-md">
@@ -52,14 +74,24 @@ const AdminFindDoctorsPage = () => {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredDoctors.length > 0 ? (
-          filteredDoctors.map(doctor => (
-            <Card key={doctor.id} className="overflow-hidden flex flex-col hover:shadow-md transition-shadow">
+          filteredDoctors.map((doctor) => (
+            <Card
+              key={doctor.id}
+              className="overflow-hidden flex flex-col hover:shadow-md transition-shadow"
+            >
               <CardHeader className="pb-4 bg-muted/30">
                 <div className="flex items-start justify-between">
                   <Avatar className="h-20 w-20 border-2 border-background shadow-sm">
-                    <AvatarImage src={doctor.profilePicture} alt={doctor.name} className="object-cover" />
+                    <AvatarImage
+                      src={doctor.profilePicture}
+                      alt={doctor.name}
+                      className="object-cover"
+                    />
                     <AvatarFallback className="text-xl bg-primary/10 text-primary">
-                      {doctor.name.split(' ').map(n => n[0]).join('')}
+                      {doctor.name
+                        ?.split(" ")
+                        .map((n) => n[0])
+                        .join("")}
                     </AvatarFallback>
                   </Avatar>
                   <Badge variant="secondary" className="font-medium">
@@ -84,18 +116,19 @@ const AdminFindDoctorsPage = () => {
                     </div>
                   )}
                 </div>
-                
+
                 <div className="text-sm line-clamp-3 italic text-muted-foreground">
-                  {doctor.bio || "Dedicated to providing high-quality dental care with a gentle touch and personalized approach for every patient."}
+                  {doctor.bio ||
+                    "Dedicated to providing high-quality dental care with a gentle touch and personalized approach for every patient."}
                 </div>
               </CardContent>
               <CardFooter className="pt-2 border-t bg-muted/5 flex flex-col gap-2">
-                <Button 
-                  onClick={() => router.push(`/admin/book-appointment?doctorId=${encodeURIComponent(doctor.id)}&doctorName=${encodeURIComponent(doctor.name)}`)}
+                <Button
+                  onClick={() => handleDoctorClick(doctor)}
                   className="w-full gap-2 bg-blue-600 hover:bg-blue-700"
                 >
                   <Calendar className="h-4 w-4" />
-                  Book Appointment
+                  {getButtonText()}
                 </Button>
               </CardFooter>
             </Card>
@@ -108,6 +141,4 @@ const AdminFindDoctorsPage = () => {
       </div>
     </div>
   );
-};
-
-export default AdminFindDoctorsPage;
+}

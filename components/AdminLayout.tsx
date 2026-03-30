@@ -48,7 +48,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
     { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/admin/requests", label: "Requests", icon: ClipboardList },
     { href: "/admin/patients", label: "Patients", icon: Users },
-    { href: "/admin/find-doctors", label: "Find Doctors", icon: Stethoscope },
+    { href: "/admin/doctors", label: "Find Doctors", icon: Stethoscope },
     { href: "/admin/calendar", label: "Calendar", icon: Calendar },
     { href: "/admin/finance", label: "Finance", icon: CreditCard },
     { href: "/admin/staff", label: "Staff", icon: Shield },

@@ -187,9 +187,9 @@ export function CreateAppointmentModal() {
     if (!prevOpenRef.current && isCreateModalOpen) {
       // If the opener is an admin or a patient, redirect instead of opening the modal
       if (user?.role === "admin") {
-        console.log("CreateAppointmentModal: redirecting admin to /admin/find-doctors");
+        console.log("CreateAppointmentModal: redirecting admin to /admin/doctors");
         closeCreateModal();
-        router.push("/admin/find-doctors");
+        router.push("/admin/doctors");
         prevOpenRef.current = isCreateModalOpen;
         return;
       }

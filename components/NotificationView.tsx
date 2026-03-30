@@ -31,6 +31,7 @@ import { useDoctors } from "../hooks/useDoctors";
 interface NotificationViewProps {
   notifications: Notification[];
   onMarkAsRead: (id: string) => void;
+  onMarkAsUnread?: (id: string) => void;
   onDelete: (id: string) => void;
   onMarkAllAsRead: () => void;
   onUpdateAppointmentStatus?: (appointmentId: string, status: Appointment["status"], notificationId: string) => void;
@@ -42,7 +43,8 @@ interface NotificationViewProps {
 
 export function NotificationView({ 
   notifications, 
-  onMarkAsRead, 
+  onMarkAsRead,
+  onMarkAsUnread,
   onDelete, 
   onMarkAllAsRead,
   onUpdateAppointmentStatus,
@@ -54,7 +56,45 @@ export function NotificationView({
   const { doctors } = useDoctors();
   const [filter, setFilter] = useState<'all' | 'unread' | 'appointment' | 'payment'>('all');
 
-  const filteredNotifications = notifications
+  // Group notifications by appointmentId, showing active notification first, then logs
+  const groupedNotifications = notifications.reduce((acc, notif) => {
+    const appointmentId = notif.metadata?.appointmentId;
+    if (appointmentId) {
+      if (!acc[appointmentId]) {
+        acc[appointmentId] = { active: null, logs: [] };
+      }
+      if (notif.isLog) {
+        acc[appointmentId].logs.push(notif);
+      } else if (!acc[appointmentId].active) {
+        // Since notifications are sorted newest first, the first non-log 
+        // we encounter is the most recent active one.
+        acc[appointmentId].active = notif;
+      } else {
+        // If we encounter another non-log for same appointment, it's older.
+        // Treat it as a log entry for consistent UI.
+        acc[appointmentId].logs.push(notif);
+      }
+    } else {
+      // Notifications without appointmentId are treated as standalone
+      if (!acc['_standalone']) {
+        acc['_standalone'] = { active: null, logs: [notif] };
+      } else {
+        acc['_standalone'].logs.push(notif);
+      }
+    }
+    return acc;
+  }, {} as Record<string, { active: Notification | null; logs: Notification[] }>);
+
+  // Flatten back to a list of all notifications for filtering, but keep track of grouping
+  // IMPORTANT: Active notifications ALWAYS come first, then logs
+  const allNotificationsList = Object.entries(groupedNotifications).flatMap(([, group]) => {
+    const list = [];
+    if (group.active) list.push(group.active);
+    list.push(...group.logs);
+    return list;
+  });
+
+  const filteredNotifications = allNotificationsList
     .filter(n => {
       if (filter === 'unread') return !n.isRead;
       if (filter === 'appointment') return n.type === 'appointment';
@@ -62,6 +102,11 @@ export function NotificationView({
       return true;
     })
     .sort((a, b) => {
+      // Primary sort: Active notifications ALWAYS come before logs
+      if (a.isLog !== b.isLog) {
+        return a.isLog ? 1 : -1; // non-logs (false) come first
+      }
+      // Secondary sort: Within each group (active or logs), sort by date (newest first)
       const dateA = new Date(a.updatedAt || a.createdAt).getTime();
       const dateB = new Date(b.updatedAt || b.createdAt).getTime();
       return dateB - dateA;
@@ -125,10 +170,15 @@ export function NotificationView({
     const isActionTaken = ['cancelled', 'completed', 'scheduled'].includes(status);
 
     // When an appointment is already finalized make the row non-clickable
-    const itemClasses = `group relative p-4 flex gap-3 transition-colors rounded-xl ${!notification.isRead ? 'bg-violet-50/40' : ''} ${isActionTaken ? '' : 'cursor-pointer hover:bg-gray-100'}`;
+    const isLog = notification.isLog;
+    const itemClasses = `group relative p-4 flex gap-3 transition-colors rounded-xl ${
+      isLog 
+        ? 'bg-gray-50/60 border-l-2 border-gray-200 ml-2 opacity-75' // Logs have a subtle left border and are slightly faded
+        : !notification.isRead ? 'bg-violet-50/40' : ''
+    } ${isActionTaken || isLog ? '' : 'cursor-pointer hover:bg-gray-100'}`;
 
     // normalized sets for actionable statuses
-    const acceptStatuses = new Set(['cancelled', 'pending', 'tentative', 'topay', 'reserved', 'halfpaid']);
+    const acceptStatuses = new Set(['cancelled', 'pending', 'tentative', 'topay', 'reserved', 'halfpaid', 'scheduled']);
     const cancelStatuses = new Set(['scheduled', 'pending', 'tentative', 'topay', 'reserved', 'halfpaid']);
 
     return (
@@ -141,17 +191,24 @@ export function NotificationView({
             {avatarSrc ? <AvatarImage src={avatarSrc} /> : <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${notification.metadata?.patientName || notification.title}`} />}
             <AvatarFallback>{notification.title.substring(0, 2).toUpperCase()}</AvatarFallback>
           </Avatar>
-          <div className={`absolute -bottom-1 -right-1 p-1 rounded-full border-2 border-white ${getIconBg(notification.type)}`}>
-            {getIcon(notification.type)}
+          <div className={`absolute -bottom-1 -right-1 p-1 rounded-full border-2 border-white ${getIconBg(notification.type as NotificationType)}`}>
+            {getIcon(notification.type as NotificationType)}
           </div>
         </div>
 
         <div className="flex-1 min-w-0 pr-8">
-          <div className="flex flex-col">
-            <p className={`text-sm leading-snug ${!notification.isRead ? 'font-semibold text-gray-900' : 'text-gray-700'}`}>
-              {notification.message}
-            </p>
-            <span className={`text-xs mt-1 ${!notification.isRead ? 'text-violet-600 font-medium' : 'text-gray-500'}`}>
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <p className={`text-sm leading-snug ${!notification.isRead ? 'font-semibold text-gray-900' : 'text-gray-700'}`}>
+                {notification.message}
+              </p>
+              {isLog && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-200 text-gray-700">
+                  Log
+                </span>
+              )}
+            </div>
+            <span className={`text-xs ${!notification.isRead ? 'text-violet-600 font-medium' : 'text-gray-500'}`}>
               {format(new Date(notification.updatedAt || notification.createdAt), "yyyy-MM-dd HH:mm")}
             </span>
           </div>
@@ -159,7 +216,8 @@ export function NotificationView({
           {notification.type === 'appointment' &&
            notification.metadata?.appointmentId &&
            portal !== 'patient' &&
-           (notification.metadata?.isRequest || isActionTaken) && (
+           !isLog &&
+           (notification.metadata?.isRequest || !isActionTaken) && (
               <div className="mt-3 flex gap-2">
                 {onUpdateAppointmentStatus && (
                   <>
@@ -177,7 +235,7 @@ export function NotificationView({
                         }
                       }}
                     >
-                      {status === 'scheduled' ? 'Accepted' : 'Accept'}
+                      {status === 'scheduled' ? 'Accepted' : status === 'reserved' ? 'Accept & Schedule' : 'Accept'}
                     </Button>
                     <Button 
                       size="sm" 
@@ -214,20 +272,23 @@ export function NotificationView({
         </div>
 
         <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
-          {!notification.isRead && (
+          {/* Hide unread indicator and all interactive elements for logged notifications */}
+          {!isLog && !notification.isRead && (
             <div className="w-3 h-3 rounded-full bg-violet-600"></div>
           )}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-8 w-8 rounded-full opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity bg-white shadow-sm border border-gray-100"
-              >
-                <MoreHorizontal className="h-5 w-5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
+          {/* Hide 3-dots menu for logged notifications */}
+          {!notification.isLog && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-8 w-8 rounded-full opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity bg-white shadow-sm border border-gray-100"
+                >
+                  <MoreHorizontal className="h-5 w-5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
               {/* Always offer mark-as-read when unread */}
               {!notification.isRead && (
                 <DropdownMenuItem onClick={() => onMarkAsRead(notification.id)}>
@@ -236,25 +297,39 @@ export function NotificationView({
                 </DropdownMenuItem>
               )}
 
+              {/* Offer mark-as-unread when already read */}
+              {notification.isRead && (
+                <DropdownMenuItem onClick={() => {
+                  console.log(`[NotificationView] Mark as unread clicked for notification ${notification.id}`);
+                  if (onMarkAsUnread) {
+                    onMarkAsUnread(notification.id);
+                  }
+                }}>
+                  <Bell className="h-4 w-4 mr-2" />
+                  Mark as unread
+                </DropdownMenuItem>
+              )}
+
               {/*
                 For patient portal: if the notification is NOT an appointment,
                 has no appointmentId, or the appointment is already cancelled,
                 only show the 'Mark as read' option (per requirement).
+                For logs: never show any action items
               */}
-              {!(portal === 'patient' && (notification.type !== 'appointment' || !notification.metadata?.appointmentId || status === 'cancelled')) && (
+              {!notification.isLog && !(portal === 'patient' && (notification.type !== 'appointment' || !notification.metadata?.appointmentId || status === 'cancelled')) && (
                 <>
                   {/* Reversal & Action options in menu */}
                   {notification.type === 'appointment' && notification.metadata?.appointmentId && (
                     <>
                       {portal !== 'patient' && onUpdateAppointmentStatus && (
                         <>
-                          {acceptStatuses.has(status) && (
+                          {acceptStatuses.has(status) && status !== 'scheduled' && (
                             <DropdownMenuItem onClick={() => onUpdateAppointmentStatus(notification.metadata!.appointmentId!, 'scheduled', notification.id)}>
                               <CheckCircle className="h-4 w-4 mr-2 text-green-600" />
                               {status === 'cancelled' ? 'Re-accept Appointment' : 'Accept Appointment'}
                             </DropdownMenuItem>
                           )}
-                          {cancelStatuses.has(status) && (
+                          {cancelStatuses.has(status) && status !== 'cancelled' && (
                             <DropdownMenuItem onClick={() => onUpdateAppointmentStatus(notification.metadata!.appointmentId!, 'cancelled', notification.id)}>
                               <X className="h-4 w-4 mr-2 text-red-600" />
                               {['scheduled'].includes(status) ? 'Cancel Appointment' : 'Decline Request'}
@@ -290,7 +365,8 @@ export function NotificationView({
                 </>
               )}
             </DropdownMenuContent>
-          </DropdownMenu>
+            </DropdownMenu>
+          )}
         </div>
       </div>
     );

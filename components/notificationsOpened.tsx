@@ -45,8 +45,41 @@ export function NotificationsOpened({
 }: NotificationsOpenedProps) {
   const [filter, setFilter] = useState<'all' | 'unread' | 'appointment' | 'payment'>('all');
   const { doctors } = useDoctors();
+
+  // Group notifications by appointmentId, showing active notification first, then logs
+  const groupedNotifications = notifications.reduce((acc, notif) => {
+    const appointmentId = notif.metadata?.appointmentId;
+    if (appointmentId) {
+      if (!acc[appointmentId]) {
+        acc[appointmentId] = { active: null, logs: [] };
+      }
+      if (notif.isLog) {
+        acc[appointmentId].logs.push(notif);
+      } else if (!acc[appointmentId].active) {
+        acc[appointmentId].active = notif;
+      } else {
+        acc[appointmentId].logs.push(notif);
+      }
+    } else {
+      if (!acc['_standalone']) {
+        acc['_standalone'] = { active: null, logs: [notif] };
+      } else {
+        acc['_standalone'].logs.push(notif);
+      }
+    }
+    return acc;
+  }, {} as Record<string, { active: Notification | null; logs: Notification[] }>);
+
+  // Flatten back to a list of all notifications for filtering, but keep track of grouping
+  // IMPORTANT: Active notifications ALWAYS come first, then logs
+  const allNotificationsList = Object.entries(groupedNotifications).flatMap(([, group]) => {
+    const list = [];
+    if (group.active) list.push(group.active);
+    list.push(...group.logs);
+    return list;
+  });
   
-  const filteredNotifications = notifications
+  const filteredNotifications = allNotificationsList
     .filter(n => {
       if (filter === 'unread') return !n.isRead;
       if (filter === 'appointment') return n.type === 'appointment';
@@ -54,6 +87,11 @@ export function NotificationsOpened({
       return true;
     })
     .sort((a, b) => {
+      // Primary sort: Active notifications ALWAYS come before logs
+      if (a.isLog !== b.isLog) {
+        return a.isLog ? 1 : -1; // non-logs (false) come first
+      }
+      // Secondary sort: Within each group (active or logs), sort by date (newest first)
       const dateA = new Date(a.updatedAt || a.createdAt).getTime();
       const dateB = new Date(b.updatedAt || b.createdAt).getTime();
       return dateB - dateA;
@@ -92,9 +130,13 @@ export function NotificationsOpened({
   };
 
   const renderNotificationItem = (n: Notification) => {
-    const isActionTaken = ['cancelled', 'completed', 'scheduled'].includes(n.metadata?.currentStatus || '');
+    const statusRaw = (n.metadata?.currentStatus || '').toString().toLowerCase();
+    const status = statusRaw.replace(/[\s-]/g, '');
+    // Only consider scheduled, completed, or cancelled as final states where no actions are permitted
+    const isActionTaken = ['cancelled', 'completed', 'scheduled'].includes(status);
+    const isLog = n.isLog;
 
-  const avatarSrc = (() => {
+    const avatarSrc = (() => {
       try {
         if (n.type === 'appointment') {
           const meta: any = n.metadata || {};
@@ -112,7 +154,14 @@ export function NotificationsOpened({
     })();
 
     // if the appointment already has a final status we don't want the item to look clickable
-    const itemClasses = `group relative p-2 flex gap-3 hover:bg-gray-100 transition-colors rounded-lg ${isActionTaken ? '' : 'cursor-pointer'} ${!n.isRead ? 'bg-violet-50/40' : ''}`;
+    const itemClasses = `group relative p-2 flex gap-3 rounded-lg transition-colors ${
+      isLog 
+        ? 'bg-gray-50/60 border-l-2 border-gray-200 ml-2 opacity-75'
+        : isActionTaken 
+        ? '' 
+        : 'hover:bg-gray-100 cursor-pointer'
+    } ${!n.isRead && !isLog ? 'bg-violet-50/40' : ''}`;
+    
     return (
       <div key={n.id} className={itemClasses}>
         <div className="relative flex-shrink-0">
@@ -124,21 +173,28 @@ export function NotificationsOpened({
             )}
             <AvatarFallback>{n.title.substring(0, 2).toUpperCase()}</AvatarFallback>
           </Avatar>
-          <div className={`absolute -bottom-1 -right-1 p-0.5 rounded-full border-2 border-white ${getIconBg(n.type)}`}>
-            {getIcon(n.type)}
+          <div className={`absolute -bottom-1 -right-1 p-0.5 rounded-full border-2 border-white ${getIconBg(n.type as NotificationType)}`}>
+            {getIcon(n.type as NotificationType)}
           </div>
         </div>
         <div className="flex-1 min-w-0 py-0.5 pr-6">
-          <p className={`text-xs leading-snug line-clamp-3 ${!n.isRead ? 'font-semibold text-gray-900' : 'text-gray-700'}`}>
-            {n.message}
-          </p>
+          <div className="flex items-center gap-2">
+            <p className={`text-xs leading-snug line-clamp-3 ${!n.isRead ? 'font-semibold text-gray-900' : 'text-gray-700'}`}>
+              {n.message}
+            </p>
+            {isLog && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-200 text-gray-700 flex-shrink-0">
+                Log
+              </span>
+            )}
+          </div>
           <p className={`text-[10px] mt-1 ${!n.isRead ? 'text-violet-600 font-medium' : 'text-gray-400'}`}>
             {format(new Date(n.updatedAt || n.createdAt), "yyyy-MM-dd HH:mm")}
           </p>
 
           {n.type === 'appointment' && 
            n.metadata?.appointmentId && 
-           (n.metadata?.isRequest || isActionTaken) && 
+           !isLog &&
            onUpdateAppointmentStatus && 
            portal !== 'patient' && (
               <div className="mt-2 flex gap-1.5">
@@ -146,7 +202,7 @@ export function NotificationsOpened({
                   size="sm" 
                   disabled={isActionTaken}
                   className={`h-7 flex-1 text-[10px] font-semibold rounded-md ${
-                    n.metadata?.currentStatus === 'scheduled'
+                    status === 'scheduled'
                       ? "bg-emerald-600 hover:bg-emerald-700 text-white disabled:bg-emerald-600 disabled:text-white disabled:cursor-not-allowed"
                       : "bg-violet-600 hover:bg-violet-700 text-white disabled:bg-violet-200"
                   }`}
@@ -157,14 +213,14 @@ export function NotificationsOpened({
                     }
                   }}
                 >
-                  {n.metadata?.currentStatus === 'scheduled' ? 'Accepted' : 'Accept'}
+                  {status === 'scheduled' ? 'Accepted' : 'Accept'}
                 </Button>
                 <Button 
                   size="sm" 
                   variant="secondary"
                   disabled={isActionTaken}
                   className={`h-7 flex-1 text-[10px] font-semibold rounded-md ${
-                    n.metadata?.currentStatus === 'cancelled'
+                    status === 'cancelled'
                       ? "bg-red-600 hover:bg-red-700 text-white disabled:bg-red-600 disabled:text-white disabled:cursor-not-allowed"
                       : "bg-gray-200 hover:bg-gray-300 text-gray-900 disabled:bg-gray-100 disabled:text-gray-400"
                   }`}
@@ -175,104 +231,110 @@ export function NotificationsOpened({
                     }
                   }}
                 >
-                  {n.metadata?.currentStatus === 'cancelled' ? 'Declined' : 'Decline'}
+                  {status === 'cancelled' ? 'Declined' : 'Decline'}
                 </Button>
               </div>
           )}
         </div>
 
         <div className="absolute right-1 top-2 flex flex-col items-center gap-2">
-          {!n.isRead && (
+          {!isLog && !n.isRead && (
             <div className="w-2 h-2 rounded-full bg-violet-600"></div>
           )}
           
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-6 w-6 rounded-full opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <MoreHorizontal className="h-4 w-4 text-gray-500" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              {!n.isRead && onMarkAsRead && (
-                <DropdownMenuItem onClick={(e) => {
-                  e.stopPropagation();
-                  onMarkAsRead(n.id);
-                }}>
-                  <Check className="h-3.5 w-3.5 mr-2" />
-                  <span className="text-xs">Mark as read</span>
-                </DropdownMenuItem>
-              )}
-
-              {/* Reversal & Action options in menu */}
-              {n.type === 'appointment' && n.metadata?.appointmentId && (
-                <>
-                  {portal !== 'patient' && onUpdateAppointmentStatus && (
-                    <>
-                      {['cancelled', 'pending', 'tentative', 'To Pay'].includes(n.metadata.currentStatus || '') && (
-                        <DropdownMenuItem onClick={(e) => {
-                          e.stopPropagation();
-                          onUpdateAppointmentStatus(n.metadata!.appointmentId!, 'scheduled', n.id);
-                        }}>
-                          <CheckCircle className="h-3.5 w-3.5 mr-2 text-green-600" />
-                          <span className="text-xs">{n.metadata.currentStatus === 'cancelled' ? 'Re-accept Appointment' : 'Accept Appointment'}</span>
-                        </DropdownMenuItem>
-                      )}
-                      {['scheduled', 'pending', 'tentative', 'To Pay'].includes(n.metadata.currentStatus || '') && (
-                        <DropdownMenuItem onClick={(e) => {
-                          e.stopPropagation();
-                          onUpdateAppointmentStatus(n.metadata!.appointmentId!, 'cancelled', n.id);
-                        }}>
-                          <X className="h-3.5 w-3.5 mr-2 text-red-600" />
-                          <span className="text-xs">{['scheduled'].includes(n.metadata.currentStatus || '') ? 'Cancel Appointment' : 'Decline Request'}</span>
-                        </DropdownMenuItem>
-                      )}
-                    </>
-                  )}
-                  
-                  {portal === 'patient' && n.metadata?.appointmentId && n.metadata?.currentStatus !== 'cancelled' && (
-                    <>
-                      {onReschedule && (
-                        <DropdownMenuItem onClick={(e) => {
-                          e.stopPropagation();
-                          onReschedule(n.metadata!.appointmentId!);
-                        }}>
-                          <Edit2 className="h-3.5 w-3.5 mr-2 text-violet-600" />
-                          <span className="text-xs">Reschedule</span>
-                        </DropdownMenuItem>
-                      )}
-                      {onCancelAppointment && (
-                        <DropdownMenuItem onClick={(e) => {
-                          e.stopPropagation();
-                          onCancelAppointment(n.metadata!.appointmentId!);
-                        }}>
-                          <Ban className="h-3.5 w-3.5 mr-2 text-red-600" />
-                          <span className="text-xs">Cancel Appointment</span>
-                        </DropdownMenuItem>
-                      )}
-                    </>
-                  )}
-                </>
-              )}
-
-              {onDelete && (
-                <DropdownMenuItem 
-                  className="text-red-600 focus:text-red-600" 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDelete(n.id);
-                  }}
+          {!isLog && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-6 w-6 rounded-full opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                  onClick={(e) => e.stopPropagation()}
                 >
-                  <Trash2 className="h-3.5 w-3.5 mr-2" />
-                  <span className="text-xs">Delete notification</span>
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
+                  <MoreHorizontal className="h-4 w-4 text-gray-500" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                {!n.isRead && onMarkAsRead && (
+                  <DropdownMenuItem onClick={(e) => {
+                    e.stopPropagation();
+                    onMarkAsRead(n.id);
+                  }}>
+                    <Check className="h-3.5 w-3.5 mr-2" />
+                    <span className="text-xs">Mark as read</span>
+                  </DropdownMenuItem>
+                )}
+
+                {/* Reversal & Action options in menu - only for non-logs and non-patient cancelled appointments */}
+                {!isLog && !(portal === 'patient' && (n.type !== 'appointment' || !n.metadata?.appointmentId || status === 'cancelled')) && (
+                  <>
+                    {n.type === 'appointment' && n.metadata?.appointmentId && (
+                      <>
+                        {portal !== 'patient' && onUpdateAppointmentStatus && (
+                          <>
+                            {['cancelled', 'pending', 'tentative', 'topay'].includes(status) && (
+                              <DropdownMenuItem onClick={(e) => {
+                                e.stopPropagation();
+                                onUpdateAppointmentStatus(n.metadata!.appointmentId!, 'scheduled', n.id);
+                              }}>
+                                <CheckCircle className="h-3.5 w-3.5 mr-2 text-green-600" />
+                                <span className="text-xs">{status === 'cancelled' ? 'Re-accept Appointment' : 'Accept Appointment'}</span>
+                              </DropdownMenuItem>
+                            )}
+                            {['scheduled', 'pending', 'tentative', 'topay'].includes(status) && (
+                              <DropdownMenuItem onClick={(e) => {
+                                e.stopPropagation();
+                                onUpdateAppointmentStatus(n.metadata!.appointmentId!, 'cancelled', n.id);
+                              }}>
+                                <X className="h-3.5 w-3.5 mr-2 text-red-600" />
+                                <span className="text-xs">{status === 'scheduled' ? 'Cancel Appointment' : 'Decline Request'}</span>
+                              </DropdownMenuItem>
+                            )}
+                          </>
+                        )}
+                        
+                        {portal === 'patient' && n.metadata?.currentStatus !== 'cancelled' && (
+                          <>
+                            {onReschedule && (
+                              <DropdownMenuItem onClick={(e) => {
+                                e.stopPropagation();
+                                onReschedule(n.metadata!.appointmentId!);
+                              }}>
+                                <Edit2 className="h-3.5 w-3.5 mr-2 text-violet-600" />
+                                <span className="text-xs">Reschedule</span>
+                              </DropdownMenuItem>
+                            )}
+                            {onCancelAppointment && (
+                              <DropdownMenuItem onClick={(e) => {
+                                e.stopPropagation();
+                                onCancelAppointment(n.metadata!.appointmentId!);
+                              }}>
+                                <Ban className="h-3.5 w-3.5 mr-2 text-red-600" />
+                                <span className="text-xs">Cancel Appointment</span>
+                              </DropdownMenuItem>
+                            )}
+                          </>
+                        )}
+                      </>
+                    )}
+
+                    {onDelete && (
+                      <DropdownMenuItem 
+                        className="text-red-600 focus:text-red-600" 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDelete(n.id);
+                        }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5 mr-2" />
+                        <span className="text-xs">Delete notification</span>
+                      </DropdownMenuItem>
+                    )}
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       </div>
     );

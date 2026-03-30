@@ -141,7 +141,7 @@ export function PatientBookingModal() {
       // redirect immediately for admin or patient users instead of opening modal
       if (user?.role === "admin") {
         closePatientBookingModal();
-        router.push("/admin/find-doctors");
+        router.push("/admin/doctors");
         return;
       }
       if (user?.role === "patient") {

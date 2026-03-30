@@ -55,6 +55,26 @@ export const useNotifications = () => {
     }
   };
 
+  const markAsUnread = async (id: string) => {
+    try {
+      console.log(`[useNotifications] Marking notification ${id} as unread`);
+      const response = await fetch(`http://localhost:3001/api/notifications/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isRead: false }),
+      });
+
+      if (!response.ok) throw new Error("Failed to mark notification as unread");
+      
+      console.log(`[useNotifications] Successfully marked notification ${id} as unread`);
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: false } : n));
+      toast.success("Marked as unread");
+    } catch (error) {
+      console.error("Error marking notification as unread:", error);
+      toast.error("Failed to update notification");
+    }
+  };
+
   const deleteNotification = async (id: string) => {
     try {
       const response = await fetch(`http://localhost:3001/api/notifications/${id}`, {
@@ -93,6 +113,7 @@ export const useNotifications = () => {
     notifications,
     isLoading,
     markAsRead,
+    markAsUnread,
     deleteNotification,
     markAllAsRead,
     refreshNotifications: fetchNotifications,
