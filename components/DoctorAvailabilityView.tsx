@@ -284,6 +284,218 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
     );
   };
 
+  const getWeekDates = useCallback(() => {
+    const start = new Date(selectedDate);
+    const day = start.getDay();
+    start.setDate(start.getDate() - day);
+    
+    const dates = [];
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(start);
+      date.setDate(start.getDate() + i);
+      dates.push(date);
+    }
+    return dates;
+  }, [selectedDate]);
+
+  const renderWeekView = () => {
+    const weekDates = getWeekDates();
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const maxSlotsDisplay = 4;
+
+    return (
+      <div className="bg-white rounded-xl overflow-hidden shadow-sm">
+        <div className="overflow-x-auto">
+          <div className="grid gap-4 p-6" style={{ gridTemplateColumns: 'repeat(7, minmax(160px, 1fr))' }}>
+            {weekDates.map((date) => {
+              const slots = getDaySlots(date);
+              const isPastDate = date < now;
+              const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+              const dayStr = date.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
+              
+              const openSlots = slots.filter(s => s.isAvailable && !s.isPast);
+              const displaySlots = openSlots.slice(0, maxSlotsDisplay);
+              const hasMore = openSlots.length > maxSlotsDisplay;
+
+              return (
+                <div key={dateStr} className="flex flex-col border border-gray-100 rounded-lg overflow-hidden">
+                  <div className={`p-3 text-center font-semibold text-sm border-b ${
+                    isPastDate ? 'bg-gray-50 text-gray-400 border-gray-200' : 'bg-blue-50 text-blue-700 border-blue-100'
+                  }`}>
+                    <div className="font-bold">{dayStr}</div>
+                    <div className="text-xs">{dateStr}</div>
+                  </div>
+                  
+                  <div className="flex-1 flex flex-col bg-gray-50/50">
+                    {isPastDate ? (
+                      <div className="flex-1 flex items-center justify-center p-4">
+                        <span className="text-[10px] text-gray-400 font-semibold">PAST DATE</span>
+                      </div>
+                    ) : openSlots.length === 0 ? (
+                      <div className="flex-1 flex items-center justify-center p-4">
+                        <span className="text-[10px] text-gray-400 font-semibold">NO OPEN SLOTS</span>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col">
+                        <div className="space-y-1 p-2 max-h-[200px] overflow-y-auto custom-scrollbar">
+                          {displaySlots.map((slot) => (
+                            <button
+                              key={slot.time}
+                              onClick={() => {
+                                setBookingDefaultTime(slot.time);
+                                setBookingDefaultDate(date);
+                                setBookingModalOpen(true);
+                              }}
+                              className="w-full px-2 py-1 rounded text-[10px] font-bold transition-all text-center bg-emerald-100 text-emerald-700 hover:bg-emerald-200 cursor-pointer"
+                            >
+                              {slot.time}
+                            </button>
+                          ))}
+                        </div>
+                        {hasMore && (
+                          <button
+                            onClick={() => {
+                              setSelectedDate(date);
+                              setViewMode('day');
+                            }}
+                            className="mt-2 mx-2 mb-2 py-1.5 rounded-lg text-[9px] font-bold uppercase bg-blue-600 text-white hover:bg-blue-700 transition-all"
+                          >
+                            View More
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const getMonthDates = useCallback(() => {
+    const start = new Date(selectedDate);
+    start.setDate(1);
+    const end = new Date(start);
+    end.setMonth(end.getMonth() + 1);
+    end.setDate(0);
+    
+    const dates = [];
+    const startDay = start.getDay();
+    
+    // Add previous month's dates
+    for (let i = startDay - 1; i >= 0; i--) {
+      const date = new Date(start);
+      date.setDate(start.getDate() - (i + 1));
+      dates.push({ date, isCurrentMonth: false });
+    }
+    
+    // Add current month's dates
+    for (let date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
+      dates.push({ date: new Date(date), isCurrentMonth: true });
+    }
+    
+    // Add next month's dates
+    const remaining = 42 - dates.length;
+    for (let i = 1; i <= remaining; i++) {
+      const date = new Date(end);
+      date.setDate(end.getDate() + i);
+      dates.push({ date, isCurrentMonth: false });
+    }
+    
+    return dates;
+  }, [selectedDate]);
+
+  const renderMonthView = () => {
+    const monthDates = getMonthDates();
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    
+    const monthStr = selectedDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const weekDayHeaders = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+    const maxSlotsDisplay = 3;
+
+    return (
+      <div className="bg-white rounded-xl overflow-hidden shadow-sm">
+        <div className="p-6">
+          <h3 className="text-lg font-bold text-gray-900 mb-6 text-center">{monthStr}</h3>
+          
+          <div className="grid grid-cols-7 gap-2 mb-4">
+            {weekDayHeaders.map((day) => (
+              <div key={day} className="text-center font-bold text-xs text-gray-600 py-2 bg-gray-50 rounded">
+                {day}
+              </div>
+            ))}
+          </div>
+          
+          <div className="grid grid-cols-7 gap-2">
+            {monthDates.map((dayObj, idx) => {
+              const { date, isCurrentMonth } = dayObj;
+              const isPastDate = date < now;
+              const dateStr = formatDateToYYYYMMDD(date);
+              const dayNum = date.getDate();
+              const slots = getDaySlots(date);
+              
+              const openSlots = slots.filter(s => s.isAvailable && !s.isPast);
+              const displaySlots = openSlots.slice(0, maxSlotsDisplay);
+              const hasMore = openSlots.length > maxSlotsDisplay;
+              const isSelected = formatDateToYYYYMMDD(date) === formatDateToYYYYMMDD(selectedDate);
+
+              return (
+                <div
+                  key={idx}
+                  className={`min-h-[160px] p-2 rounded-lg font-medium text-sm transition-all flex flex-col ${
+                    !isCurrentMonth
+                      ? 'bg-gray-50 text-gray-300 cursor-default'
+                      : isPastDate
+                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                      : isSelected
+                      ? 'bg-blue-50 border-2 border-blue-600 text-gray-900'
+                      : 'bg-white border border-gray-200 text-gray-700'
+                  }`}
+                >
+                  <div className="font-bold text-right text-sm mb-1">{dayNum}</div>
+                  
+                  {isCurrentMonth && !isPastDate && openSlots.length > 0 && (
+                    <div className="flex-1 flex flex-col space-y-0.5 text-left overflow-hidden">
+                      {displaySlots.map((slot, i) => (
+                        <button
+                          key={i}
+                          onClick={() => {
+                            setBookingDefaultTime(slot.time);
+                            setBookingDefaultDate(date);
+                            setBookingModalOpen(true);
+                          }}
+                          className="text-[9px] font-bold px-1.5 py-0.5 rounded truncate bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-all text-left"
+                        >
+                          {slot.time}
+                        </button>
+                      ))}
+                      {hasMore && (
+                        <button
+                          onClick={() => {
+                            setSelectedDate(date);
+                            setViewMode('day');
+                          }}
+                          className="text-[8px] font-bold text-blue-600 px-1.5 pt-1 border-t border-gray-200 hover:text-blue-700"
+                        >
+                          +{openSlots.length - maxSlotsDisplay} more
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   if (isLoadingDoctors) {
     return (
       <div className="flex justify-center items-center h-screen bg-gray-50">
@@ -325,8 +537,8 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
             </div>
           </div>
 
-          <div className="flex items-center gap-3 bg-white p-1.5 rounded-2xl shadow-sm border border-gray-100">
-            <div className="flex items-center gap-1">
+          <div className="flex flex-col md:flex-row items-center gap-3">
+            <div className="flex items-center gap-3 bg-white p-1.5 rounded-2xl shadow-sm border border-gray-100">
               <Button variant="ghost" size="icon" onClick={() => navigateDate('prev')} className="h-9 w-9 rounded-xl hover:bg-gray-100">
                 <ChevronLeft className="h-4 w-4" />
               </Button>
@@ -339,6 +551,30 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
               </Button>
               <Button variant="ghost" size="icon" onClick={() => navigateDate('next')} className="h-9 w-9 rounded-xl hover:bg-gray-100">
                 <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+            
+            <div className="flex items-center gap-2 bg-white p-1.5 rounded-2xl shadow-sm border border-gray-100">
+              <Button 
+                variant={viewMode === 'day' ? 'default' : 'ghost'} 
+                className="h-9 px-3 text-xs font-bold uppercase rounded-xl"
+                onClick={() => setViewMode('day')}
+              >
+                Day
+              </Button>
+              <Button 
+                variant={viewMode === 'week' ? 'default' : 'ghost'} 
+                className="h-9 px-3 text-xs font-bold uppercase rounded-xl"
+                onClick={() => setViewMode('week')}
+              >
+                Week
+              </Button>
+              <Button 
+                variant={viewMode === 'month' ? 'default' : 'ghost'} 
+                className="h-9 px-3 text-xs font-bold uppercase rounded-xl"
+                onClick={() => setViewMode('month')}
+              >
+                Month
               </Button>
             </div>
           </div>
@@ -392,7 +628,9 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
               </div>
             ) : (
               <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                {renderDayView()}
+                {viewMode === 'day' && renderDayView()}
+                {viewMode === 'week' && renderWeekView()}
+                {viewMode === 'month' && renderMonthView()}
               </div>
             )}
 
