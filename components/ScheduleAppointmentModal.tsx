@@ -70,8 +70,8 @@ export function ScheduleAppointmentModal() {
     if (isScheduleModalOpen) {
       reloadDoctors();
       
-      // Update doctor if logged in as doctor and not already set
-      if (user?.role === "doctor" && !formData.doctor) {
+      // Update doctor if logged in as doctor
+      if (user?.role === "doctor") {
         setFormData(prev => ({ ...prev, doctor: user.username }));
       }
 
@@ -82,7 +82,7 @@ export function ScheduleAppointmentModal() {
         setShowSlotPicker(false);
       }
     }
-  }, [isScheduleModalOpen, reloadDoctors, user, formData.doctor]);
+  }, [isScheduleModalOpen, reloadDoctors, user]);
 
   // Fetch all appointments for the selected date to check for clinic-wide conflicts
   // This bypasses view filters to ensure global conflict detection
@@ -453,14 +453,16 @@ export function ScheduleAppointmentModal() {
             <Select
               value={formData.doctor}
               onValueChange={(value) => setFormData(prev => ({ ...prev, doctor: value }))}
-              disabled={isLoadingDoctors}
+              disabled={isLoadingDoctors || user?.role === "doctor"}
             >
               <SelectTrigger>
-                <SelectValue placeholder={isLoadingDoctors ? "Loading doctors..." : doctors.length === 0 ? "No doctors available" : "Select doctor"} />
+                <SelectValue placeholder={isLoadingDoctors ? "Loading doctors..." : doctors.length === 0 ? "No doctors available" : user?.role === "doctor" ? `${user.username}` : "Select doctor"} />
               </SelectTrigger>
               <SelectContent>
                 {isLoadingDoctors ? (
                   <div className="p-2 text-sm text-gray-500">Loading doctors...</div>
+                ) : user?.role === "doctor" ? (
+                  <SelectItem value={user.username}>{user.username}</SelectItem>
                 ) : doctors.length > 0 ? (
                   doctors.map((doctor) => (
                     <SelectItem key={doctor.id} value={doctor.name}>

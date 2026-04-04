@@ -10,7 +10,7 @@ import { Badge } from "./ui/badge";
 import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal } from "../lib/utils";
-import BookingModal from "./BookingModal";
+import { NextAppointmentCard } from "./NextAppointmentCard";
 
 const revenueData = [
   { month: "Jan", revenue: 42000, appointments: 180 },
@@ -29,8 +29,6 @@ export function Dashboard({ portal }: { portal?: string }) {
   const [viewMode, setViewMode] = useState<"day" | "week" | "month">("day");
   const [totalPatients, setTotalPatients] = useState(0);
   const [isLoadingView, setIsLoadingView] = useState(false);
-  const [bookingModalOpen, setBookingModalOpen] = useState(false);
-  const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
 
   // Fetch total patients from backend
   useEffect(() => {
@@ -101,6 +99,34 @@ export function Dashboard({ portal }: { portal?: string }) {
   const pendingAppointmentsCount = useMemo(() => {
     return appointments.filter(apt => apt.status === "pending" || apt.status === "tentative" || apt.status === "To Pay").length;
   }, [appointments]);
+
+  // Get next upcoming appointment (regardless of view mode)
+  const nextAppointment = useMemo(() => {
+    const now = new Date();
+    const allFutureAppointments = appointments
+      .filter((apt: Appointment) => {
+        const aptDateTime = new Date(`${apt.date}T${apt.time}`);
+        return aptDateTime > now && apt.status !== "cancelled";
+      })
+      .sort((a, b) => {
+        const timeA = new Date(`${a.date}T${a.time}`).getTime();
+        const timeB = new Date(`${b.date}T${b.time}`).getTime();
+        return timeA - timeB;
+      });
+    return allFutureAppointments.length > 0 ? allFutureAppointments[0] : null;
+  }, [appointments]);
+
+  // Get all appointments at the same time as next appointment
+  const sameTimeAppointments = useMemo(() => {
+    if (!nextAppointment) return [];
+    return appointments.filter(
+      (apt: Appointment) =>
+        apt.date === nextAppointment.date &&
+        apt.time === nextAppointment.time &&
+        apt.id !== nextAppointment.id &&
+        apt.status !== "cancelled"
+    );
+  }, [nextAppointment, appointments]);
 
   // Build dynamic stats based on backend data
   const dynamicStats = [
@@ -378,8 +404,7 @@ export function Dashboard({ portal }: { portal?: string }) {
                     key={appointment.id}
                     className="group flex items-center justify-between p-4 hover:bg-violet-50/50 transition-all duration-300 cursor-pointer"
                     onClick={() => {
-                      setSelectedAppointment(appointment);
-                      setBookingModalOpen(true);
+                      openEditModal(appointment);
                     }}
                   >
                     <div className="flex items-center space-x-4">
@@ -414,11 +439,36 @@ export function Dashboard({ portal }: { portal?: string }) {
                   </div>
                 ))
               ) : (
-                <div className="flex flex-col items-center justify-center py-16 text-gray-400">
+                <div className="flex flex-col items-center justify-center py-16 text-gray-500">
                   <div className="p-4 bg-gray-50 rounded-full mb-4">
-                    <Heart className="h-8 w-8 opacity-20" />
+                    <Calendar className="h-8 w-8 opacity-20" />
                   </div>
-                  <p className="text-sm font-medium">No appointments scheduled</p>
+                  <p className="text-sm font-semibold">No appointments scheduled for this {viewMode}</p>
+                  {viewMode !== "month" && (
+                    <p className="text-xs text-gray-400 mt-1 max-w-[200px] text-center">
+                      Try switching to {viewMode === "day" ? "week or month" : "month"} view to see more.
+                    </p>
+                  )}
+                  {viewMode === "day" && (
+                    <div className="mt-4 flex gap-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="text-xs font-bold rounded-xl"
+                        onClick={() => setViewMode("week")}
+                      >
+                        Week View
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="text-xs font-bold rounded-xl"
+                        onClick={() => setViewMode("month")}
+                      >
+                        Month View
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -491,16 +541,20 @@ export function Dashboard({ portal }: { portal?: string }) {
         </Card>
       </div>
 
-      {/* Booking Modal */}
-      <BookingModal
-        open={bookingModalOpen}
-        onOpenChange={setBookingModalOpen}
-        appointmentToEdit={selectedAppointment}
-        onBooked={() => {
-          setSelectedAppointment(null);
-          setBookingModalOpen(false);
-        }}
-      />
+      <div className="grid grid-cols-1 gap-6">
+        {/* Next Appointment Card */}
+        {nextAppointment && (
+          <NextAppointmentCard
+            appointment={nextAppointment}
+            role="admin"
+            sameTimeAppointments={sameTimeAppointments}
+            onViewDetails={(apt) => {
+              openEditModal(apt);
+            }}
+            showHeader={true}
+          />
+        )}
+      </div>
     </div>
   );
 }

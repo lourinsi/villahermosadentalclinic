@@ -6,7 +6,6 @@ import { Appointment } from "@/hooks/useAppointments";
 import { useAuth } from "@/hooks/useAuth";
 import { AllAppointmentsView } from "@/components/AllAppointmentsView";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
-import { ContextBookingModal } from "@/components/ContextBookingModal";
 import { toast } from "sonner";
 import { useState } from "react";
 import ConfirmDialog from "@/components/ConfirmDialog";
@@ -52,7 +51,7 @@ const CartPage = () => {
     }, [appointments]);
 
     const handlePay = (appointment: Appointment) => {
-        openEditModal(appointment, true);
+        openEditModal(appointment, true, true);
     };
 
     const [isConfirmOpen, setIsConfirmOpen] = useState(false);
@@ -134,9 +133,6 @@ const CartPage = () => {
                 confirmLabel="Remove"
                 cancelLabel="Cancel"
             />
-            
-            {/* Context-connected BookingModal for viewing/editing appointments */}
-            <ContextBookingModal />
         </div>
     );
 };

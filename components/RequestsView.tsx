@@ -5,10 +5,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
+import { usePaymentStatuses } from "@/hooks/usePaymentStatuses";
 import { Badge } from "./ui/badge";
 import { toast } from "sonner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
-import BookingModal from "./BookingModal";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { 
   Clock, 
@@ -54,6 +54,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogFooter as Footer,
 } from "./ui/alert-dialog";
 
 interface RequestsViewProps {
@@ -61,8 +62,9 @@ interface RequestsViewProps {
 }
 
 export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
-  const { appointments, isLoading, updateAppointment, openEditModal, refreshAppointments } = useAppointmentModal();
+  const { appointments, isLoading, updateAppointment, openEditModal, refreshAppointments, refreshTrigger } = useAppointmentModal();
   const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
+  const { statuses: PAYMENT_STATUSES } = usePaymentStatuses();
   
   // Function to update notifications when appointment data changes
   const updateNotificationsForAppointment = async (appointmentId: string, changes: { status?: string; paymentStatus?: string }) => {
@@ -85,11 +87,6 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       // Don't show toast - this is a background sync
     }
   };
-  
-  // Booking Modal state
-  const [bookingModalOpen, setBookingModalOpen] = useState(false);
-  const [selectedAppointmentToEdit, setSelectedAppointmentToEdit] = useState<any>(null);
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
   
   useEffect(() => {
     // Fetch all appointments including unpaid/pending to show in requests view
@@ -138,6 +135,14 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   // Confirmation dialog state
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [pendingStatusChange, setPendingStatusChange] = useState<{appointment: Appointment, newStatus: Appointment['status']} | null>(null);
+  
+  // Approve confirmation dialog state
+  const [isApproveConfirmOpen, setIsApproveConfirmOpen] = useState(false);
+  const [pendingApproveAppointment, setPendingApproveAppointment] = useState<Appointment | null>(null);
+  
+  // Reject confirmation dialog state
+  const [isRejectConfirmOpen, setIsRejectConfirmOpen] = useState(false);
+  const [pendingRejectAppointment, setPendingRejectAppointment] = useState<Appointment | null>(null);
 
   const getInitials = (name: string) => {
     if (!name) return "P";
@@ -155,7 +160,6 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       // Requests are those with pending statuses
       if (!isPendingRequestStatus(apt.status) || !matchesDoctor) return false;
 
-      // ...existing code...
       if (pendingSearchTerm && !apt.patientName.toLowerCase().includes(pendingSearchTerm.toLowerCase()) && 
           !getAppointmentTypeName(apt.type, apt.customType).toLowerCase().includes(pendingSearchTerm.toLowerCase())) {
         return false;
@@ -213,11 +217,18 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   }, [appointments, doctorFilter, historySearchTerm, historyStatusFilter, historyDateFilter, refreshTrigger]);
 
   const handleApprove = async (appointment: Appointment) => {
+    setPendingApproveAppointment(appointment);
+    setIsApproveConfirmOpen(true);
+  };
+
+  const confirmApprove = async () => {
+    if (!pendingApproveAppointment) return;
+    
     try {
       // Approve any pending/reserved request to scheduled
-      const newStatus = appointment.status === "pending" || appointment.status === "reserved" ? "scheduled" : "scheduled";
-      await updateAppointment(appointment.id, { status: newStatus });
-      toast.success(`Appointment for ${appointment.patientName} approved`);
+      const newStatus = pendingApproveAppointment.status === "pending" || pendingApproveAppointment.status === "reserved" ? "scheduled" : "scheduled";
+      await updateAppointment(pendingApproveAppointment.id, { status: newStatus });
+      toast.success(`Appointment for ${pendingApproveAppointment.patientName} approved`);
       // Refresh notifications to show the new status change notification
       refreshAppointments();
       // Also refresh notifications from NotificationPage context if available
@@ -226,13 +237,23 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       }, 500);
     } catch {
       toast.error("Failed to approve appointment");
+    } finally {
+      setIsApproveConfirmOpen(false);
+      setPendingApproveAppointment(null);
     }
   };
 
   const handleReject = async (appointment: Appointment) => {
+    setPendingRejectAppointment(appointment);
+    setIsRejectConfirmOpen(true);
+  };
+
+  const confirmReject = async () => {
+    if (!pendingRejectAppointment) return;
+    
     try {
-      await updateAppointment(appointment.id, { status: "cancelled" });
-      toast.success(`Appointment for ${appointment.patientName} rejected`);
+      await updateAppointment(pendingRejectAppointment.id, { status: "cancelled" });
+      toast.success(`Appointment for ${pendingRejectAppointment.patientName} rejected`);
       // Refresh notifications to show the new status change notification
       refreshAppointments();
       // Also refresh notifications from NotificationPage context if available
@@ -241,6 +262,9 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       }, 500);
     } catch {
       toast.error("Failed to reject appointment");
+    } finally {
+      setIsRejectConfirmOpen(false);
+      setPendingRejectAppointment(null);
     }
   };
 
@@ -262,6 +286,19 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       }, 500);
     } catch {
       toast.error("Failed to update payment status");
+    }
+  };
+
+  const handleHistoryStatusChange = async (appointmentId: string, newStatus: string) => {
+    try {
+      await updateAppointment(appointmentId, { status: newStatus as any });
+      toast.success(`Status updated to ${newStatus}`);
+      refreshAppointments();
+      setTimeout(() => {
+        window.dispatchEvent(new Event('refreshNotifications'));
+      }, 500);
+    } catch {
+      toast.error("Failed to update status");
     }
   };
 
@@ -301,6 +338,22 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         return <Badge className="bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 font-medium">Cancelled</Badge>;
       default:
         return <Badge variant="outline" className="font-medium">{status}</Badge>;
+    }
+  };
+
+  const getPaymentStatusBadge = (paymentStatus: string | undefined) => {
+    const k = canonicalStatus(paymentStatus || "unpaid");
+    switch (k) {
+      case "unpaid":
+        return <Badge className="bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100 font-medium">Unpaid</Badge>;
+      case "half-paid":
+        return <Badge className="bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100 font-medium">Half Paid</Badge>;
+      case "paid":
+        return <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 font-medium">Paid</Badge>;
+      case "pay-at-clinic":
+        return <Badge className="bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 font-medium">Pay at Clinic</Badge>;
+      default:
+        return <Badge variant="outline" className="font-medium">{paymentStatus || "Unpaid"}</Badge>;
     }
   };
 
@@ -359,6 +412,10 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
             aVal = canonicalStatus(a.status);
             bVal = canonicalStatus(b.status);
             break;
+          case "payment":
+            aVal = canonicalStatus(a.paymentStatus || "unpaid");
+            bVal = canonicalStatus(b.paymentStatus || "unpaid");
+            break;
           case "booked":
             aVal = new Date(a.createdAt || 0).getTime();
             bVal = new Date(b.createdAt || 0).getTime();
@@ -398,6 +455,10 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
             aVal = canonicalStatus(a.status);
             bVal = canonicalStatus(b.status);
             break;
+          case "payment":
+            aVal = canonicalStatus(a.paymentStatus || "unpaid");
+            bVal = canonicalStatus(b.paymentStatus || "unpaid");
+            break;
           case "booked":
             aVal = new Date(a.createdAt || 0).getTime();
             bVal = new Date(b.createdAt || 0).getTime();
@@ -414,615 +475,556 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     return sorted;
   }, [history, historySortColumn, historySortDirection]);
 
-  // Build status options dynamically from backend appointments (preserve a representative 'raw' value)
-  const statusOptions = useMemo(() => {
-    const map = new Map<string, string>(); // key -> raw
-    appointments.forEach(a => {
-      const raw = String(a.status || "").trim();
-      const key = canonicalStatus(raw) || raw;
-      if (!map.has(key)) map.set(key, raw || key);
-    });
-    return Array.from(map.entries()).map(([key, raw]) => ({ key, raw, label: (raw || key).toString().replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) }));
-  }, [appointments]);
-
   return (
-    <div className="p-6 space-y-6 max-w-[1600px] mx-auto">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+    <div className="p-6 max-w-[1600px] mx-auto space-y-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3 mb-1">
-            <div className="p-2 bg-violet-100 rounded-lg">
-              <ClipboardList className="h-6 w-6 text-violet-600" />
-            </div>
-            <h1 className="text-3xl font-bold text-gray-900 tracking-tight">
-              Booking Management
-            </h1>
-          </div>
-          <p className="text-muted-foreground ml-11">
-            {doctorFilter 
-              ? "Review pending requests or browse processed booking history for your patients."
-              : "Review pending requests or browse processed booking history for all doctors."}
-          </p>
+          <h1 className="text-3xl font-black text-gray-900 tracking-tight uppercase italic">
+            {doctorFilter ? "Patient Requests" : "Appointment Management"}
+          </h1>
+          <p className="text-gray-500 font-medium">Review and manage pending patient appointments</p>
         </div>
-        <Button 
-          onClick={() => refreshAppointments({ includeUnpaid: true })} 
-          variant="outline" 
-          className="flex items-center gap-2 border-violet-200 text-violet-700 hover:bg-violet-50 hover:text-violet-800 transition-all shadow-sm"
-        >
-          <RotateCcw className="h-4 w-4" />
-          Refresh List
-        </Button>
       </div>
 
-      <Tabs defaultValue="pending" className="w-full">
-        <TabsList className="bg-gray-100/80 p-1 h-12 border border-gray-200">
-          <TabsTrigger value="pending" className="flex items-center gap-2 px-6 h-10 data-[state=active]:bg-white data-[state=active]:text-violet-700 data-[state=active]:shadow-sm transition-all font-medium">
-            <Clock className="h-4 w-4" />
+      <Tabs defaultValue="requests" className="space-y-6">
+        <TabsList className="bg-white border p-1 rounded-xl shadow-sm">
+          <TabsTrigger value="requests" className="rounded-lg px-6 py-2.5 data-[state=active]:bg-violet-600 data-[state=active]:text-white font-bold transition-all duration-300">
             Pending Requests
-            {requests.length > 0 && (
-              <Badge className="ml-1.5 bg-violet-600 text-[10px] px-1.5 h-4 min-w-4 flex items-center justify-center rounded-full border-none">
-                {requests.length}
-              </Badge>
-            )}
+            <Badge className="ml-2 bg-violet-100 text-violet-700 border-none">{requests.length}</Badge>
           </TabsTrigger>
-          <TabsTrigger value="history" className="flex items-center gap-2 px-6 h-10 data-[state=active]:bg-white data-[state=active]:text-violet-700 data-[state=active]:shadow-sm transition-all font-medium">
-            <History className="h-4 w-4" />
-            Requests History
+          <TabsTrigger value="history" className="rounded-lg px-6 py-2.5 data-[state=active]:bg-violet-600 data-[state=active]:text-white font-bold transition-all duration-300">
+            History
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="pending" className="space-y-4">
-          <Card className="shadow-sm border-violet-100 overflow-hidden">
-            <CardHeader className="pb-4 bg-gray-50/30">
-              <div className="flex flex-col md:flex-row md:items-center gap-4 justify-between">
-                <div>
-                  <CardTitle className="text-lg font-semibold text-gray-800">Request Filters</CardTitle>
-                  <p className="text-xs text-muted-foreground">Filter through pending appointment requests</p>
+        <TabsContent value="requests" className="space-y-4">
+          <Card className="border-none shadow-xl shadow-gray-200/50 bg-white/80 backdrop-blur-xl rounded-2xl overflow-hidden">
+            <CardHeader className="border-b border-gray-100 pb-6 bg-white">
+              <div className="flex flex-col md:flex-row gap-4 md:items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-amber-50 rounded-xl">
+                    <AlertCircle className="h-6 w-6 text-amber-600" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-xl font-black text-gray-900 uppercase">Action Required</CardTitle>
+                    <p className="text-sm text-gray-500 font-medium">Please review these pending appointments</p>
+                  </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="relative min-w-[240px]">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      placeholder="Search patient or service..."
-                      className="pl-9 bg-white border-violet-100 focus-visible:ring-violet-400"
+                
+                <div className="flex flex-wrap gap-2">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <Input 
+                      placeholder="Search patient or service..." 
+                      className="pl-10 w-64 bg-gray-50 border-gray-100 rounded-xl text-sm"
                       value={pendingSearchTerm}
                       onChange={(e) => setPendingSearchTerm(e.target.value)}
                     />
                   </div>
+                  
                   <Select value={pendingStatusFilter} onValueChange={setPendingStatusFilter}>
-                    <SelectTrigger className="w-[150px] bg-white border-violet-100">
+                    <SelectTrigger className="w-[160px] bg-gray-50 border-gray-100 rounded-xl text-sm">
                       <div className="flex items-center gap-2">
-                        <Filter className="h-3.5 w-3.5 text-muted-foreground" />
-                        <SelectValue placeholder="Status" />
+                        <Filter className="h-3.5 w-3.5 text-gray-400" />
+                        <SelectValue placeholder="All Status" />
                       </div>
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Statuses</SelectItem>
-                      {APPOINTMENT_STATUSES.filter(opt => opt.value && opt.value.trim()).map(opt => (
-                        <SelectItem key={opt.key} value={opt.value}>{opt.label}</SelectItem>
+                      <SelectItem value="all">All Status</SelectItem>
+                      {APPOINTMENT_STATUSES.filter((s: any) => isPendingRequestStatus(s.value)).map((status: any) => (
+                        <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+
                   {!doctorFilter && (
                     <Select value={pendingDoctorFilter} onValueChange={setPendingDoctorFilter}>
-                      <SelectTrigger className="w-[160px] bg-white border-violet-100">
+                      <SelectTrigger className="w-[160px] bg-gray-50 border-gray-100 rounded-xl text-sm">
                         <div className="flex items-center gap-2">
-                          <User className="h-3.5 w-3.5 text-muted-foreground" />
-                          <SelectValue placeholder="Doctor" />
+                          <User className="h-3.5 w-3.5 text-gray-400" />
+                          <SelectValue placeholder="All Doctors" />
                         </div>
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">All Doctors</SelectItem>
-                        {Array.from(new Set(appointments.map(apt => apt.doctor))).map(doctor => (
-                          <SelectItem key={doctor} value={doctor}>{doctor}</SelectItem>
+                        {Array.from(new Set(appointments.map(a => a.doctor))).map((doc: any) => (
+                          <SelectItem key={doc} value={doc}>{doc}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   )}
-                  {(pendingSearchTerm || pendingStatusFilter !== "all" || pendingDoctorFilter !== "all" || pendingDateFilter) && (
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      onClick={() => {
-                        setPendingSearchTerm("");
-                        setPendingStatusFilter("all");
-                        setPendingDoctorFilter("all");
-                        setPendingDateFilter("");
-                      }}
-                      className="text-violet-600 hover:text-violet-700 hover:bg-violet-50 h-9"
-                    >
-                      <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
-                      Clear
-                    </Button>
-                  )}
+
+                  <Button variant="ghost" size="icon" className="rounded-xl border border-gray-100" onClick={() => {
+                    setPendingSearchTerm("");
+                    setPendingStatusFilter("all");
+                    setPendingDoctorFilter("all");
+                    setPendingDateFilter("");
+                  }}>
+                    <RotateCcw className="h-4 w-4 text-gray-500" />
+                  </Button>
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="p-0 border-t">
-              <Table>
-                <TableHeader className="bg-gray-50/50">
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead className="cursor-pointer hover:text-primary transition-colors pl-6 h-12" onClick={() => handlePendingSort("date")}>
-                      <div className="flex items-center gap-2 font-semibold">
-                        Appointment Date
-                        <div className="flex flex-col">
-                          {getSortIcon("date", true)}
-                        </div>
-                      </div>
-                    </TableHead>
-                    <TableHead className="cursor-pointer hover:text-primary transition-colors h-12" onClick={() => handlePendingSort("patient")}>
-                      <div className="flex items-center gap-2 font-semibold">
-                        Patient
-                        {getSortIcon("patient", true)}
-                      </div>
-                    </TableHead>
-                    <TableHead className="cursor-pointer hover:text-primary transition-colors h-12" onClick={() => handlePendingSort("service")}>
-                      <div className="flex items-center gap-2 font-semibold">
-                        Service
-                        {getSortIcon("service", true)}
-                      </div>
-                    </TableHead>
-                    {!doctorFilter && (
-                      <TableHead className="cursor-pointer hover:text-primary transition-colors h-12" onClick={() => handlePendingSort("doctor")}>
-                        <div className="flex items-center gap-2 font-semibold">
-                          Doctor
-                          {getSortIcon("doctor", true)}
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-gray-50/50 hover:bg-gray-50/50 border-b border-gray-100">
+                      <TableHead className="font-bold text-gray-900 py-5 cursor-pointer" onClick={() => handlePendingSort("patient")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Patient {getSortIcon("patient", true)}
                         </div>
                       </TableHead>
-                    )}
-                    <TableHead className="cursor-pointer hover:text-primary transition-colors h-12" onClick={() => handlePendingSort("status")}>
-                      <div className="flex items-center gap-2 font-semibold">
-                        Status
-                        {getSortIcon("status", true)}
-                      </div>
-                    </TableHead>
-                    <TableHead className="font-semibold h-12">Payment</TableHead>
-                    <TableHead className="cursor-pointer hover:text-primary transition-colors h-12" onClick={() => handlePendingSort("booked")}>
-                      <div className="flex items-center gap-2 font-semibold">
-                        Booked
-                        {getSortIcon("booked", true)}
-                      </div>
-                    </TableHead>
-                    <TableHead className="text-right pr-6 h-12 font-semibold">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading ? (
-                    <TableRow>
-                      <TableCell colSpan={doctorFilter ? 8 : 9} className="text-center py-12 text-muted-foreground">
-                        <div className="flex flex-col items-center gap-2">
-                          <div className="h-8 w-8 animate-spin rounded-full border-2 border-violet-600 border-t-transparent" />
+                      <TableHead className="font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("service")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Service {getSortIcon("service", true)}
+                        </div>
+                      </TableHead>
+                      <TableHead className="font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("date")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Schedule {getSortIcon("date", true)}
+                        </div>
+                      </TableHead>
+                      {!doctorFilter && (
+                        <TableHead className="font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("doctor")}>
+                          <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                            Doctor {getSortIcon("doctor", true)}
+                          </div>
+                        </TableHead>
+                      )}
+                      <TableHead className="font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("status")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Status {getSortIcon("status", true)}
+                        </div>
+                      </TableHead>
+                      <TableHead className="font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("payment")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Payment {getSortIcon("payment", true)}
+                        </div>
+                      </TableHead>
+                      <TableHead className="font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("booked")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Booked {getSortIcon("booked", true)}
+                        </div>
+                      </TableHead>
+                      <TableHead className="text-right uppercase text-[11px] tracking-wider font-bold text-gray-900">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {isLoading ? (
+                      <TableRow>
+                        <TableCell colSpan={8} className="h-32 text-center text-gray-500 font-medium">
                           Loading requests...
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ) : requests.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={doctorFilter ? 7 : 8} className="py-24">
-                        <div className="flex flex-col items-center justify-center text-center">
-                          <div className="bg-gray-50 p-4 rounded-full mb-4">
-                            <Clock className="h-8 w-8 text-gray-400" />
-                          </div>
-                          <h3 className="text-lg font-semibold text-gray-900">No requests found</h3>
-                          <p className="text-sm text-muted-foreground max-w-[300px] mt-1">
-                            We couldn&apos;t find any appointment requests matching your current filters.
-                          </p>
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
-                            className="mt-6 border-violet-200 text-violet-700 hover:bg-violet-50"
-                            onClick={() => {
-                              setPendingSearchTerm("");
-                              setPendingStatusFilter("all");
-                              setPendingDoctorFilter("all");
-                            }}
-                          >
-                            Reset Filters
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    sortedRequests.map((request) => (
-                      <TableRow key={request.id} className="group hover:bg-violet-50/30 transition-colors">
-                        <TableCell className="pl-6">
-                          <div className="flex flex-col">
-                            <span className="font-semibold text-gray-900">
-                              {parseBackendDateToLocal(request.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                            </span>
-                            <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
-                              <Clock className="h-3 w-3" />
-                              {request.time}
+                        </TableCell>
+                      </TableRow>
+                    ) : sortedRequests.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={8} className="h-64 text-center">
+                          <div className="flex flex-col items-center justify-center py-12">
+                            <div className="p-4 bg-gray-50 rounded-full mb-4">
+                              <ClipboardList className="h-10 w-10 text-gray-300" />
                             </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            <Avatar className="h-8 w-8 border border-violet-100 shadow-sm">
-                              <AvatarImage src="" />
-                              <AvatarFallback className="bg-violet-100 text-violet-700 text-xs font-bold">
-                                {getInitials(request.patientName)}
-                              </AvatarFallback>
-                            </Avatar>
-                            <div className="flex flex-col">
-                              <span className="font-medium text-gray-900">{request.patientName}</span>
-                              {request.phone && (
-                                <span className="text-[10px] text-muted-foreground flex items-center gap-1">
-                                  <Phone className="h-2.5 w-2.5" />
-                                  {request.phone}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-col">
-                            <span className="text-sm font-medium text-gray-700">{getAppointmentTypeName(request.type, request.customType)}</span>
-                          </div>
-                        </TableCell>
-                        {!doctorFilter && (
-                          <TableCell>
-                            <Badge variant="secondary" className="bg-slate-100 text-slate-700 hover:bg-slate-200 border-none font-medium px-2 py-0">
-                              Dr. {request.doctor.split(' ').pop()}
-                            </Badge>
-                          </TableCell>
-                        )}
-                        <TableCell>{getStatusBadge(request.status)}</TableCell>
-                        <TableCell>
-                          {request.paymentStatus?.toLowerCase() === "paid" ? (
-                            <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 font-medium px-2">
-                              <CheckCircle className="h-3 w-3 mr-1" />
-                              Paid
-                            </Badge>
-                          ) : request.paymentStatus?.toLowerCase() === "half-paid" ? (
-                            <Badge className="bg-yellow-50 text-yellow-700 border-yellow-200 hover:bg-yellow-100 font-medium px-2">
-                              <AlertCircle className="h-3 w-3 mr-1" />
-                              Partial
-                            </Badge>
-                          ) : request.paymentStatus?.toLowerCase() === "pay-at-clinic" ? (
-                            <Badge className="bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 font-medium px-2">
-                              <DollarSign className="h-3 w-3 mr-1" />
-                              At Clinic
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-slate-400 border-slate-200 font-normal px-2">
-                              Unpaid
-                            </Badge>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-xs text-muted-foreground bg-gray-100 px-1.5 py-0.5 rounded">
-                            {request.createdAt ? new Date(request.createdAt).toLocaleDateString('en-US', { 
-                              month: 'short', 
-                              day: 'numeric' 
-                            }) : "—"}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-right pr-6">
-                          <div className="flex justify-end items-center gap-1">
-                            <Button 
-                              variant="ghost" 
-                              size="sm" 
-                              onClick={() => {
-                                setSelectedAppointmentToEdit(request);
-                                setBookingModalOpen(true);
-                              }} 
-                              className="h-8 w-8 p-0 text-muted-foreground hover:text-primary hover:bg-primary/5 rounded-full"
-                              title="View Details"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            
-                            <div className="h-4 w-[1px] bg-gray-200 mx-1" />
-                            
-                            <Button 
-                              size="sm" 
-                              className="h-8 px-3 bg-violet-600 hover:bg-violet-700 text-white rounded-lg shadow-sm font-medium"
-                              onClick={() => handleStatusChangeRequest(request, 'scheduled')}
-                            >
-                              <CalendarCheck2 className="h-3.5 w-3.5 mr-1.5" />
-                              Approve
-                            </Button>
-                            
-                            <Button 
-                              size="sm"
-                              variant="ghost"
-                              className="h-8 w-8 p-0 text-red-500 hover:text-red-600 hover:bg-red-50 rounded-full"
-                              onClick={() => handleStatusChangeRequest(request, 'cancelled')}
-                              title="Reject Request"
-                            >
-                              <CalendarX2 className="h-4 w-4" />
-                            </Button>
+                            <h3 className="text-lg font-bold text-gray-900 uppercase">All Caught Up!</h3>
+                            <p className="text-gray-500 max-w-xs mx-auto mt-2">There are no pending requests matching your filters.</p>
                           </div>
                         </TableCell>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
+                    ) : (
+                      sortedRequests.map((request) => (
+                        <TableRow key={request.id} className="hover:bg-violet-50/30 transition-colors border-b border-gray-50">
+                          <TableCell className="py-4">
+                            <div className="flex items-center gap-3">
+                              <Avatar className="h-10 w-10 border-2 border-white shadow-sm">
+                                <AvatarFallback className="bg-violet-100 text-violet-700 font-bold text-xs uppercase">
+                                  {getInitials(request.patientName)}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div>
+                                <div className="font-bold text-gray-900">{request.patientName}</div>
+                                <div className="text-[10px] text-gray-500 font-medium uppercase tracking-tight">ID: {request.id.slice(0, 8)}</div>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <span className="font-semibold text-gray-700">{getAppointmentTypeName(request.type, request.customType)}</span>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-col">
+                              <span className="font-bold text-gray-900">{parseBackendDateToLocal(request.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                              <span className="text-xs text-gray-500 font-medium">{request.time}</span>
+                            </div>
+                          </TableCell>
+                          {!doctorFilter && (
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <div className="h-1.5 w-1.5 rounded-full bg-violet-400"></div>
+                                <span className="text-sm font-semibold text-gray-700">{request.doctor}</span>
+                              </div>
+                            </TableCell>
+                          )}
+                          <TableCell>
+                            {getStatusBadge(request.status)}
+                          </TableCell>
+                          <TableCell>
+                            <Select 
+                              value={request.paymentStatus || "unpaid"} 
+                              onValueChange={(newPaymentStatus) => handlePaymentStatusChange(request.id, newPaymentStatus)}
+                            >
+                              <SelectTrigger className="w-auto h-auto p-0 bg-transparent border-0 hover:opacity-80 transition-opacity [&>svg]:text-gray-400">
+                                <div className="cursor-pointer">
+                                  {getPaymentStatusBadge(request.paymentStatus)}
+                                </div>
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PAYMENT_STATUSES.map((status: any) => (
+                                  <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-col">
+                              <span className="font-bold text-gray-900">{request.createdAt ? new Date(request.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}</span>
+                              <span className="text-xs text-gray-500 font-medium">{request.createdAt ? new Date(request.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end items-center gap-2">
+                              {request.status === "pending" || request.status === "reserved" ? (
+                                <>
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline" 
+                                    className="h-9 px-4 border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 rounded-xl font-bold uppercase text-[10px] tracking-wider"
+                                    onClick={() => handleApprove(request)}
+                                  >
+                                    Approve
+                                  </Button>
+                                  <Button 
+                                    size="sm" 
+                                    variant="ghost" 
+                                    className="h-9 w-9 p-0 text-rose-600 hover:bg-rose-50 rounded-xl"
+                                    onClick={() => handleReject(request)}
+                                  >
+                                    <XCircle className="h-5 w-5" />
+                                  </Button>
+                                </>
+                              ) : null}
+                              <Button 
+                                size="sm" 
+                                variant="ghost" 
+                                className="h-9 w-9 p-0 text-violet-600 hover:bg-violet-50 rounded-xl"
+                                onClick={() => {
+                                  openEditModal(request);
+                                }}
+                              >
+                                <Eye className="h-5 w-5" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
 
         <TabsContent value="history" className="space-y-4">
-          <Card className="shadow-sm border-violet-100 overflow-hidden">
-            <CardHeader className="pb-4 bg-gray-50/30">
-              <div className="flex flex-col md:flex-row md:items-center gap-4 justify-between">
-                <div>
-                  <CardTitle className="text-lg font-semibold text-gray-800">History Filters</CardTitle>
-                  <p className="text-xs text-muted-foreground">Browse through processed booking history</p>
+          <Card className="border-none shadow-xl shadow-gray-200/50 bg-white rounded-2xl overflow-hidden">
+            <CardHeader className="border-b border-gray-100 pb-6">
+              <div className="flex flex-col md:flex-row gap-4 md:items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-violet-50 rounded-xl">
+                    <History className="h-6 w-6 text-violet-600" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-xl font-black text-gray-900 uppercase">Recent Activity</CardTitle>
+                    <p className="text-sm text-gray-500 font-medium">History of processed appointments</p>
+                  </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="relative min-w-[240px]">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      placeholder="Search patient or service..."
-                      className="pl-9 bg-white border-violet-100 focus-visible:ring-violet-400"
+
+                <div className="flex flex-wrap gap-2">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <Input 
+                      placeholder="Search history..." 
+                      className="pl-10 w-64 bg-gray-50 border-gray-100 rounded-xl text-sm"
                       value={historySearchTerm}
                       onChange={(e) => setHistorySearchTerm(e.target.value)}
                     />
                   </div>
-                  <div className="relative">
-                    <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      type="date"
-                      className="pl-9 w-[180px] bg-white border-violet-100"
-                      value={historyDateFilter}
-                      onChange={(e) => setHistoryDateFilter(e.target.value)}
-                    />
-                  </div>
+                  
                   <Select value={historyStatusFilter} onValueChange={setHistoryStatusFilter}>
-                    <SelectTrigger className="w-[150px] bg-white border-violet-100">
+                    <SelectTrigger className="w-[160px] bg-gray-50 border-gray-100 rounded-xl text-sm">
                       <div className="flex items-center gap-2">
-                        <Filter className="h-3.5 w-3.5 text-muted-foreground" />
-                        <SelectValue placeholder="Status" />
+                        <Filter className="h-3.5 w-3.5 text-gray-400" />
+                        <SelectValue placeholder="All Status" />
                       </div>
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Statuses</SelectItem>
-                      {APPOINTMENT_STATUSES.filter(opt => opt.value && opt.value.trim()).map(opt => (
-                        <SelectItem key={opt.key} value={opt.value}>{opt.label}</SelectItem>
-                      ))}
+                      <SelectItem value="all">All Status</SelectItem>
+                      <SelectItem value="scheduled">Scheduled</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                      <SelectItem value="cancelled">Cancelled</SelectItem>
                     </SelectContent>
                   </Select>
-                  {(historySearchTerm || historyStatusFilter !== "all" || historyDateFilter) && (
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      onClick={() => {
-                        setHistorySearchTerm("");
-                        setHistoryStatusFilter("all");
-                        setHistoryDateFilter("");
-                      }}
-                      className="text-violet-600 hover:text-violet-700 hover:bg-violet-50 h-9"
-                    >
-                      <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
-                      Clear
-                    </Button>
-                  )}
+
+                  <Button variant="ghost" size="icon" className="rounded-xl border border-gray-100" onClick={() => {
+                    setHistorySearchTerm("");
+                    setHistoryStatusFilter("all");
+                    setHistoryDateFilter("");
+                  }}>
+                    <RotateCcw className="h-4 w-4 text-gray-500" />
+                  </Button>
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="p-0 border-t">
-              <Table>
-                <TableHeader className="bg-gray-50/50">
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead className="cursor-pointer hover:text-primary transition-colors pl-6 h-12" onClick={() => handleHistorySort("date")}>
-                      <div className="flex items-center gap-2 font-semibold">
-                        Appointment Date
-                        {getSortIcon("date", false)}
-                      </div>
-                    </TableHead>
-                    <TableHead className="cursor-pointer hover:text-primary transition-colors h-12" onClick={() => handleHistorySort("patient")}>
-                      <div className="flex items-center gap-2 font-semibold">
-                        Patient
-                        {getSortIcon("patient", false)}
-                      </div>
-                    </TableHead>
-                    <TableHead className="cursor-pointer hover:text-primary transition-colors h-12" onClick={() => handleHistorySort("service")}>
-                      <div className="flex items-center gap-2 font-semibold">
-                        Service
-                        {getSortIcon("service", false)}
-                      </div>
-                    </TableHead>
-                    {!doctorFilter && (
-                      <TableHead className="font-semibold h-12">Doctor</TableHead>
-                    )}
-                    <TableHead className="cursor-pointer hover:text-primary transition-colors h-12" onClick={() => handleHistorySort("status")}>
-                      <div className="flex items-center gap-2 font-semibold">
-                        Status
-                        {getSortIcon("status", false)}
-                      </div>
-                    </TableHead>
-                    <TableHead className="cursor-pointer hover:text-primary transition-colors h-12" onClick={() => handleHistorySort("booked")}>
-                      <div className="flex items-center gap-2 font-semibold">
-                        Booked Date
-                        {getSortIcon("booked", false)}
-                      </div>
-                    </TableHead>
-                    <TableHead className="font-semibold h-12">Payment Status</TableHead>
-                    <TableHead className="text-right pr-6 h-12 font-semibold">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading ? (
-                    <TableRow>
-                      <TableCell colSpan={doctorFilter ? 7 : 8} className="text-center py-12 text-muted-foreground">
-                        <div className="flex flex-col items-center gap-2">
-                          <div className="h-8 w-8 animate-spin rounded-full border-2 border-violet-600 border-t-transparent" />
-                          Loading history...
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-gray-50 hover:bg-gray-50 border-b border-gray-100">
+                      <TableHead className="font-bold text-gray-900 py-5 cursor-pointer" onClick={() => handleHistorySort("patient")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Patient {getSortIcon("patient", false)}
                         </div>
-                      </TableCell>
-                    </TableRow>
-                  ) : history.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={doctorFilter ? 7 : 8} className="py-24">
-                        <div className="flex flex-col items-center justify-center text-center">
-                          <div className="bg-gray-50 p-4 rounded-full mb-4">
-                            <History className="h-8 w-8 text-gray-400" />
-                          </div>
-                          <h3 className="text-lg font-semibold text-gray-900">No history found</h3>
-                          <p className="text-sm text-muted-foreground max-w-[300px] mt-1">
-                            There are no processed appointment requests in your history yet.
-                          </p>
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
-                            className="mt-6 border-violet-200 text-violet-700 hover:bg-violet-50"
-                            onClick={() => {
-                              setHistorySearchTerm("");
-                              setHistoryStatusFilter("all");
-                              setHistoryDateFilter("");
-                            }}
-                          >
-                            Reset Filters
-                          </Button>
+                      </TableHead>
+                      <TableHead className="font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("service")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Service {getSortIcon("service", false)}
                         </div>
-                      </TableCell>
+                      </TableHead>
+                      <TableHead className="font-bold text-gray-900 uppercase text-[11px] tracking-wider">Schedule</TableHead>
+                      <TableHead className="font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("status")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Status {getSortIcon("status", false)}
+                        </div>
+                      </TableHead>
+                      <TableHead className="font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("payment")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Payment {getSortIcon("payment", false)}
+                        </div>
+                      </TableHead>
+                      <TableHead className="font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("booked")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Booked {getSortIcon("booked", false)}
+                        </div>
+                      </TableHead>
+                      <TableHead className="text-right uppercase text-[11px] tracking-wider font-bold text-gray-900">Details</TableHead>
                     </TableRow>
-                  ) : (
-                    sortedHistory.map((item) => (
-                      <TableRow key={item.id} className="group hover:bg-violet-50/30 transition-colors">
-                        <TableCell className="pl-6">
-                          <div className="flex flex-col">
-                            <span className="font-semibold text-gray-900">
-                              {parseBackendDateToLocal(item.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                            </span>
-                            <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
-                              <Clock className="h-3 w-3" />
-                              {item.time}
+                  </TableHeader>
+                  <TableBody>
+                    {sortedHistory.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={7} className="h-64 text-center">
+                          <div className="flex flex-col items-center justify-center py-12">
+                            <div className="p-4 bg-gray-50 rounded-full mb-4">
+                              <History className="h-10 w-10 text-gray-300" />
                             </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            <Avatar className="h-8 w-8 border border-violet-100 shadow-sm">
-                              <AvatarFallback className="bg-violet-100 text-violet-700 text-xs font-bold">
-                                {getInitials(item.patientName)}
-                              </AvatarFallback>
-                            </Avatar>
-                            <span className="font-medium text-gray-900">{item.patientName}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-sm font-medium text-gray-700">{getAppointmentTypeName(item.type, item.customType)}</span>
-                        </TableCell>
-                        {!doctorFilter && (
-                          <TableCell>
-                            <Badge variant="secondary" className="bg-slate-100 text-slate-700 border-none font-medium px-2 py-0">
-                              Dr. {item.doctor.split(' ').pop()}
-                            </Badge>
-                          </TableCell>
-                        )}
-                        <TableCell>{getStatusBadge(item.status)}</TableCell>
-                        <TableCell>
-                          <span className="text-xs text-muted-foreground bg-gray-100 px-1.5 py-0.5 rounded">
-                            {item.createdAt ? new Date(item.createdAt).toLocaleDateString('en-US', { 
-                              month: 'short', 
-                              day: 'numeric' 
-                            }) : "—"}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <Select 
-                            value={item.paymentStatus || "unpaid"} 
-                            onValueChange={(val) => handlePaymentStatusChange(item.id, val)}
-                          >
-                            <SelectTrigger className="h-8 w-[120px] text-xs border-violet-100 bg-white shadow-sm focus:ring-violet-200">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="unpaid">Unpaid</SelectItem>
-                              <SelectItem value="half-paid">Half-Paid</SelectItem>
-                              <SelectItem value="paid">Paid</SelectItem>
-                              <SelectItem value="overdue">Overdue</SelectItem>
-                              <SelectItem value="pay-at-clinic">Pay at Clinic</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                        <TableCell className="text-right pr-6">
-                          <div className="flex justify-end items-center gap-2">
-                            <Button 
-                              variant="ghost" 
-                              size="sm" 
-                              onClick={() => {
-                                setSelectedAppointmentToEdit(item);
-                                setBookingModalOpen(true);
-                              }} 
-                              className="h-8 w-8 p-0 text-muted-foreground hover:text-primary hover:bg-primary/5 rounded-full"
-                              title="View Details"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            
-                            <Select 
-                              value={canonicalStatus(item.status)} 
-                              onValueChange={(val) => handleStatusChangeRequest(item, val as Appointment['status'])}
-                            >
-                              <SelectTrigger className="h-8 w-[105px] text-[10px] font-medium border-violet-100 bg-white shadow-sm focus:ring-violet-200">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {APPOINTMENT_STATUSES.filter(opt => opt.value && opt.value.trim()).map(opt => (
-                                  <SelectItem key={opt.key} value={opt.value} className="text-xs">{opt.label}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            <h3 className="text-lg font-bold text-gray-900 uppercase">No History Found</h3>
+                            <p className="text-gray-500 max-w-xs mx-auto mt-2">No completed or cancelled appointments recorded yet.</p>
                           </div>
                         </TableCell>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
+                    ) : (
+                      sortedHistory.map((item) => (
+                        <TableRow key={item.id} className="hover:bg-gray-50 transition-colors border-b border-gray-50">
+                          <TableCell className="py-4 font-bold text-gray-900">{item.patientName}</TableCell>
+                          <TableCell className="font-semibold text-gray-700">{getAppointmentTypeName(item.type, item.customType)}</TableCell>
+                          <TableCell>
+                            <div className="flex flex-col">
+                              <span className="font-bold text-gray-900">{parseBackendDateToLocal(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                              <span className="text-xs text-gray-500 font-medium">{item.time}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Select 
+                              value={item.status} 
+                              onValueChange={(newStatus) => handleHistoryStatusChange(item.id, newStatus)}
+                            >
+                              <SelectTrigger className="w-auto h-auto p-0 bg-transparent border-0 hover:opacity-80 transition-opacity [&>svg]:text-gray-400">
+                                <div className="cursor-pointer">
+                                  {getStatusBadge(item.status)}
+                                </div>
+                              </SelectTrigger>
+                              <SelectContent>
+                                {APPOINTMENT_STATUSES.map((status: any) => (
+                                  <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell>
+                            <Select 
+                              value={item.paymentStatus || "unpaid"} 
+                              onValueChange={(newPaymentStatus) => handlePaymentStatusChange(item.id, newPaymentStatus)}
+                            >
+                              <SelectTrigger className="w-auto h-auto p-0 bg-transparent border-0 hover:opacity-80 transition-opacity [&>svg]:text-gray-400">
+                                <div className="cursor-pointer">
+                                  {getPaymentStatusBadge(item.paymentStatus)}
+                                </div>
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PAYMENT_STATUSES.map((status: any) => (
+                                  <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-col">
+                              <span className="font-bold text-gray-900">{item.createdAt ? new Date(item.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}</span>
+                              <span className="text-xs text-gray-500 font-medium">{item.createdAt ? new Date(item.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button 
+                              size="sm" 
+                              variant="ghost" 
+                              className="h-9 w-9 p-0 text-violet-600 hover:bg-violet-50 rounded-xl"
+                              onClick={() => {
+                                openEditModal(item);
+                              }}
+                            >
+                              <Eye className="h-5 w-5" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
 
       <AlertDialog open={isConfirmOpen} onOpenChange={setIsConfirmOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent className="rounded-2xl border-none shadow-2xl">
           <AlertDialogHeader>
-            <AlertDialogTitle>Confirm Status Change</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to change the status of {pendingStatusChange?.appointment.patientName}&apos;s appointment 
-              from <strong>{pendingStatusChange?.appointment.status}</strong> to <strong>{pendingStatusChange?.newStatus}</strong>?
+            <AlertDialogTitle className="text-2xl font-black text-gray-900 uppercase tracking-tight">Confirm Status Change</AlertDialogTitle>
+            <AlertDialogDescription className="text-gray-500 font-medium">
+              Are you sure you want to update the status of this appointment for <strong>{pendingStatusChange?.appointment.patientName}</strong>?
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmStatusChange} className="bg-violet-600 hover:bg-violet-700">
+          <AlertDialogFooter className="gap-2">
+            <AlertDialogCancel className="rounded-xl border-gray-100 font-bold uppercase text-xs tracking-wider">Cancel</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={confirmStatusChange}
+              className="bg-violet-600 hover:bg-violet-700 text-white rounded-xl font-bold uppercase text-xs tracking-wider"
+            >
               Confirm Change
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      <BookingModal
-        open={bookingModalOpen}
-        onOpenChange={(open) => {
-          setBookingModalOpen(open);
-          // When modal closes, refresh to pick up any changes
-          if (!open) {
-            setTimeout(() => {
-              refreshAppointments({});
-              setRefreshTrigger(prev => prev + 1);
-            }, 500);
-          }
-        }}
-        appointmentToEdit={selectedAppointmentToEdit}
-        onBooked={() => {
-          setSelectedAppointmentToEdit(null);
-          // Force a complete refresh to ensure all data is updated
-          refreshAppointments({});
-          setRefreshTrigger(prev => prev + 1);
-        }}
-        onDeleted={() => {
-          setSelectedAppointmentToEdit(null);
-          // Force a complete refresh to ensure all data is updated
-          refreshAppointments({});
-          setRefreshTrigger(prev => prev + 1);
-        }}
-      />
+      <AlertDialog open={isApproveConfirmOpen} onOpenChange={setIsApproveConfirmOpen}>
+        <AlertDialogContent className="rounded-2xl border-none shadow-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-2xl font-black text-gray-900 uppercase tracking-tight">Approve Appointment?</AlertDialogTitle>
+            <AlertDialogDescription className="text-gray-500 font-medium">
+              Are you sure you want to approve this appointment for <strong>{pendingApproveAppointment?.patientName}</strong>? The status will be set to <strong>Scheduled</strong>.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          
+          {/* Payment Status Summary */}
+          <div className="bg-amber-50 p-3 rounded-lg border border-amber-200 mb-4">
+            <p className="text-sm font-medium text-amber-900">
+              {(() => {
+                const paymentStatus = canonicalStatus(pendingApproveAppointment?.paymentStatus || "unpaid");
+                const patientName = pendingApproveAppointment?.patientName || "Patient";
+                
+                if (paymentStatus === "paid") {
+                  return `✓ ${patientName} has paid in full.`;
+                } else if (paymentStatus === "half-paid") {
+                  return `⚠ ${patientName} has made a partial payment.`;
+                } else if (paymentStatus === "pay-at-clinic") {
+                  return `📍 ${patientName} will pay at the clinic.`;
+                } else {
+                  return `✗ ${patientName} has not paid yet.`;
+                }
+              })()}
+            </p>
+          </div>
+
+          <div className="bg-blue-50 p-4 rounded-lg border border-blue-200 space-y-2">
+            <div className="text-sm space-y-2">
+              <div className="flex justify-between">
+                <span className="text-gray-600">Service:</span>
+                <span className="font-semibold text-gray-900">{pendingApproveAppointment ? getAppointmentTypeName(pendingApproveAppointment.type, pendingApproveAppointment.customType) : ""}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Date & Time:</span>
+                <span className="font-semibold text-gray-900">{pendingApproveAppointment?.date} at {pendingApproveAppointment?.time}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Doctor:</span>
+                <span className="font-semibold text-gray-900">{pendingApproveAppointment?.doctor}</span>
+              </div>
+              <div className="border-t border-blue-100 pt-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Payment Status:</span>
+                  <div>
+                    {getPaymentStatusBadge(pendingApproveAppointment?.paymentStatus)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <AlertDialogFooter className="gap-2">
+            <AlertDialogCancel className="rounded-xl border-gray-100 font-bold uppercase text-xs tracking-wider">Cancel</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={confirmApprove}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold uppercase text-xs tracking-wider"
+            >
+              Yes, Approve
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={isRejectConfirmOpen} onOpenChange={setIsRejectConfirmOpen}>
+        <AlertDialogContent className="rounded-2xl border-none shadow-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-2xl font-black text-gray-900 uppercase tracking-tight">Reject Appointment?</AlertDialogTitle>
+            <AlertDialogDescription className="text-gray-500 font-medium">
+              Are you sure you want to reject this appointment for <strong>{pendingRejectAppointment?.patientName}</strong>? The status will be set to <strong>Cancelled</strong>.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          
+          {/* Appointment Details */}
+          <div className="bg-red-50 p-4 rounded-lg border border-red-200 space-y-2">
+            <div className="text-sm space-y-2">
+              <div className="flex justify-between">
+                <span className="text-gray-600">Service:</span>
+                <span className="font-semibold text-gray-900">{pendingRejectAppointment ? getAppointmentTypeName(pendingRejectAppointment.type, pendingRejectAppointment.customType) : ""}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Date & Time:</span>
+                <span className="font-semibold text-gray-900">{pendingRejectAppointment?.date} at {pendingRejectAppointment?.time}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Doctor:</span>
+                <span className="font-semibold text-gray-900">{pendingRejectAppointment?.doctor}</span>
+              </div>
+            </div>
+          </div>
+          <AlertDialogFooter className="gap-2">
+            <AlertDialogCancel className="rounded-xl border-gray-100 font-bold uppercase text-xs tracking-wider">Cancel</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={confirmReject}
+              className="bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold uppercase text-xs tracking-wider"
+            >
+              Yes, Reject
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

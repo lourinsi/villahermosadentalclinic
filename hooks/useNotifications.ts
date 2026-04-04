@@ -109,6 +109,24 @@ export const useNotifications = () => {
     }
   };
 
+  const deleteAllNotifications = async () => {
+    if (!userId) return;
+
+    try {
+      const response = await fetch(`http://localhost:3001/api/notifications?userId=${userId}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) throw new Error("Failed to delete all notifications");
+      
+      setNotifications([]);
+      toast.success("All notifications cleared");
+    } catch (error) {
+      console.error("Error deleting all notifications:", error);
+      toast.error("Failed to clear notifications");
+    }
+  };
+
   return {
     notifications,
     isLoading,
@@ -116,6 +134,7 @@ export const useNotifications = () => {
     markAsUnread,
     deleteNotification,
     markAllAsRead,
+    deleteAllNotifications,
     refreshNotifications: fetchNotifications,
   };
 };

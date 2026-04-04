@@ -1,12 +1,7 @@
 "use client";
 
-import { DoctorCalendarView } from '@/components/DoctorCalendarView';
-import { Suspense } from 'react';
+import { CalendarPageLayout } from '@/components/CalendarPageLayout';
 
 export default function DoctorCalendarPage() {
-  return (
-    <Suspense fallback={<div>Loading calendar...</div>}>
-      <DoctorCalendarView />
-    </Suspense>
-  );
+  return <CalendarPageLayout portal="doctor" />;
 }

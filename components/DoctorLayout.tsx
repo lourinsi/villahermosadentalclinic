@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { LogOut, User, LayoutDashboard, Calendar, Users, Settings, Bell, ClipboardList } from "lucide-react";
 import { toast } from "sonner";
 import { NotificationsOpened } from "./notificationsOpened";
+import BookingModal from "./BookingModal";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { Appointment } from "@/hooks/useAppointments";
@@ -14,8 +15,21 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
   const pathname = usePathname();
   const router = useRouter();
   const { logout, user } = useAuth();
-  const { notifications, markAsRead, refreshNotifications } = useNotifications();
-  const { updateAppointment, refreshAppointments } = useAppointmentModal();
+  const { notifications, markAsRead, markAsUnread, deleteNotification, markAllAsRead, deleteAllNotifications, refreshNotifications } = useNotifications();
+  const { 
+    updateAppointment, 
+    refreshAppointments, 
+    appointments, 
+    openEditModal, 
+    openEditModalById,
+    isEditModalOpen,
+    isCreateModalOpen,
+    closeEditModal,
+    closeCreateModal,
+    selectedAppointment,
+    newAppointmentDate,
+    newAppointmentTime
+  } = useAppointmentModal();
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
@@ -29,6 +43,16 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
     } catch (error) {
       toast.error("Failed to update appointment status");
       console.error(error);
+    }
+  };
+
+  const handleEditAppointment = async (appointmentId: string) => {
+    console.log(`[DoctorLayout] Attempting to edit appointment: ${appointmentId}`);
+    try {
+      await openEditModalById(appointmentId);
+    } catch (error) {
+      console.error(`[DoctorLayout] Error in handleEditAppointment:`, error);
+      toast.error("Appointment not found or could not be loaded");
     }
   };
 
@@ -107,10 +131,29 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
             portal="doctor" 
             onUpdateAppointmentStatus={handleUpdateAppointmentStatus}
             onMarkAsRead={markAsRead}
+            onMarkAsUnread={markAsUnread}
+            onDelete={deleteNotification}
+            onMarkAllAsRead={markAllAsRead}
+            onDeleteAll={deleteAllNotifications}
             onRefresh={refreshNotifications}
+            onEditAppointment={handleEditAppointment}
           />
         </header>
         <main className="flex-1 p-6 overflow-auto bg-gray-50">{children}</main>
+        
+        {/* Support editing appointments from notifications */}
+        <BookingModal 
+          open={isEditModalOpen || isCreateModalOpen} 
+          onOpenChange={(open) => {
+            if (!open) {
+              closeEditModal();
+              closeCreateModal();
+            }
+          }}
+          appointmentToEdit={selectedAppointment}
+          defaultDate={newAppointmentDate}
+          defaultTime={newAppointmentTime}
+        />
       </div>
     </div>
   );

@@ -1,7 +1,7 @@
 "use client";
 
-import { DoctorDashboard } from '@/components/DoctorDashboard';
+import { Dashboard } from '@/components/Dashboard';
 
 export default function DoctorDashboardPage() {
-  return <DoctorDashboard />;
+  return <Dashboard portal="doctor" />;
 }

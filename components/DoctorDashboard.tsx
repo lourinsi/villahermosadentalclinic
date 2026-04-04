@@ -10,7 +10,7 @@ import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal } from "../lib/utils";
 import { useAuth } from "@/hooks/useAuth.tsx";
-import BookingModal from "./BookingModal";
+import { NextAppointmentCard } from "./NextAppointmentCard";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend, AreaChart, Area } from "recharts";
 
 export function DoctorDashboard() {
@@ -18,8 +18,6 @@ export function DoctorDashboard() {
   const { user } = useAuth();
   const [viewMode, setViewMode] = useState<"day" | "week" | "month">("day");
   const [isLoadingView, setIsLoadingView] = useState(false);
-  const [bookingModalOpen, setBookingModalOpen] = useState(false);
-  const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
 
   // Filter appointments to only show this doctor's appointments
   const doctorName = user?.username || "";
@@ -75,6 +73,35 @@ export function DoctorDashboard() {
   const filteredAppointments = useMemo(() => {
     return appointmentsByDate.filter(apt => apt.status !== "pending");
   }, [appointmentsByDate]);
+
+  // Get next upcoming appointment (regardless of view mode)
+  const nextAppointment = useMemo(() => {
+    const now = new Date();
+    const allFutureAppointments = myAppointments
+      .filter((apt: Appointment) => {
+        const aptDate = parseBackendDateToLocal(apt.date);
+        const aptDateTime = new Date(`${apt.date}T${apt.time}`);
+        return aptDateTime > now && apt.status !== "cancelled";
+      })
+      .sort((a, b) => {
+        const timeA = new Date(`${a.date}T${a.time}`).getTime();
+        const timeB = new Date(`${b.date}T${b.time}`).getTime();
+        return timeA - timeB;
+      });
+    return allFutureAppointments.length > 0 ? allFutureAppointments[0] : null;
+  }, [myAppointments]);
+
+  // Get all appointments at the same time as next appointment
+  const sameTimeAppointments = useMemo(() => {
+    if (!nextAppointment) return [];
+    return myAppointments.filter(
+      (apt: Appointment) =>
+        apt.date === nextAppointment.date &&
+        apt.time === nextAppointment.time &&
+        apt.id !== nextAppointment.id &&
+        apt.status !== "cancelled"
+    );
+  }, [nextAppointment, myAppointments]);
 
   // Get unique patients this doctor has seen
   const uniquePatients = useMemo(() => {
@@ -225,8 +252,7 @@ export function DoctorDashboard() {
                     key={appointment.id}
                     className="group flex items-center justify-between p-4 hover:bg-violet-50/50 transition-all duration-300 cursor-pointer"
                     onClick={() => {
-                      setSelectedAppointment(appointment);
-                      setBookingModalOpen(true);
+                      openEditModal(appointment);
                     }}
                   >
                     <div className="flex items-center space-x-4">
@@ -261,11 +287,36 @@ export function DoctorDashboard() {
                   </div>
                 ))
               ) : (
-                <div className="flex flex-col items-center justify-center py-16 text-gray-400">
+                <div className="flex flex-col items-center justify-center py-16 text-gray-500">
                   <div className="p-4 bg-gray-50 rounded-full mb-4">
-                    <Heart className="h-8 w-8 opacity-20" />
+                    <Calendar className="h-8 w-8 opacity-20" />
                   </div>
-                  <p className="text-sm font-medium">No appointments scheduled</p>
+                  <p className="text-sm font-semibold">No appointments scheduled for this {viewMode}</p>
+                  {viewMode !== "month" && (
+                    <p className="text-xs text-gray-400 mt-1 max-w-[200px] text-center">
+                      Try switching to {viewMode === "day" ? "week or month" : "month"} view to see more.
+                    </p>
+                  )}
+                  {viewMode === "day" && (
+                    <div className="mt-4 flex gap-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="text-xs font-bold rounded-xl"
+                        onClick={() => setViewMode("week")}
+                      >
+                        Week View
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="text-xs font-bold rounded-xl"
+                        onClick={() => setViewMode("month")}
+                      >
+                        Month View
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -346,62 +397,23 @@ export function DoctorDashboard() {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Your Next Patient Card */}
-        {filteredAppointments.length > 0 && (
-          <div className="relative p-6 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg overflow-hidden group">
-            <div className="absolute top-0 right-0 p-4 opacity-10">
-              <Users className="h-32 w-32" />
-            </div>
-            <div className="relative z-10">
-              <div className="mb-4">
-                <div className="flex items-center space-x-2 bg-white/20 w-fit px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-sm mb-3">
-                  <Clock className="h-3 w-3" />
-                  <span>Confirmed</span>
-                </div>
-                <h3 className="text-2xl font-bold tracking-tight mb-1">
-                  {filteredAppointments[0].patientName}
-                </h3>
-                <p className="text-emerald-100 font-medium">{getAppointmentTypeName(filteredAppointments[0].type, filteredAppointments[0].customType)}</p>
-              </div>
-              
-              <div className="flex items-center justify-between mb-4">
-                <div className="space-y-2 flex-1">
-                  <div className="flex items-center space-x-2 bg-white/10 px-3 py-1.5 rounded-lg backdrop-blur-sm w-fit text-xs font-medium">
-                    <Calendar className="h-3 w-3" />
-                    <span>{parseBackendDateToLocal(filteredAppointments[0].date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
-                  </div>
-                  <div className="flex items-center space-x-2 bg-white/10 px-3 py-1.5 rounded-lg backdrop-blur-sm w-fit text-xs font-medium">
-                    <Clock className="h-3 w-3" />
-                    <span>{filteredAppointments[0].time}</span>
-                  </div>
-                </div>
-                <div className="h-20 w-20 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center flex-shrink-0 ml-3 border-2 border-white/30">
-                  <div className="text-center">
-                    <div className="text-3xl font-bold">
-                      {filteredAppointments[0].patientName.split(' ')[0].charAt(0)}{filteredAppointments[0].patientName.split(' ').pop()?.charAt(0)}
-                    </div>
-                    <div className="text-[10px] font-semibold text-emerald-100">Patient</div>
-                  </div>
-                </div>
-              </div>
-
-              <Button 
-                size="sm"
-                className="w-full bg-white text-emerald-600 hover:bg-emerald-50 font-bold py-2 rounded-lg h-auto"
-                onClick={() => {
-                  setSelectedAppointment(filteredAppointments[0]);
-                  setBookingModalOpen(true);
-                }}
-              >
-                View Details
-              </Button>
-            </div>
-          </div>
+      <div className="grid grid-cols-1 gap-6">
+        {/* Your Next Patient Card - Full Width */}
+        {nextAppointment && (
+          <NextAppointmentCard
+            appointment={nextAppointment}
+            role="doctor"
+            sameTimeAppointments={sameTimeAppointments}
+            onViewDetails={(apt) => {
+              openEditModal(apt);
+            }}
+          />
         )}
+      </div>
 
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Quick Actions */}
-        <Card className="border-none shadow-md bg-white overflow-hidden lg:col-span-2">
+        <Card className="border-none shadow-md bg-white overflow-hidden lg:col-span-3">
           <CardHeader className="border-b border-gray-50 pb-4">
             <CardTitle className="text-xl font-bold text-gray-800">Quick Actions</CardTitle>
           </CardHeader>
@@ -474,17 +486,6 @@ export function DoctorDashboard() {
           </CardContent>
         </Card>
       </div>
-
-      {/* Booking Modal */}
-      <BookingModal
-        open={bookingModalOpen}
-        onOpenChange={setBookingModalOpen}
-        appointmentToEdit={selectedAppointment}
-        onBooked={() => {
-          setSelectedAppointment(null);
-          setBookingModalOpen(false);
-        }}
-      />
     </div>
   );
 }

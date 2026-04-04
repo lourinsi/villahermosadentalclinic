@@ -37,6 +37,9 @@ interface AppointmentFormData {
   status: string;
   paymentStatus: "paid" | "unpaid" | "overdue" | "half-paid";
   balance: number;
+  email?: string;
+  phone?: string;
+  dateOfBirth?: string;
 }
 
 interface ApiPatient {
@@ -728,13 +731,76 @@ export function CreateAppointmentModal() {
       ) : (
         <div className="space-y-4">
           <Button type="button" variant="outline" className="w-full justify-start text-muted-foreground" onClick={() => setShowNewPatient(false)}>← Back to Patient Search</Button>
-          <div className="space-y-2">
-            <Label className="text-base font-medium">New Patient Name *</Label>
-            <Input placeholder="Enter first and last name" value={formData.patientName} onChange={(e) => setFormData(prev => ({ ...prev, patientName: e.target.value }))} autoFocus required />
-            <p className="text-xs text-gray-500">e.g., John Doe</p>
+          
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">First Name *</Label>
+                <Input 
+                  placeholder="Enter first name" 
+                  value={formData.patientName.split(" ")[0] || ""} 
+                  onChange={(e) => {
+                    const lastName = formData.patientName.split(" ").slice(1).join(" ") || "";
+                    setFormData(prev => ({ ...prev, patientName: `${e.target.value} ${lastName}`.trim() }));
+                  }} 
+                  autoFocus 
+                  required 
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Last Name *</Label>
+                <Input 
+                  placeholder="Enter last name" 
+                  value={formData.patientName.split(" ").slice(1).join(" ") || ""} 
+                  onChange={(e) => {
+                    const firstName = formData.patientName.split(" ")[0] || "";
+                    setFormData(prev => ({ ...prev, patientName: `${firstName} ${e.target.value}`.trim() }));
+                  }} 
+                  required 
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Email *</Label>
+              <Input 
+                type="email"
+                placeholder="Enter email" 
+                value={formData.email || ""} 
+                onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))} 
+                required 
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Phone Number *</Label>
+              <Input 
+                type="tel"
+                placeholder="Enter phone number" 
+                value={formData.phone || ""} 
+                onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))} 
+                required 
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Date of Birth</Label>
+              <Input 
+                type="date"
+                value={formData.dateOfBirth || ""} 
+                onChange={(e) => setFormData(prev => ({ ...prev, dateOfBirth: e.target.value }))} 
+              />
+            </div>
           </div>
 
-          {formData.patientName && <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg"><p className="text-sm font-medium text-gray-900">New patient will be created as:</p><p className="text-sm text-blue-600 font-semibold mt-1">{formData.patientName}</p></div>}
+          {formData.patientName && (
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-sm font-medium text-gray-900">New patient will be created as:</p>
+              <p className="text-sm text-blue-600 font-semibold mt-1">{formData.patientName}</p>
+              {formData.email && <p className="text-xs text-gray-600 mt-1">Email: {formData.email}</p>}
+              {formData.phone && <p className="text-xs text-gray-600">Phone: {formData.phone}</p>}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -888,7 +954,13 @@ export function CreateAppointmentModal() {
         const res = await fetch("http://localhost:3001/api/patients", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ firstName, lastName, email: "", phone: "" })
+          body: JSON.stringify({ 
+            firstName, 
+            lastName, 
+            email: formData.email || "", 
+            phone: formData.phone || "",
+            dateOfBirth: formData.dateOfBirth || ""
+          })
         });
         const json = await res.json();
         if (!res.ok || !json?.success || !json.data) {

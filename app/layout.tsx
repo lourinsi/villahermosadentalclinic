@@ -42,12 +42,8 @@ export default function RootLayout({
             <PaymentModalProvider>
               {children}
               <Toaster />
-              <CreateAppointmentModal />
               <ScheduleAppointmentModal />
               <AddPatientModal />
-              <RecordPaymentModal />
-              <PatientPaymentModal />
-              <PatientBookingModal />
             </PaymentModalProvider>
           </AppointmentModalProvider>
         </AuthProvider>

@@ -35,8 +35,8 @@ import {
   User as UserIcon
 } from "lucide-react";
 import { EditPaymentModal } from "./EditPaymentModal";
-import ConfirmDialog from "./ConfirmDialog";
 import BookingModal from "./BookingModal";
+import ConfirmDialog from "./ConfirmDialog";
 import { Appointment } from "../hooks/useAppointments";
 import { RecentTransaction } from "../lib/finance-types";
 import { DentalChart } from "./DentalChart";
@@ -122,9 +122,9 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   const [confirmTitle, setConfirmTitle] = useState<string>("");
   const [confirmMessage, setConfirmMessage] = useState<string>("");
 
-  // Booking Modal state
+  // BookingModal state
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
-  const [selectedAppointmentToEdit, setSelectedAppointmentToEdit] = useState<any>(null);
+  const [selectedAppointmentToEdit, setSelectedAppointmentToEdit] = useState<Appointment | null>(null);
 
   // State to hold doctor's appointments (for filtering patients by doctor)
   const [doctorAppointments, setDoctorAppointments] = useState<Appointment[]>([]);

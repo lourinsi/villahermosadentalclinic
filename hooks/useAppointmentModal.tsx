@@ -10,6 +10,7 @@ interface AppointmentModalContextType {
   isAddPatientModalOpen: boolean;
   isEditModalOpen: boolean;
   isPatientFieldReadOnly: boolean;
+  isPaymentFlow: boolean;
   selectedAppointment: Appointment | null;
   newAppointmentDate?: Date;
   newAppointmentTime?: string;
@@ -25,7 +26,8 @@ interface AppointmentModalContextType {
   closePatientBookingModal: () => void;
   openAddPatientModal: () => void;
   closeAddPatientModal: () => void;
-  openEditModal: (appointment: Appointment, isPatientReadOnly?: boolean) => void;
+  openEditModal: (appointment: Appointment, isPatientReadOnly?: boolean, isPaymentFlow?: boolean) => void;
+  openEditModalById: (id: string, isPatientReadOnly?: boolean, isPaymentFlow?: boolean) => Promise<void>;
   closeEditModal: () => void;
   refreshAppointments: (filters?: AppointmentFilters) => void;
   refreshPatients: () => void;
@@ -47,6 +49,7 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
   const [isAddPatientModalOpen, setAddPatientModalOpen] = useState(false);
   const [isEditModalOpen, setEditModalOpen] = useState(false);
   const [isPatientFieldReadOnly, setPatientFieldReadOnly] = useState(false);
+  const [isPaymentFlow, setIsPaymentFlow] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
@@ -100,11 +103,11 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
       if (time !== undefined) setNewAppointmentTime(time ?? "");
       if (doctor !== undefined) setNewAppointmentDoctorName(doctor ?? "");
 
-      // DO NOT redirect patients — just open the modal
-      setCreateModalOpen(true);
+      // Open the specific patient booking modal instead of the generic create modal
+      setPatientBookingModalOpen(true);
     } catch (err) {
-      // fallback: ensure modal still opens
-      setCreateModalOpen(true);
+      // fallback
+      setPatientBookingModalOpen(true);
     }
   };
 
@@ -113,16 +116,57 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
   const openAddPatientModal = useCallback(() => setAddPatientModalOpen(true), []);
   const closeAddPatientModal = useCallback(() => setAddPatientModalOpen(false), []);
   
-  const openEditModal = useCallback((appointment: Appointment, isPatientReadOnly: boolean = false) => {
+  const openEditModal = useCallback((appointment: Appointment, isPatientReadOnly: boolean = false, isPaymentFlowMode: boolean = false) => {
     setSelectedAppointment(appointment);
     setPatientFieldReadOnly(isPatientReadOnly);
+    setIsPaymentFlow(isPaymentFlowMode);
     setEditModalOpen(true);
   }, []);
+
+  const openEditModalById = useCallback(async (id: string, isPatientReadOnly: boolean = false, isPaymentFlowMode: boolean = false) => {
+    // 1. Try to find in existing appointments
+    const existing = appointments.find(a => String(a.id) === String(id));
+    if (existing) {
+      console.log(`[useAppointmentModal] Found appointment ${id} in local state.`);
+      openEditModal(existing, isPatientReadOnly, isPaymentFlowMode);
+      return;
+    }
+
+    // 2. If not found, fetch from API
+    console.log(`[useAppointmentModal] Appointment ${id} not found in local state. Fetching from API...`);
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem("authToken") : null;
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      
+      const response = await fetch(`http://localhost:3001/api/appointments/${id}`, { 
+        headers,
+        credentials: "include" 
+      });
+      
+      const result = await response.json();
+      if (result.success && result.data) {
+        console.log(`[useAppointmentModal] Successfully fetched appointment ${id} from API.`);
+        openEditModal(result.data, isPatientReadOnly, isPaymentFlowMode);
+      } else {
+        console.error(`[useAppointmentModal] Failed to fetch appointment ${id}:`, result.message);
+        throw new Error(result.message || "Appointment not found");
+      }
+    } catch (error) {
+      console.error(`[useAppointmentModal] Error fetching appointment ${id}:`, error);
+      throw error;
+    }
+  }, [appointments, openEditModal]);
 
   const closeEditModal = useCallback(() => {
     setEditModalOpen(false);
     setSelectedAppointment(null);
     setPatientFieldReadOnly(false);
+    setIsPaymentFlow(false);
   }, []);
 
   const value = useMemo(() => ({
@@ -132,6 +176,7 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
     isAddPatientModalOpen,
     isEditModalOpen,
     isPatientFieldReadOnly,
+    isPaymentFlow,
     selectedAppointment,
     newAppointmentDate,
     newAppointmentTime,
@@ -148,6 +193,7 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
     openAddPatientModal,
     closeAddPatientModal,
     openEditModal,
+    openEditModalById,
     closeEditModal,
     refreshAppointments,
     refreshPatients,
@@ -165,6 +211,7 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
     isAddPatientModalOpen,
     isEditModalOpen,
     isPatientFieldReadOnly,
+    isPaymentFlow,
     selectedAppointment,
     newAppointmentDate,
     newAppointmentTime,
@@ -181,6 +228,7 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
     openAddPatientModal,
     closeAddPatientModal,
     openEditModal,
+    openEditModalById,
     closeEditModal,
     refreshAppointments,
     refreshPatients,

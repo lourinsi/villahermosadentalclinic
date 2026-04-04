@@ -14,7 +14,6 @@ import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
-import { ContextBookingModal } from "@/components/ContextBookingModal";
 import { Input } from "@/components/ui/input";
 import {
     Select,
@@ -92,11 +91,11 @@ const OrdersContent = () => {
     }, []);
 
     const handleOpenPayment = (apt: Appointment) => {
-        // Open BookingModal in view mode (patient readonly)
+        // Open BookingModal in view mode (patient readonly) with payment flow
         console.log('[Orders] Pay Now clicked:', { appointmentId: apt.id, doctor: apt.doctor, date: apt.date, time: apt.time });
         try {
-            console.log('[Orders] Calling openEditModal with:', { appointmentId: apt.id, isPatientReadonly: true });
-            openEditModal(apt, true);
+            console.log('[Orders] Calling openEditModal with:', { appointmentId: apt.id, isPatientReadonly: true, isPaymentFlow: true });
+            openEditModal(apt, true, true);
             console.log('[Orders] openEditModal called successfully');
         } catch (err) {
             console.error('[Orders] Error calling openEditModal:', err);
@@ -522,9 +521,6 @@ const OrdersContent = () => {
                     ))}
                 </div>
             )}
-
-            {/* Context-connected BookingModal for viewing/editing appointments */}
-            <ContextBookingModal />
         </div>
     );
 };

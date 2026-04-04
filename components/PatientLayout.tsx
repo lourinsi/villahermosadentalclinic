@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { LogOut, User, Home, Users, Calendar, Search, ShoppingBag, ShoppingCart, Bell, LayoutDashboard } from "lucide-react";
 import { toast } from "sonner";
 import { NotificationsOpened } from "./notificationsOpened";
+import BookingModal from "./BookingModal";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 
@@ -13,22 +14,32 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
   const pathname = usePathname();
   const router = useRouter();
   const { logout, user } = useAuth();
-  const { notifications, refreshNotifications, markAsRead } = useNotifications();
+  const { notifications, refreshNotifications, markAsRead, markAsUnread, deleteNotification, markAllAsRead, deleteAllNotifications } = useNotifications();
   const { 
     appointments, 
     openEditModal, 
+    openEditModalById,
     updateAppointment, 
-    refreshAppointments 
+    refreshAppointments,
+    isEditModalOpen,
+    isCreateModalOpen,
+    closeEditModal,
+    closeCreateModal,
+    selectedAppointment,
+    isPatientFieldReadOnly,
+    newAppointmentDate,
+    newAppointmentTime
   } = useAppointmentModal();
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
-  const handleReschedule = (appointmentId: string) => {
-    const appointment = appointments.find(a => a.id === appointmentId);
-    if (appointment) {
-      openEditModal(appointment, true);
-    } else {
-      toast.error("Appointment not found");
+  const handleReschedule = async (appointmentId: string) => {
+    console.log(`[PatientLayout] Attempting to reschedule/view appointment: ${appointmentId}`);
+    try {
+      await openEditModalById(appointmentId, true);
+    } catch (error) {
+      console.error(`[PatientLayout] Error in handleReschedule:`, error);
+      toast.error("Appointment not found or could not be loaded");
     }
   };
 
@@ -116,11 +127,30 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
             portal="patient" 
             onRefresh={refreshNotifications}
             onMarkAsRead={markAsRead}
+            onMarkAsUnread={markAsUnread}
+            onDelete={deleteNotification}
+            onMarkAllAsRead={markAllAsRead}
+            onDeleteAll={deleteAllNotifications}
             onReschedule={handleReschedule}
             onCancelAppointment={handleCancelAppointment}
+            onEditAppointment={handleReschedule}
           />
         </header>
         <main className="flex-1 p-6 overflow-auto bg-gray-50">{children}</main>
+        
+        {/* Support editing/viewing appointments from notifications */}
+        <BookingModal 
+          open={isEditModalOpen || isCreateModalOpen} 
+          onOpenChange={(open) => {
+            if (!open) {
+              closeEditModal();
+              closeCreateModal();
+            }
+          }}
+          appointmentToEdit={selectedAppointment}
+          defaultDate={newAppointmentDate}
+          defaultTime={newAppointmentTime}
+        />
       </div>
     </div>
   );

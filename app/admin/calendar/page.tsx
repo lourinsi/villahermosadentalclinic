@@ -1,10 +1,5 @@
-import { AdminCalendarView } from '@/components/AdminCalendarView';
-import { Suspense } from 'react';
+import { CalendarPageLayout } from '@/components/CalendarPageLayout';
 
 export default function CalendarPage() {
-  return (
-    <Suspense fallback={<div>Loading calendar...</div>}>
-      <AdminCalendarView />
-    </Suspense>
-  );
+  return <CalendarPageLayout portal="admin" />;
 }

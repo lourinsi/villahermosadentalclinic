@@ -19,13 +19,14 @@ export function NotificationPage({ portal }: NotificationPageProps) {
     markAsUnread,
     deleteNotification, 
     markAllAsRead,
+    deleteAllNotifications,
     refreshNotifications
   } = useNotifications();
 
   const { 
     updateAppointment, 
     refreshAppointments, 
-    openEditModal, 
+    openEditModalById,
     appointments,
     isLoading: appointmentsLoading
   } = useAppointmentModal();
@@ -52,12 +53,13 @@ export function NotificationPage({ portal }: NotificationPageProps) {
     }
   };
 
-  const handleReschedule = (appointmentId: string) => {
-    const appointment = appointments.find(a => a.id === appointmentId);
-    if (appointment) {
-      openEditModal(appointment, portal === "patient"); // true for patient view read-only patient field
-    } else {
-      toast.error("Appointment not found");
+  const handleReschedule = async (appointmentId: string) => {
+    console.log(`[NotificationPage] Attempting to view/edit appointment: ${appointmentId}`);
+    try {
+      await openEditModalById(appointmentId, portal === "patient");
+    } catch (error) {
+      console.error(`[NotificationPage] Error in handleReschedule:`, error);
+      toast.error("Appointment not found or could not be loaded");
     }
   };
 
@@ -90,12 +92,15 @@ export function NotificationPage({ portal }: NotificationPageProps) {
       onUpdateAppointmentStatus: handleUpdateAppointmentStatus,
       onReschedule: handleReschedule,
       onCancelAppointment: handleCancelAppointment,
+      onEditAppointment: handleReschedule, // Reuse handleReschedule as it opens the modal
     },
     doctor: {
       onUpdateAppointmentStatus: handleUpdateAppointmentStatus,
+      onEditAppointment: handleReschedule,
     },
     admin: {
       onUpdateAppointmentStatus: handleUpdateAppointmentStatus,
+      onEditAppointment: handleReschedule,
     },
   };
 
@@ -107,6 +112,7 @@ export function NotificationPage({ portal }: NotificationPageProps) {
         onMarkAsUnread={markAsUnread}
         onDelete={deleteNotification}
         onMarkAllAsRead={markAllAsRead}
+        onDeleteAll={deleteAllNotifications}
         portal={portal}
         {...portalProps[portal]}
       />

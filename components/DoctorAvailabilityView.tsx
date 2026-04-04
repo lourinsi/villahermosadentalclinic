@@ -23,7 +23,6 @@ import { TIME_SLOTS } from "@/lib/time-slots";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import ViewMode from "@/components/viewMode";
-import BookingModal from "@/components/BookingModal";
 import { toast } from "sonner";
 
 interface DoctorAvailabilityViewProps {
@@ -35,16 +34,12 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
   const router = useRouter();
   const { user } = useAuth();
   const { doctors, isLoadingDoctors } = useDoctors();
-  const { updateAppointment } = useAppointmentModal();
+  const { updateAppointment, openEditModal, openPatientBookingModal } = useAppointmentModal();
   
   const [viewMode, setViewMode] = useState<ViewMode>("day");
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isLoadingAvailability, setIsLoadingAvailability] = useState(false);
-  const [bookingModalOpen, setBookingModalOpen] = useState(false);
-  const [bookingDefaultTime, setBookingDefaultTime] = useState<string | undefined>(undefined);
-  const [bookingDefaultDate, setBookingDefaultDate] = useState<Date | undefined>(undefined);
-  const [appointmentToEdit, setAppointmentToEdit] = useState<Appointment | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
   const doctor = useMemo(() => {
@@ -182,24 +177,16 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
               setIsProcessing(false);
             }
           }
-          setAppointmentToEdit(slot.appointment);
-          setBookingDefaultTime(slot.time);
-          setBookingDefaultDate(selectedDate);
-          setBookingModalOpen(true);
+          openEditModal(slot.appointment, true);
         } else {
           toast.error("This appointment belongs to another patient");
         }
       } else {
         // Admin can view all appointments
-        setAppointmentToEdit(slot.appointment);
-        setBookingDefaultTime(slot.time);
-        setBookingDefaultDate(selectedDate);
-        setBookingModalOpen(true);
+        openEditModal(slot.appointment);
       }
     } else if (slot.isAvailable) {
-      setBookingDefaultTime(slot.time);
-      setBookingDefaultDate(selectedDate);
-      setBookingModalOpen(true);
+      openPatientBookingModal(selectedDate, slot.time, doctorName);
     }
   };
 
@@ -343,10 +330,8 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
                             <button
                               key={slot.time}
                               onClick={() => {
-                                setBookingDefaultTime(slot.time);
-                                setBookingDefaultDate(date);
-                                setBookingModalOpen(true);
-                              }}
+                              openPatientBookingModal(date, slot.time, doctorName);
+                            }}
                               className="w-full px-2 py-1 rounded text-[10px] font-bold transition-all text-center bg-emerald-100 text-emerald-700 hover:bg-emerald-200 cursor-pointer"
                             >
                               {slot.time}
@@ -656,25 +641,6 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
           </div>
         </div>
       </div>
-
-      <BookingModal
-        open={bookingModalOpen}
-        onOpenChange={(open) => {
-          setBookingModalOpen(open);
-          if (!open) setAppointmentToEdit(null);
-        }}
-        defaultDate={bookingDefaultDate}
-        defaultTime={bookingDefaultTime}
-        doctorName={doctor?.name}
-        appointmentToEdit={appointmentToEdit}
-        onBooked={() => {
-          window.dispatchEvent(new CustomEvent('appointments:updated'));
-        }}
-        onDeleted={() => {
-          setAppointmentToEdit(null);
-          window.dispatchEvent(new CustomEvent('appointments:updated'));
-        }}
-      />
 
       <style jsx global>{`
         .custom-scrollbar::-webkit-scrollbar {

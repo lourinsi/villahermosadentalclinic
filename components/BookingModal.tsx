@@ -59,7 +59,7 @@ interface BookingModalProps {
 
 export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, onBooked, appointmentToEdit, onDeleted, title, isReschedule }: BookingModalProps) {
   const { user } = useAuth();
-  const { addAppointment, deleteAppointment, updateAppointment } = useAppointmentModal();
+  const { addAppointment, deleteAppointment, updateAppointment, isPaymentFlow } = useAppointmentModal();
   const { openPatientPaymentFor } = usePaymentModal();
   const { statuses: appointmentStatuses, isLoading: isLoadingStatuses } = useAppointmentStatuses();
   const { statuses: paymentStatuses, isLoading: isLoadingPaymentStatuses } = usePaymentStatuses();
@@ -118,8 +118,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   }, [defaultTime]);
 
   // Price calculations - handle custom types
+  // In edit mode, use the appointment's stored price. In create mode, calculate from form
   const basePrice = appointmentType === "Other" ? Number(customPrice) : (APPOINTMENT_PRICES[appointmentType] || 0);
-  const finalPrice = appointmentType === "Other" ? basePrice : Math.max(0, basePrice - (Number(discount) || 0));
+  const finalPrice = appointmentToEdit 
+    ? appointmentToEdit.price  // Use stored price when editing
+    : (appointmentType === "Other" ? basePrice : Math.max(0, basePrice - (Number(discount) || 0)));
 
   // Log appointment type changes with price
   useEffect(() => {
@@ -239,10 +242,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       // Reset the flag when opening for edit
       setStatusChangedByUser(0);
       setPaymentStatusChangedByUser(0);
-      // For patient readonly view (Pay Now flow), skip to payment step
-      // For admin editing, start on details step
-      const isPatientReadonly = Boolean(appointmentToEdit && user?.role === 'patient');
-      setModalStep(isPatientReadonly ? 'payment' : 'details');
+      // Set the modal step based on isPaymentFlow flag
+      // Only skip to payment step if explicitly marked as payment flow (e.g., "Pay Now" click)
+      // Otherwise, always start with details step
+      setModalStep(isPaymentFlow ? 'payment' : 'details');
     } else {
       // Reset form when creating new appointment
       setSelectedPatient(patients.length > 0 ? patients[0].id : '');
@@ -270,7 +273,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const displayStatus = appointmentToEdit?.status || appointmentStatus;
   
   // Calculate remaining balance for display in payment step
-  const previouslyPaidAmount = appointmentToEdit?.totalPaid || 0;
+  const previouslyPaidAmount = appointmentToEdit?.totalPaid !== undefined 
+    ? appointmentToEdit.totalPaid 
+    : (appointmentToEdit?.price !== undefined && appointmentToEdit?.balance !== undefined)
+      ? Math.max(0, appointmentToEdit.price - appointmentToEdit.balance)
+      : 0;
   const remainingBalance = Math.max(0, finalPrice - previouslyPaidAmount);
 
   // Handler for status changes that sets the flag
@@ -1038,18 +1045,20 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                     <span className="text-blue-700">₱{finalPrice.toLocaleString()}</span>
                   </div>
                 </div>
-                {(parseFloat(amountToPay) || 0) > 0 && (
-                  <>
-                    <div className="flex justify-between text-green-700 font-semibold">
-                      <span>Amount to Pay:</span>
-                      <span>₱{(parseFloat(amountToPay) || 0).toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between text-blue-700 font-semibold">
-                      <span>Balance Left:</span>
-                      <span>₱{Math.max(0, finalPrice - (previouslyPaidAmount + (parseFloat(amountToPay) || 0))).toLocaleString()}</span>
-                    </div>
-                  </>
+                {previouslyPaidAmount > 0 && (
+                  <div className="flex justify-between text-green-600 font-semibold">
+                    <span>Already Paid:</span>
+                    <span>₱{previouslyPaidAmount.toLocaleString()}</span>
+                  </div>
                 )}
+                <div className="flex justify-between text-green-700 font-semibold">
+                  <span>Amount to Pay Now:</span>
+                  <span>₱{(parseFloat(amountToPay) || 0).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between text-blue-700 font-semibold">
+                  <span>Remaining Balance:</span>
+                  <span>₱{Math.max(0, finalPrice - previouslyPaidAmount - (parseFloat(amountToPay) || 0)).toLocaleString()}</span>
+                </div>
               </div>
             </div>
           </div>

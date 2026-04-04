@@ -37,7 +37,6 @@ import CalendarPopover from "./CalendarPopover";
 
 import ViewMode from "./viewMode";
 import { useRouter, useSearchParams } from 'next/navigation';
-import BookingModal from "@/components/BookingModal";
 
 // Map numeric keys to readable UI labels using APPOINTMENT_STATUSES
 // This will be moved inside the component since we need the hook
@@ -95,12 +94,6 @@ export function CalendarView({ portal = 'admin', defaultStatusFilter, defaultDoc
   const router = useRouter();
   const searchParams = useSearchParams();
   
-  // Booking modal state
-  const [bookingModalOpen, setBookingModalOpen] = useState(false);
-  const [bookingDefaultDate, setBookingDefaultDate] = useState<Date | undefined>(undefined);
-  const [bookingDefaultTime, setBookingDefaultTime] = useState<string | undefined>(undefined);
-  const [appointmentToEditLocal, setAppointmentToEditLocal] = useState<Appointment | null>(null);
-
   useEffect(() => {
     const doctorId = searchParams.get("doctor");
     if (doctorId) {
@@ -491,10 +484,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                       }}
                       onClick={(e) => {
                         e.stopPropagation();
-                        setAppointmentToEditLocal(appointment);
-                        setBookingDefaultDate(selectedDate);
-                        setBookingDefaultTime(appointment.time);
-                        setBookingModalOpen(true);
+                        openEditModal(appointment);
                       }}
                     >
                       <div className="flex flex-col h-full">
@@ -666,10 +656,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                               }}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setAppointmentToEditLocal(appointment);
-                                setBookingDefaultDate(day);
-                                setBookingDefaultTime(appointment.time);
-                                setBookingModalOpen(true);
+                                openEditModal(appointment);
                               }}
                             >
                               <div className="flex justify-between items-start">
@@ -798,10 +785,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                       className={`text-[10px] p-1 rounded truncate border-l-2 ${colors.bg} ${colors.text} ${colors.border} ${apt.status === "tentative" ? "border-dashed opacity-80" : apt.status === "To Pay" ? "border-orange-400" : ""} flex items-center gap-2 cursor-pointer hover:shadow-sm transition-all`}
                       onClick={(e) => {
                         e.stopPropagation();
-                        setAppointmentToEditLocal(apt);
-                        setBookingDefaultDate(item.date);
-                        setBookingDefaultTime(apt.time);
-                        setBookingModalOpen(true);
+                        openEditModal(apt);
                       }}
                     >
                       <Avatar className="h-5 w-5 border border-gray-100 flex-shrink-0">
@@ -862,10 +846,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
               const colors = getColorForType(apt.status);
               return (
                 <Card key={apt.id} className="overflow-hidden hover:shadow-md transition-shadow cursor-pointer" onClick={() => { 
-                  setAppointmentToEditLocal(apt);
-                  setBookingDefaultDate(parseBackendDateToLocal(apt.date));
-                  setBookingDefaultTime(apt.time);
-                  setBookingModalOpen(true);
+                  openEditModal(apt);
                 }}>
                   <div className={`h-1 ${colors.bg.replace('bg-', 'bg-').split(' ')[0]}`} />
                   <CardContent className="p-4">
@@ -1088,18 +1069,6 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
           </div>
         </CardContent>
       </Card>
-
-      <BookingModal 
-        open={bookingModalOpen} 
-        onOpenChange={setBookingModalOpen} 
-        defaultDate={bookingDefaultDate}
-        defaultTime={bookingDefaultTime}
-        appointmentToEdit={appointmentToEditLocal}
-        onBooked={(appt) => {
-          setAppointmentToEditLocal(null);
-          refreshAppointments({});
-        }}
-      />
 
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <DialogContent className="max-w-md">
