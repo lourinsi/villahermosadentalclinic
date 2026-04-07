@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { Patient } from "@/lib/patient-types";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
-import { Loader2, User, FileText, CheckCircle } from "lucide-react";
+import { Loader2, User, FileText, CheckCircle, Save } from "lucide-react";
 
 const AccountPage = () => {
   const { user, isLoading: authLoading } = useAuth();
@@ -20,6 +20,8 @@ const AccountPage = () => {
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [canvasRef, setCanvasRef] = useState<HTMLCanvasElement | null>(null);
   const [questionnaire, setQuestionnaire] = useState<any>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const lastSavedData = useRef<string>("");
 
   useEffect(() => {
     const fetchPatientData = async () => {
@@ -42,6 +44,7 @@ const AccountPage = () => {
           if (result.success) {
             setPatient(result.data);
             setTermsAccepted(result.data.termsAccepted || false);
+            lastSavedData.current = JSON.stringify(result.data);
           } else {
             setError(result.message || "Failed to fetch patient data.");
             toast.error(result.message || "Failed to fetch patient data.");
@@ -79,7 +82,11 @@ const AccountPage = () => {
         if (result.success && result.data) {
           setQuestionnaire(result.data);
           // Update patient state with questionnaire data
-          setPatient(prev => prev ? { ...prev, ...result.data } as any : null);
+          setPatient(prev => {
+            const updated = prev ? { ...prev, ...result.data } as any : null;
+            lastSavedData.current = JSON.stringify(updated);
+            return updated;
+          });
         }
       } catch (err) {
         console.error("Error fetching questionnaire:", err);
@@ -87,8 +94,8 @@ const AccountPage = () => {
     }
   };
 
-  const handleUpdate = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
+  const handleUpdate = async (e?: React.FormEvent<HTMLFormElement>) => {
+    if (e && e.preventDefault) e.preventDefault();
     if (!patient) return;
 
     // Only send fields that actually exist on the current patient object
@@ -121,12 +128,13 @@ const AccountPage = () => {
       });
       const result = await response.json();
       if (result.success) {
-        toast.success("Account details updated successfully!");
+        if (e) toast.success("Account details updated successfully!");
+        lastSavedData.current = JSON.stringify(patient);
       } else {
-        toast.error(result.message || "Failed to update account details.");
+        if (e) toast.error(result.message || "Failed to update account details.");
       }
     } catch {
-      toast.error("An error occurred while updating account details.");
+      if (e) toast.error("An error occurred while updating account details.");
     }
   };
 
@@ -195,10 +203,11 @@ const AccountPage = () => {
     }
   };
 
-  const handleQuestionnaireUpdate = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
+  const handleQuestionnaireUpdate = async (e?: React.FormEvent<HTMLFormElement>) => {
+    if (e && e.preventDefault) e.preventDefault();
     if (!patient) return;
 
+    setIsSaving(true);
     // Build questionnaire data from current patient state
     const questionnaireData: any = {};
     
@@ -259,14 +268,31 @@ const AccountPage = () => {
       });
       const result = await response.json();
       if (result.success) {
-        toast.success("Questionnaire information saved successfully!");
+        if (e) toast.success("Questionnaire information saved successfully!");
+        lastSavedData.current = JSON.stringify(patient);
       } else {
-        toast.error(result.message || "Failed to save questionnaire.");
+        if (e) toast.error(result.message || "Failed to save questionnaire.");
       }
     } catch {
-      toast.error("An error occurred while saving questionnaire.");
+      if (e) toast.error("An error occurred while saving questionnaire.");
+    } finally {
+      setIsSaving(false);
     }
   };
+
+  // Autosave logic
+  useEffect(() => {
+    if (activeTab !== "questionnaire" || !patient) return;
+
+    const currentData = JSON.stringify(patient);
+    if (currentData === lastSavedData.current) return;
+
+    const timer = setTimeout(() => {
+      handleQuestionnaireUpdate();
+    }, 2000); // 2 second debounce
+
+    return () => clearTimeout(timer);
+  }, [patient, activeTab]);
 
   if (authLoading || isLoading) {
     return (
@@ -431,58 +457,75 @@ const AccountPage = () => {
 
         {activeTab === "questionnaire" && (
           <div className="space-y-6">
+            <div className="flex items-center justify-between sticky top-0 z-20 bg-gray-50/80 backdrop-blur-sm py-4 -mt-4">
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl font-bold text-gray-900">Health Information</h2>
+                {isSaving && (
+                  <div className="flex items-center gap-1.5 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded-full animate-pulse">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Saving...
+                  </div>
+                )}
+              </div>
+              <Button 
+                onClick={() => handleQuestionnaireUpdate({ preventDefault: () => {} } as any)} 
+                disabled={isSaving}
+                className="bg-blue-600 hover:bg-blue-700 shadow-md flex items-center gap-2"
+              >
+                {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                Save All Changes
+              </Button>
+            </div>
+
             <Card>
               <CardHeader>
                 <CardTitle>Personal Information</CardTitle>
               </CardHeader>
               <CardContent>
-                <form onSubmit={handleQuestionnaireUpdate} className="space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="firstName">First Name</Label>
-                      <Input
-                        id="firstName"
-                        value={patient.firstName || ''}
-                        onChange={(e) => setPatient({ ...patient, firstName: e.target.value, name: `${e.target.value} ${patient.lastName || ''}` })}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="lastName">Last Name</Label>
-                      <Input
-                        id="lastName"
-                        value={patient.lastName || ''}
-                        onChange={(e) => setPatient({ ...patient, lastName: e.target.value, name: `${patient.firstName || ''} ${e.target.value}` })}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="email">Email</Label>
-                      <Input
-                        id="email"
-                        type="email"
-                        value={patient.email || ''}
-                        onChange={(e) => setPatient({ ...patient, email: e.target.value })}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="phone">Phone</Label>
-                      <Input
-                        id="phone"
-                        value={patient.phone || ''}
-                        onChange={(e) => setPatient({ ...patient, phone: e.target.value })}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="dateOfBirth">Date of Birth</Label>
-                      <Input
-                        id="dateOfBirth"
-                        type="date"
-                        value={patient.dateOfBirth?.split('T')[0] || ''}
-                        onChange={(e) => setPatient({ ...patient, dateOfBirth: e.target.value })}
-                      />
-                    </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="firstName">First Name</Label>
+                    <Input
+                      id="firstName"
+                      value={patient.firstName || ''}
+                      onChange={(e) => setPatient({ ...patient, firstName: e.target.value, name: `${e.target.value} ${patient.lastName || ''}` })}
+                    />
                   </div>
-                  <Button type="submit" className="bg-blue-600 hover:bg-blue-700">Save Personal Information</Button>
-                </form>
+                  <div className="space-y-2">
+                    <Label htmlFor="lastName">Last Name</Label>
+                    <Input
+                      id="lastName"
+                      value={patient.lastName || ''}
+                      onChange={(e) => setPatient({ ...patient, lastName: e.target.value, name: `${patient.firstName || ''} ${e.target.value}` })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="email">Email</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      value={patient.email || ''}
+                      onChange={(e) => setPatient({ ...patient, email: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="phone">Phone</Label>
+                    <Input
+                      id="phone"
+                      value={patient.phone || ''}
+                      onChange={(e) => setPatient({ ...patient, phone: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="dateOfBirth">Date of Birth</Label>
+                    <Input
+                      id="dateOfBirth"
+                      type="date"
+                      value={patient.dateOfBirth?.split('T')[0] || ''}
+                      onChange={(e) => setPatient({ ...patient, dateOfBirth: e.target.value })}
+                    />
+                  </div>
+                </div>
               </CardContent>
             </Card>
 
@@ -491,82 +534,79 @@ const AccountPage = () => {
                 <CardTitle>General Information</CardTitle>
               </CardHeader>
               <CardContent>
-                <form onSubmit={handleQuestionnaireUpdate} className="space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* First Row */}
-                    <div className="space-y-2">
-                      <Label htmlFor="gender">Gender</Label>
-                      <select
-                        id="gender"
-                        value={patientData.gender || ''}
-                        onChange={(e) => setPatient({ ...patient, gender: e.target.value } as any)}
-                        className="w-full border border-gray-300 rounded px-3 py-2 bg-white"
-                      >
-                        <option value="">Select Gender</option>
-                        <option value="Male">Male</option>
-                        <option value="Female">Female</option>
-                        <option value="Other">Other</option>
-                      </select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="civilStatus">Civil Status</Label>
-                      <select
-                        id="civilStatus"
-                        value={patientData.civilStatus || ''}
-                        onChange={(e) => setPatient({ ...patient, civilStatus: e.target.value } as any)}
-                        className="w-full border border-gray-300 rounded px-3 py-2 bg-white"
-                      >
-                        <option value="">Select Civil Status</option>
-                        <option value="Single">Single</option>
-                        <option value="Married">Married</option>
-                        <option value="Divorced">Divorced</option>
-                        <option value="Widowed">Widowed</option>
-                      </select>
-                    </div>
-
-                    {/* Age, Ethnicity, etc */}
-                    <div className="space-y-2">
-                      <Label htmlFor="age">Age</Label>
-                      <Input
-                        id="age"
-                        type="number"
-                        placeholder="Enter age"
-                        value={patientData.age || ''}
-                        onChange={(e) => setPatient({ ...patient, age: parseInt(e.target.value) || 0 } as any)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="ethnicity">Ethnicity</Label>
-                      <Input
-                        id="ethnicity"
-                        placeholder="e.g., Filipino"
-                        value={patientData.ethnicity || ''}
-                        onChange={(e) => setPatient({ ...patient, ethnicity: e.target.value } as any)}
-                      />
-                    </div>
-
-                    {/* Religion, Nationality */}
-                    <div className="space-y-2">
-                      <Label htmlFor="religion">Religion</Label>
-                      <Input
-                        id="religion"
-                        placeholder="e.g., Roman Catholic"
-                        value={patientData.religion || ''}
-                        onChange={(e) => setPatient({ ...patient, religion: e.target.value } as any)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="nationality">Nationality</Label>
-                      <Input
-                        id="nationality"
-                        placeholder="e.g., Filipino"
-                        value={patientData.nationality || ''}
-                        onChange={(e) => setPatient({ ...patient, nationality: e.target.value } as any)}
-                      />
-                    </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* First Row */}
+                  <div className="space-y-2">
+                    <Label htmlFor="gender">Gender</Label>
+                    <select
+                      id="gender"
+                      value={patientData.gender || ''}
+                      onChange={(e) => setPatient({ ...patient, gender: e.target.value } as any)}
+                      className="w-full border border-gray-300 rounded px-3 py-2 bg-white"
+                    >
+                      <option value="">Select Gender</option>
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                      <option value="Other">Other</option>
+                    </select>
                   </div>
-                  <Button type="submit" className="bg-blue-600 hover:bg-blue-700">Save General Information</Button>
-                </form>
+                  <div className="space-y-2">
+                    <Label htmlFor="civilStatus">Civil Status</Label>
+                    <select
+                      id="civilStatus"
+                      value={patientData.civilStatus || ''}
+                      onChange={(e) => setPatient({ ...patient, civilStatus: e.target.value } as any)}
+                      className="w-full border border-gray-300 rounded px-3 py-2 bg-white"
+                    >
+                      <option value="">Select Civil Status</option>
+                      <option value="Single">Single</option>
+                      <option value="Married">Married</option>
+                      <option value="Divorced">Divorced</option>
+                      <option value="Widowed">Widowed</option>
+                    </select>
+                  </div>
+
+                  {/* Age, Ethnicity, etc */}
+                  <div className="space-y-2">
+                    <Label htmlFor="age">Age</Label>
+                    <Input
+                      id="age"
+                      type="number"
+                      placeholder="Enter age"
+                      value={patientData.age || ''}
+                      onChange={(e) => setPatient({ ...patient, age: parseInt(e.target.value) || 0 } as any)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="ethnicity">Ethnicity</Label>
+                    <Input
+                      id="ethnicity"
+                      placeholder="e.g., Filipino"
+                      value={patientData.ethnicity || ''}
+                      onChange={(e) => setPatient({ ...patient, ethnicity: e.target.value } as any)}
+                    />
+                  </div>
+
+                  {/* Religion, Nationality */}
+                  <div className="space-y-2">
+                    <Label htmlFor="religion">Religion</Label>
+                    <Input
+                      id="religion"
+                      placeholder="e.g., Roman Catholic"
+                      value={patientData.religion || ''}
+                      onChange={(e) => setPatient({ ...patient, religion: e.target.value } as any)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="nationality">Nationality</Label>
+                    <Input
+                      id="nationality"
+                      placeholder="e.g., Filipino"
+                      value={patientData.nationality || ''}
+                      onChange={(e) => setPatient({ ...patient, nationality: e.target.value } as any)}
+                    />
+                  </div>
+                </div>
               </CardContent>
             </Card>
 
@@ -575,7 +615,7 @@ const AccountPage = () => {
                 <CardTitle>Current Address</CardTitle>
               </CardHeader>
               <CardContent>
-                <form onSubmit={handleQuestionnaireUpdate} className="space-y-4">
+                <div className="space-y-4">
                   <div className="space-y-2">
                     <Label htmlFor="currentStreet">No. & Street</Label>
                     <Input
@@ -623,8 +663,7 @@ const AccountPage = () => {
                       />
                     </div>
                   </div>
-                  <Button type="submit" className="bg-blue-600 hover:bg-blue-700">Save Current Address</Button>
-                </form>
+                </div>
               </CardContent>
             </Card>
 
@@ -633,7 +672,7 @@ const AccountPage = () => {
                 <CardTitle>Permanent Address</CardTitle>
               </CardHeader>
               <CardContent>
-                <form onSubmit={handleQuestionnaireUpdate} className="space-y-4">
+                <div className="space-y-4">
                   <div className="space-y-2">
                     <Label htmlFor="permanentStreet">No. & Street</Label>
                     <Input
@@ -681,8 +720,7 @@ const AccountPage = () => {
                       />
                     </div>
                   </div>
-                  <Button type="submit" className="bg-blue-600 hover:bg-blue-700">Save Permanent Address</Button>
-                </form>
+                </div>
               </CardContent>
             </Card>
 
@@ -691,7 +729,7 @@ const AccountPage = () => {
                 <CardTitle>Contact Information</CardTitle>
               </CardHeader>
               <CardContent>
-                <form onSubmit={handleQuestionnaireUpdate} className="space-y-4">
+                <div className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="landline">Landline Number</Label>
@@ -723,8 +761,7 @@ const AccountPage = () => {
                     />
                   </div>
                   <p className="text-xs text-gray-500">In case the patient is a minor, contact dentist's email should be of the parents.</p>
-                  <Button type="submit" className="bg-blue-600 hover:bg-blue-700">Save Contact Information</Button>
-                </form>
+                </div>
               </CardContent>
             </Card>
 
@@ -733,7 +770,7 @@ const AccountPage = () => {
                 <CardTitle>Contact Person In Case of Emergency</CardTitle>
               </CardHeader>
               <CardContent>
-                <form onSubmit={handleQuestionnaireUpdate} className="space-y-4">
+                <div className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="emergencyFirstName">First Name</Label>
@@ -763,8 +800,7 @@ const AccountPage = () => {
                       onChange={(e) => setPatient({ ...patient, emergencyRelationship: e.target.value } as any)}
                     />
                   </div>
-                  <Button type="submit" className="bg-blue-600 hover:bg-blue-700">Save Emergency Contact</Button>
-                </form>
+                </div>
               </CardContent>
             </Card>
 
@@ -773,67 +809,75 @@ const AccountPage = () => {
                 <CardTitle>Other Information</CardTitle>
               </CardHeader>
               <CardContent>
-                <form onSubmit={handleQuestionnaireUpdate} className="space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <Label htmlFor="education">Highest Educational Attainment *</Label>
-                      <Input
-                        id="education"
-                        placeholder="e.g., College Undergrad"
-                        value={patientData.education || ''}
-                        onChange={(e) => setPatient({ ...patient, education: e.target.value } as any)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="occupation">Occupation *</Label>
-                      <Input
-                        id="occupation"
-                        placeholder="e.g., Self-employed"
-                        value={patientData.occupation || ''}
-                        onChange={(e) => setPatient({ ...patient, occupation: e.target.value } as any)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="company">Company *</Label>
-                      <Input
-                        id="company"
-                        placeholder="e.g., Company Name"
-                        value={patientData.company || ''}
-                        onChange={(e) => setPatient({ ...patient, company: e.target.value } as any)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="companyAddress">Company Address and Contact Details</Label>
-                      <Input
-                        id="companyAddress"
-                        placeholder="Enter company address"
-                        value={patientData.companyAddress || ''}
-                        onChange={(e) => setPatient({ ...patient, companyAddress: e.target.value } as any)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="height">Height *</Label>
-                      <Input
-                        id="height"
-                        placeholder="e.g., 1.68"
-                        value={patientData.height || ''}
-                        onChange={(e) => setPatient({ ...patient, height: e.target.value } as any)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="weight">Weight *</Label>
-                      <Input
-                        id="weight"
-                        placeholder="e.g., 73"
-                        value={patientData.weight || ''}
-                        onChange={(e) => setPatient({ ...patient, weight: e.target.value } as any)}
-                      />
-                    </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <Label htmlFor="education">Highest Educational Attainment *</Label>
+                    <Input
+                      id="education"
+                      placeholder="e.g., College Undergrad"
+                      value={patientData.education || ''}
+                      onChange={(e) => setPatient({ ...patient, education: e.target.value } as any)}
+                    />
                   </div>
-                  <Button type="submit" className="bg-blue-600 hover:bg-blue-700">Save Other Information</Button>
-                </form>
+                  <div className="space-y-2">
+                    <Label htmlFor="occupation">Occupation *</Label>
+                    <Input
+                      id="occupation"
+                      placeholder="e.g., Self-employed"
+                      value={patientData.occupation || ''}
+                      onChange={(e) => setPatient({ ...patient, occupation: e.target.value } as any)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="company">Company *</Label>
+                    <Input
+                      id="company"
+                      placeholder="e.g., Company Name"
+                      value={patientData.company || ''}
+                      onChange={(e) => setPatient({ ...patient, company: e.target.value } as any)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="companyAddress">Company Address and Contact Details</Label>
+                    <Input
+                      id="companyAddress"
+                      placeholder="Enter company address"
+                      value={patientData.companyAddress || ''}
+                      onChange={(e) => setPatient({ ...patient, companyAddress: e.target.value } as any)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="height">Height *</Label>
+                    <Input
+                      id="height"
+                      placeholder="e.g., 1.68"
+                      value={patientData.height || ''}
+                      onChange={(e) => setPatient({ ...patient, height: e.target.value } as any)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="weight">Weight *</Label>
+                    <Input
+                      id="weight"
+                      placeholder="e.g., 73"
+                      value={patientData.weight || ''}
+                      onChange={(e) => setPatient({ ...patient, weight: e.target.value } as any)}
+                    />
+                  </div>
+                </div>
               </CardContent>
             </Card>
+
+            <div className="flex justify-end pt-4">
+              <Button 
+                onClick={() => handleQuestionnaireUpdate({ preventDefault: () => {} } as any)} 
+                disabled={isSaving}
+                className="bg-blue-600 hover:bg-blue-700 shadow-lg px-8 py-6 text-lg font-bold rounded-2xl flex items-center gap-3 transition-all active:scale-95"
+              >
+                {isSaving ? <Loader2 className="h-6 w-6 animate-spin" /> : <Save className="h-6 w-6" />}
+                Save All Health Information
+              </Button>
+            </div>
           </div>
         )}
 

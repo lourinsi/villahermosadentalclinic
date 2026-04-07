@@ -27,6 +27,7 @@ interface NotificationsOpenedProps {
   onMarkAsRead?: (id: string) => void;
   onMarkAsUnread?: (id: string) => void;
   onDelete?: (id: string) => void;
+  onRestore?: (id: string) => void;
   onMarkAllAsRead?: () => void;
   onDeleteAll?: () => void;
   onRefresh?: () => void;
@@ -43,6 +44,7 @@ export function NotificationsOpened({
   onMarkAsRead,
   onMarkAsUnread,
   onDelete,
+  onRestore,
   onMarkAllAsRead,
   onDeleteAll,
   onRefresh,
@@ -69,6 +71,7 @@ export function NotificationsOpened({
       onMarkAsRead={onMarkAsRead}
       onMarkAsUnread={onMarkAsUnread}
       onDelete={onDelete}
+      onRestore={onRestore}
       onUpdateAppointmentStatus={onUpdateAppointmentStatus}
       onEditAppointment={onEditAppointment}
       onReschedule={onReschedule}

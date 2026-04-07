@@ -44,7 +44,7 @@ export default function PatientDashboard() {
       return;
     }
 
-    fetchAppointments();
+    router.replace("/patient/dashboard");
   }, [user, router]);
 
   const fetchAppointments = async () => {
@@ -290,7 +290,6 @@ export default function PatientDashboard() {
         onOpenChange={setIsBookingModalOpen}
         appointmentToEdit={selectedAppointment as any}
         onBooked={handleBookingComplete}
-        title={selectedAppointment ? "Edit Appointment" : "Book New Appointment"}
       />
     </div>
   );

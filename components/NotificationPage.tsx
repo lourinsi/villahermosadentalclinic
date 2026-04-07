@@ -20,7 +20,8 @@ export function NotificationPage({ portal }: NotificationPageProps) {
     deleteNotification, 
     markAllAsRead,
     deleteAllNotifications,
-    refreshNotifications
+    refreshNotifications,
+    restoreNotification
   } = useNotifications();
 
   const { 
@@ -78,6 +79,17 @@ export function NotificationPage({ portal }: NotificationPageProps) {
     }
   };
 
+  const handleRestoreNotification = async (notificationId: string) => {
+    try {
+      await restoreNotification(notificationId);
+      toast.success("Notification restored successfully");
+      refreshNotifications();
+    } catch (error) {
+      toast.error("Failed to restore notification");
+      console.error(error);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -111,6 +123,7 @@ export function NotificationPage({ portal }: NotificationPageProps) {
         onMarkAsRead={markAsRead}
         onMarkAsUnread={markAsUnread}
         onDelete={deleteNotification}
+        onRestore={handleRestoreNotification}
         onMarkAllAsRead={markAllAsRead}
         onDeleteAll={deleteAllNotifications}
         portal={portal}

@@ -10,7 +10,7 @@ import { ScheduleAppointmentModal } from "@/components/ScheduleAppointmentModal"
 import { AddPatientModal } from "@/components/AddPatientModal";
 import { RecordPaymentModal } from "@/components/RecordPaymentModal";
 import { PatientPaymentModal } from "@/components/PatientPaymentModal";
-import { PatientBookingModal } from "@/components/PatientBookingModal";
+import { GlobalBookingModalWrapper } from "@/components/GlobalBookingModalWrapper";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -42,8 +42,12 @@ export default function RootLayout({
             <PaymentModalProvider>
               {children}
               <Toaster />
+              <CreateAppointmentModal />
               <ScheduleAppointmentModal />
               <AddPatientModal />
+              <GlobalBookingModalWrapper />
+              <RecordPaymentModal />
+              <PatientPaymentModal />
             </PaymentModalProvider>
           </AppointmentModalProvider>
         </AuthProvider>

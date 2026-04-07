@@ -23,6 +23,8 @@ export interface Notification {
   createdAt: string;
   isRead: boolean;
   isLog?: boolean; // Marked as true when this is a historical log entry (read-only)
+  deleted?: boolean; // Marked as true when this notification is soft-deleted
+  deletedAt?: string; // Timestamp when notification was deleted
   updatedAt?: string;
   link?: string;
   metadata?: {

@@ -44,7 +44,7 @@ export default function PatientLoginPage() {
         const data = await response.json();
         if (data.user?.role === "patient" || data.user?.role === "user") {
           toast.success("Login successful!");
-          router.push("/patient/account");
+          router.push("/patient/dashboard");
         } else {
           // Wrong portal! Logout immediately
           await logout();

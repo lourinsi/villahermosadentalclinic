@@ -450,9 +450,7 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
                         <button
                           key={i}
                           onClick={() => {
-                            setBookingDefaultTime(slot.time);
-                            setBookingDefaultDate(date);
-                            setBookingModalOpen(true);
+                            openPatientBookingModal(date, slot.time, doctorName);
                           }}
                           className="text-[9px] font-bold px-1.5 py-0.5 rounded truncate bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-all text-left"
                         >

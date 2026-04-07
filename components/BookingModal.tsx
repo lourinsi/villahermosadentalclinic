@@ -11,7 +11,7 @@ import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
 import { usePaymentStatuses } from "@/hooks/usePaymentStatuses";
-import { Calendar as CalendarIcon, Clock, Award, Loader2, CheckCircle2, CreditCard, Banknote, Stethoscope, Trash2, ChevronLeft } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, Award, Loader2, CheckCircle2, CreditCard, Banknote, Stethoscope, ChevronLeft } from "lucide-react";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import { APPOINTMENT_PRICES, APPOINTMENT_TYPES, getAppointmentTypeName } from "@/lib/appointmentTypes";
@@ -44,6 +44,13 @@ const getPaymentStatusLabel = (statusValue: string, statuses: any[]): string => 
   return status?.label || statusValue.charAt(0).toUpperCase() + statusValue.slice(1);
 };
 
+// Helper function to format doctor name consistently
+const formatDoctorName = (name?: string): string => {
+  if (!name || name === '—') return "—";
+  const cleanName = name.replace(/^Dr\.\s+/i, "");
+  return `Dr. ${cleanName}`;
+};
+
 interface BookingModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -52,14 +59,14 @@ interface BookingModalProps {
   doctorName?: string; // doctor's display name
   onBooked?: (apt?: any) => void;
   appointmentToEdit?: any; // optional appointment object to edit
-  onDeleted?: (id?: string) => void;
   title?: string; // optional override for dialog title
   isReschedule?: boolean; // new prop to indicate if this is a reschedule
+  onDeleted?: () => void; // callback when appointment is deleted
 }
 
-export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, onBooked, appointmentToEdit, onDeleted, title, isReschedule }: BookingModalProps) {
+export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, onBooked, appointmentToEdit, title, isReschedule, onDeleted }: BookingModalProps) {
   const { user } = useAuth();
-  const { addAppointment, deleteAppointment, updateAppointment, isPaymentFlow } = useAppointmentModal();
+  const { addAppointment, updateAppointment, isPaymentFlow } = useAppointmentModal();
   const { openPatientPaymentFor } = usePaymentModal();
   const { statuses: appointmentStatuses, isLoading: isLoadingStatuses } = useAppointmentStatuses();
   const { statuses: paymentStatuses, isLoading: isLoadingPaymentStatuses } = usePaymentStatuses();
@@ -89,6 +96,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [isConfirmSummaryOpen, setIsConfirmSummaryOpen] = useState(false);
 
   // read-only for patient viewing their own booked/reserved appointment: only notes editable
+  const isCancelled = (appointmentStatus || appointmentToEdit?.status || '').toLowerCase() === 'cancelled';
   const isPatientReadonly = Boolean(appointmentToEdit && user?.role === 'patient');
   const isEditMode = Boolean(appointmentToEdit);
 
@@ -269,7 +277,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   }, [appointmentToEdit, defaultDate, defaultTime, patients]);
 
   // Derived display values for schedule block
-  const displayDoctor = appointmentToEdit?.doctor || doctorName || '—';
+  const displayDoctor = formatDoctorName(appointmentToEdit?.doctor || doctorName);
   const displayStatus = appointmentToEdit?.status || appointmentStatus;
   
   // Calculate remaining balance for display in payment step
@@ -316,31 +324,40 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     const amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
     const amountPaid = parseFloat(amountPaidRaw) || 0;
     
+    // If user manually changed status, respect that choice
+    if (statusChangedByUser === 1) {
+      return appointmentStatus;
+    }
+
     if (appointmentToEdit) {
-      const previouslyPaid = appointmentToEdit.totalPaid || 0;
-      const newTotalPaid = amountPaid > 0 ? previouslyPaid + amountPaid : previouslyPaid;
+      // Editing existing appointment - consider previously paid + new payment
+      const newTotalPaid = amountPaid > 0 ? previouslyPaidAmount + amountPaid : previouslyPaidAmount;
       const newBalance = Math.max(0, finalPrice - newTotalPaid);
 
-      if (statusChangedByUser === 1) {
-        return appointmentStatus;
-      }
-
+      // Auto-determine status based on payment balance
       if (newBalance <= 0) {
-        // Only auto-transition from reserved to scheduled
-        if (appointmentStatus === 'reserved') return 'scheduled';
-        return appointmentStatus;
+        // Fully paid
+        return 'scheduled';
+      } else if (newTotalPaid > 0) {
+        // Partially paid
+        return 'reserved';
       } else {
-        return appointmentStatus;
+        // No payment yet - keep current status
+        return appointmentStatus || 'pending';
       }
     } else {
-      if (statusChangedByUser === 1) {
-        return appointmentStatus;
-      }
-      
-      if (amountPaid >= finalPrice) {
+      // Creating new appointment
+      const balance = Math.max(0, finalPrice - amountPaid);
+
+      if (balance <= 0) {
+        // Fully paid
         return 'scheduled';
-      } else {
+      } else if (amountPaid > 0) {
+        // Partially paid
         return 'reserved';
+      } else {
+        // No payment
+        return 'pending';
       }
     }
   };
@@ -359,8 +376,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       return paymentStatus;
     }
 
-    const previouslyPaid = appointmentToEdit?.totalPaid || 0;
-    const newTotalPaid = amountPaid > 0 ? previouslyPaid + amountPaid : previouslyPaid;
+    const newTotalPaid = amountPaid > 0 ? previouslyPaidAmount + amountPaid : previouslyPaidAmount;
     const newBalance = Math.max(0, finalPrice - newTotalPaid);
 
     if (newBalance <= 0) {
@@ -372,32 +388,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     }
   };
 
-  // Calculate the FINAL appointment status with override logic
+  // Calculate the FINAL appointment status
   const getFinalAppointmentStatus = () => {
-    const amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
-    const amountPaid = parseFloat(amountPaidRaw) || 0;
-    
-    // Calculate balance based on whether we're editing or creating
-    let balance: number;
-    if (appointmentToEdit) {
-      const previouslyPaid = appointmentToEdit.totalPaid || 0;
-      const newTotalPaid = amountPaid > 0 ? previouslyPaid + amountPaid : previouslyPaid;
-      balance = Math.max(0, finalPrice - newTotalPaid);
-    } else {
-      balance = Math.max(0, finalPrice - amountPaid);
-    }
-
-    // Get the projected status (without override)
-    let statusToReturn = getProjectedStatus();
-
-    // Apply override: if balance > 0 and status is not scheduled, set to reserved (unless user changed it)
-    if (balance > 0 && statusToReturn !== 'scheduled') {
-      if (statusChangedByUser !== 1) {
-        statusToReturn = 'reserved';
-      }
-    }
-
-    return statusToReturn;
+    return getProjectedStatus();
   };
 
   // Final step: save after confirmation
@@ -579,10 +572,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     if (!appointmentToEdit) return;
     setIsBooking(true);
     try {
-      await deleteAppointment(appointmentToEdit.id);
-      try { window.dispatchEvent(new CustomEvent('appointments:updated', { detail: { appointmentId: appointmentToEdit.id, newStatus: 'cancelled' } })); } catch (e) {}
-      if (onDeleted) onDeleted(appointmentToEdit.id);
-      toast?.success?.('Appointment canceled');
+      // Update status to cancelled instead of deleting
+      const updated = await updateAppointment(appointmentToEdit.id, {
+        ...appointmentToEdit,
+        status: 'cancelled',
+      });
+      try { window.dispatchEvent(new CustomEvent('appointments:updated', { detail: { appointment: updated, appointmentId: appointmentToEdit.id, newStatus: 'cancelled' } })); } catch (e) {}
+      if (onBooked) onBooked(updated);
+      toast?.success?.('Appointment marked as cancelled');
       onOpenChange(false);
     } catch (err) {
       console.error('Failed to cancel appointment', err);
@@ -621,36 +618,47 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 </button>
               )}
               
-              <DialogTitle className="flex items-center gap-2 text-2xl flex-1 text-center">
-                {title ? title : (modalStep === 'details' ? (appointmentToEdit ? 'Edit Appointment' : 'Appointment Details') : 'Payment Summary')}
+              <DialogTitle className="flex items-center gap-2 text-2xl font-bold flex-1 text-center">
+                {title ? title : (
+                  modalStep === 'details' 
+                    ? (appointmentToEdit 
+                        ? (isPatientReadonly ? 'View Appointment' : 'Edit Appointment') 
+                        : 'Appointment Details') 
+                    : 'Payment Summary'
+                )}
               </DialogTitle>
               
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setModalStep('details')}
-                  disabled={isBooking}
-                  className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${
-                    modalStep === "details"
-                      ? "bg-blue-600 text-white cursor-pointer hover:bg-blue-700"
-                      : "bg-gray-200 text-gray-600 cursor-pointer hover:bg-gray-300"
-                  } disabled:opacity-50 disabled:cursor-not-allowed`}
-                >
-                  Step 1: Details
-                </button>
-                <button
-                  onClick={() => setModalStep('payment')}
-                  disabled={isBooking || !selectedPatient || !appointmentType || !duration}
-                  className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${
-                    modalStep === "payment"
-                      ? "bg-blue-600 text-white cursor-pointer hover:bg-blue-700"
-                      : !selectedPatient || !appointmentType || !duration
-                      ? "bg-gray-200 text-gray-600 cursor-not-allowed"
-                      : "bg-gray-200 text-gray-600 cursor-pointer hover:bg-gray-300"
-                  } disabled:opacity-50 disabled:cursor-not-allowed`}
-                >
-                  Step 2: Payment
-                </button>
-              </div>
+                {/* Step indicators - hidden if cancelled and patient role */}
+                {!(isCancelled && user?.role === 'patient') && (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setModalStep('details')}
+                      disabled={isBooking}
+                      className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-200 shadow-sm ${
+                        modalStep === "details"
+                          ? "bg-blue-600 text-white hover:bg-blue-700"
+                          : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                      } disabled:opacity-50 disabled:cursor-not-allowed`}
+                    >
+                      <div className={`flex items-center justify-center w-4 h-4 rounded-full text-[10px] ${modalStep === "details" ? "bg-white text-blue-600" : "bg-gray-400 text-white"}`}>1</div>
+                      Details
+                    </button>
+                    <button
+                      onClick={() => setModalStep('payment')}
+                      disabled={isBooking || !selectedPatient || !appointmentType || !duration}
+                      className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-200 shadow-sm ${
+                        modalStep === "payment"
+                          ? "bg-blue-600 text-white hover:bg-blue-700"
+                          : !selectedPatient || !appointmentType || !duration
+                          ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                          : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                      } disabled:opacity-50 disabled:cursor-not-allowed`}
+                    >
+                      <div className={`flex items-center justify-center w-4 h-4 rounded-full text-[10px] ${modalStep === "payment" ? "bg-white text-blue-600" : "bg-gray-400 text-white"}`}>2</div>
+                      Payment
+                    </button>
+                  </div>
+                )}
             </div>
             <DialogDescription>
               {modalStep === 'details' ? 'Complete the following information to book your appointment' : 'Review and confirm appointment details and payment'}
@@ -786,22 +794,45 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 </div>
 
                 <div className="space-y-2">
-                  <Label className="text-sm font-bold text-gray-700">Notes (Optional)</Label>
-                  <Textarea placeholder="Any details you'd like to add..." value={notes} onChange={(e: any) => setNotes(e.target.value)} className="resize-none rounded-lg border-gray-200" rows={3} />
+                  <Label className="text-sm font-bold text-gray-700">
+                    {user?.role === 'patient' ? 'My Notes' : 'Notes (Optional)'}
+                  </Label>
+                  <Textarea 
+                    placeholder={user?.role === 'patient' ? "Add any notes for your dentist here..." : "Any details you'd like to add..."}
+                    value={notes} 
+                    onChange={(e: any) => setNotes(e.target.value)} 
+                    className="resize-none rounded-lg border-gray-200 focus:ring-blue-500 focus:border-blue-500" 
+                    rows={3} 
+                    disabled={isPatientReadonly && isCancelled}
+                  />
                 </div>
               </div>
 
               <DialogFooter className="flex gap-3 pt-6 border-t">
                 {/* destructive cancel for all users when editing an appointment */}
-                {appointmentToEdit && (
+                {appointmentToEdit && !isCancelled && (
                   <Button variant="destructive" onClick={() => setIsDeleteDialogOpen(true)} disabled={isBooking} className="h-11 px-4 rounded-lg mr-auto">
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    {isBooking ? 'Canceling...' : 'Cancel Appointment'}
+                    <CalendarIcon className="h-4 w-4 mr-2" />
+                    {isBooking ? 'Processing...' : 'Cancel Appointment'}
                   </Button>
                 )}
-                <Button onClick={handleConfirmBooking} disabled={isBooking || !appointmentType || !selectedPatient} className="bg-blue-600 hover:bg-blue-700 text-white gap-2 h-11 px-8 rounded-lg shadow-lg shadow-blue-100">
-                  {isBooking ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Next: Payment'}
-                </Button>
+                
+                {(isCancelled && user?.role === 'patient') ? (
+                  <Button 
+                    onClick={handleClose} 
+                    className="bg-gray-100 hover:bg-gray-200 text-gray-600 h-11 px-8 rounded-lg ml-auto font-bold border border-gray-200"
+                  >
+                    Close
+                  </Button>
+                ) : (
+                  <Button 
+                    onClick={handleConfirmBooking} 
+                    disabled={isBooking || !appointmentType || !selectedPatient} 
+                    className="bg-blue-600 hover:bg-blue-700 text-white gap-2 h-11 px-8 rounded-lg shadow-lg shadow-blue-100"
+                  >
+                    {isBooking ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Next: Payment'}
+                  </Button>
+                )}
               </DialogFooter>
             </>
           ) : (
@@ -935,10 +966,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               </div>
 
               <DialogFooter className="flex gap-3 pt-6 border-t">
-                {appointmentToEdit && (
+                {appointmentToEdit && !isCancelled && (
                   <Button variant="destructive" onClick={() => setIsDeleteDialogOpen(true)} disabled={isBooking} className="h-11 px-4 rounded-lg mr-auto">
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    {isBooking ? 'Canceling...' : 'Cancel Appointment'}
+                    <CalendarIcon className="h-4 w-4 mr-2" />
+                    {isBooking ? 'Processing...' : 'Cancel Appointment'}
                   </Button>
                 )}
                 
@@ -955,23 +986,23 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         </DialogContent>
       </Dialog>
 
-      {/* Delete confirmation dialog */}
+      {/* Cancel confirmation dialog */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Trash2 className="h-5 w-5 text-red-600" />
+              <CalendarIcon className="h-5 w-5 text-red-600" />
               Cancel Appointment
             </DialogTitle>
           </DialogHeader>
           <div className="py-6 space-y-4">
-            <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto">
-              <Trash2 className="h-8 w-8" />
+            <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto">
+              <CalendarIcon className="h-8 w-8" />
             </div>
             <div className="text-center space-y-2">
               <p className="font-semibold text-gray-900">Cancel this appointment?</p>
               <p className="text-sm text-gray-600">
-                Are you sure you want to cancel this appointment? This action cannot be undone and the appointment will be permanently removed from the system.
+                Are you sure you want to cancel this appointment? This will mark it as <strong>Cancelled</strong> and release the time slot, but the record will remain in the system history.
               </p>
             </div>
           </div>
@@ -983,7 +1014,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               setIsDeleteDialogOpen(false);
               await handleCancel();
             }} disabled={isBooking} className="flex-1">
-              {isBooking ? "Canceling..." : "Yes, Cancel"}
+              {isBooking ? "Processing..." : "Yes, Cancel"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -27,6 +27,13 @@ export function RecentSchedule({
   onAppointmentClick,
   onViewAll
 }: RecentScheduleProps) {
+  const sortedAppointments = [...appointments].sort((a, b) => {
+    if (a.date !== b.date) {
+      return a.date.localeCompare(b.date);
+    }
+    return a.time.localeCompare(b.time);
+  });
+
   return (
     <Card className="border border-gray-100 shadow-sm bg-white rounded-3xl overflow-hidden flex flex-col h-full">
       <CardHeader className="border-b border-gray-50 p-8 space-y-4">
@@ -70,33 +77,54 @@ export function RecentSchedule({
             <div className="flex flex-col items-center justify-center h-full py-16">
               <div className="h-10 w-10 rounded-full border-4 border-violet-100 border-t-violet-600 animate-spin"></div>
             </div>
-          ) : appointments.length > 0 ? (
-            appointments.slice(0, 6).map((appointment: Appointment) => (
-              <div
-                key={appointment.id}
-                className="group flex items-center justify-between p-5 hover:bg-violet-50/50 transition-all duration-300 cursor-pointer"
-                onClick={() => onAppointmentClick(appointment)}
-              >
-                <div className="flex items-center space-x-4">
-                  <div className="flex flex-col items-center justify-center h-12 w-12 rounded-xl bg-violet-50 text-violet-600 group-hover:bg-violet-600 group-hover:text-white transition-colors duration-300">
-                    <span className="text-xs font-bold">{appointment.time.split(':')[0]}:{appointment.time.split(':')[1].split(' ')[0]}</span>
-                    <span className="text-[8px] font-black uppercase">{appointment.time.split(' ')[1]}</span>
-                  </div>
-                  <div>
-                    <div className="text-sm font-black text-gray-900 group-hover:text-violet-700 transition-colors">
-                      {portal === "patient" ? `Dr. ${appointment.doctor}` : appointment.patientName}
+          ) : sortedAppointments.length > 0 ? (
+            sortedAppointments.slice(0, 6).map((appointment: Appointment) => {
+              const dateObj = new Date(appointment.date);
+              const month = dateObj.toLocaleDateString('en-US', { month: 'short' });
+              const day = dateObj.getDate();
+              
+              return (
+                <div
+                  key={appointment.id}
+                  className="group flex items-center justify-between p-5 hover:bg-violet-50/50 transition-all duration-300 cursor-pointer"
+                  onClick={() => onAppointmentClick(appointment)}
+                >
+                  <div className="flex items-center space-x-4">
+                    <div className="flex flex-col items-center justify-center h-12 w-12 rounded-xl bg-violet-50 text-violet-600 group-hover:bg-violet-600 group-hover:text-white transition-colors duration-300">
+                      {viewMode === "day" ? (
+                        <>
+                          <span className="text-xs font-bold">{appointment.time.split(':')[0]}:{appointment.time.split(':')[1].split(' ')[0]}</span>
+                          <span className="text-[8px] font-black uppercase">{appointment.time.split(' ')[1]}</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-[10px] font-black uppercase">{month}</span>
+                          <span className="text-sm font-bold">{day}</span>
+                        </>
+                      )}
                     </div>
-                    <div className="text-[10px] font-bold text-gray-400 uppercase tracking-tight mt-0.5 flex items-center gap-2">
-                      <span>{getAppointmentTypeName(appointment.type, appointment.customType)}</span>
-                      <span className="h-1 w-1 rounded-full bg-gray-200"></span>
-                      <span className={appointment.status === 'scheduled' ? 'text-emerald-500' : 'text-blue-500'}>
-                        {appointment.status}
-                      </span>
+                    <div>
+                      <div className="text-sm font-black text-gray-900 group-hover:text-violet-700 transition-colors">
+                        {portal === "patient" ? `Dr. ${appointment.doctor}` : appointment.patientName}
+                      </div>
+                      <div className="text-[10px] font-bold text-gray-400 uppercase tracking-tight mt-0.5 flex items-center gap-2">
+                        {viewMode !== "day" && (
+                          <>
+                            <span>{appointment.time}</span>
+                            <span className="h-1 w-1 rounded-full bg-gray-200"></span>
+                          </>
+                        )}
+                        <span>{getAppointmentTypeName(appointment.type, appointment.customType)}</span>
+                        <span className="h-1 w-1 rounded-full bg-gray-200"></span>
+                        <span className={appointment.status === 'scheduled' ? 'text-emerald-500' : 'text-blue-500'}>
+                          {appointment.status}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           ) : (
             <div className="flex flex-col items-center justify-center h-full py-16 text-gray-400">
               <Calendar className="h-10 w-10 opacity-20 mb-3" />

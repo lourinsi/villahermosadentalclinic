@@ -216,23 +216,25 @@ export function Dashboard({ portal }: DashboardProps) {
           <h1 className="text-4xl font-black text-gray-900 tracking-tight">{headerText.title}</h1>
           <p className="text-gray-500 font-medium">{headerText.subtitle}</p>
         </div>
-        <div className="flex items-center space-x-3 bg-white p-1.5 rounded-2xl shadow-sm border border-gray-100">
-          {(["day", "week", "month"] as const).map((mode) => (
-            <Button
-              key={mode}
-              size="sm"
-              variant="ghost"
-              className={`px-6 py-2 text-xs font-bold rounded-xl transition-all duration-300 ${
-                viewMode === mode
-                  ? "bg-violet-600 text-white shadow-md shadow-violet-200"
-                  : "text-gray-400 hover:text-gray-600 hover:bg-gray-50"
-              }`}
-              onClick={() => setViewMode(mode)}
-            >
-              {mode.charAt(0).toUpperCase() + mode.slice(1)}
-            </Button>
-          ))}
-        </div>
+        {portal !== "patient" && (
+          <div className="flex items-center space-x-3 bg-white p-1.5 rounded-2xl shadow-sm border border-gray-100">
+            {(["day", "week", "month"] as const).map((mode) => (
+              <Button
+                key={mode}
+                size="sm"
+                variant="ghost"
+                className={`px-6 py-2 text-xs font-bold rounded-xl transition-all duration-300 ${
+                  viewMode === mode
+                    ? "bg-violet-600 text-white shadow-md shadow-violet-200"
+                    : "text-gray-400 hover:text-gray-600 hover:bg-gray-50"
+                }`}
+                onClick={() => setViewMode(mode)}
+              >
+                {mode.charAt(0).toUpperCase() + mode.slice(1)}
+              </Button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Stats Cards */}
@@ -276,6 +278,7 @@ export function Dashboard({ portal }: DashboardProps) {
           appointments={appointments}
           filteredAppointments={filteredAppointments}
           colorPalette={colorPalette}
+          viewMode={viewMode}
         />
 
         <QuickActions

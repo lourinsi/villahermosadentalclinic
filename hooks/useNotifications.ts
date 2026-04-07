@@ -15,10 +15,15 @@ export const useNotifications = () => {
 
     try {
       setIsLoading(true);
-      const response = await fetch(`http://localhost:3001/api/notifications?userId=${userId}`);
+      console.log(`[useNotifications] Fetching notifications for userId: ${userId}`);
+      const response = await fetch(`http://localhost:3001/api/notifications?userId=${userId}&includeDeleted=true`);
+      console.log(`[useNotifications] Response status: ${response.status}`);
       if (!response.ok) throw new Error("Failed to fetch notifications");
       
       const data = await response.json();
+      console.log(`[useNotifications] Response data:`, data);
+      console.log(`[useNotifications] Total notifications received: ${data.data.length}`);
+      console.log(`[useNotifications] Deleted notifications received: ${data.data.filter((n: Notification) => n.deleted).length}`);
       if (data.success) {
         console.log(`[useNotifications] Successfully fetched ${data.data.length} notifications for userId: ${userId}`);
         if (userId === 'admin') {
@@ -127,6 +132,22 @@ export const useNotifications = () => {
     }
   };
 
+  const restoreNotification = async (id: string) => {
+    try {
+      const response = await fetch(`http://localhost:3001/api/notifications/${id}/restore`, {
+        method: "PUT",
+      });
+
+      if (!response.ok) throw new Error("Failed to restore notification");
+      
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, deleted: false, deletedAt: undefined } : n));
+      toast.success("Notification restored");
+    } catch (error) {
+      console.error("Error restoring notification:", error);
+      toast.error("Failed to restore notification");
+    }
+  };
+
   return {
     notifications,
     isLoading,
@@ -135,6 +156,7 @@ export const useNotifications = () => {
     deleteNotification,
     markAllAsRead,
     deleteAllNotifications,
+    restoreNotification,
     refreshNotifications: fetchNotifications,
   };
 };

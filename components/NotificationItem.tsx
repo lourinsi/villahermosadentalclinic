@@ -14,7 +14,8 @@ import {
   CheckCircle,
   Edit2,
   Ban,
-  Eye
+  Eye,
+  RotateCcw
 } from "lucide-react";
 import { Notification, NotificationType } from "../lib/notification-types";
 import { format } from "date-fns";
@@ -33,6 +34,7 @@ interface NotificationItemProps {
   onMarkAsRead?: (id: string) => void;
   onMarkAsUnread?: (id: string) => void;
   onDelete?: (id: string) => void;
+  onRestore?: (id: string) => void;
   onUpdateAppointmentStatus?: (appointmentId: string, status: string, notificationId: string) => void;
   onEditAppointment?: (appointmentId: string) => void;
   onReschedule?: (appointmentId: string) => void;
@@ -46,6 +48,7 @@ export function NotificationItem({
   onMarkAsRead,
   onMarkAsUnread,
   onDelete,
+  onRestore,
   onUpdateAppointmentStatus,
   onEditAppointment,
   onReschedule,
@@ -63,7 +66,7 @@ export function NotificationItem({
 
   const avatarSrc = (() => {
     try {
-      if (notification.type === 'appointment') {
+      if (notification.type === 'appointment' || notification.type === 'payment') {
         const meta: any = notification.metadata || {};
         if (meta.doctorProfile) return meta.doctorProfile;
         const doctorKey = meta.doctor || meta.doctorId || meta.doctorName;
@@ -223,94 +226,113 @@ export function NotificationItem({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
-            {notification.metadata?.appointmentId && onEditAppointment && (notification.type === 'appointment' || notification.type === 'payment') && (
-              <DropdownMenuItem onClick={(e) => {
-                e.stopPropagation();
-                onEditAppointment(notification.metadata!.appointmentId!);
-              }}>
-                <Eye className="h-4 w-4 mr-2" />
-                <span className="text-sm">View Details</span>
-              </DropdownMenuItem>
-            )}
-            {!notification.isRead && onMarkAsRead && (
-              <DropdownMenuItem onClick={(e) => {
-                e.stopPropagation();
-                onMarkAsRead(notification.id);
-              }}>
-                <Check className="h-4 w-4 mr-2" />
-                <span className="text-sm">Mark as read</span>
-              </DropdownMenuItem>
-            )}
-            {notification.isRead && onMarkAsUnread && (
-              <DropdownMenuItem onClick={(e) => {
-                e.stopPropagation();
-                onMarkAsUnread(notification.id);
-              }}>
-                <Bell className="h-4 w-4 mr-2" />
-                <span className="text-sm">Mark as unread</span>
-              </DropdownMenuItem>
-            )}
-
-            {!isLog && notification.type === 'appointment' && notification.metadata?.appointmentId && !(portal === 'patient' && (notification.type !== 'appointment' || !notification.metadata?.appointmentId || status === 'cancelled')) && (
+            {/* Only show these options if notification is NOT deleted */}
+            {!notification.deleted && (
               <>
-                {portal !== 'patient' && onUpdateAppointmentStatus && (
+                {notification.metadata?.appointmentId && onEditAppointment && (notification.type === 'appointment' || notification.type === 'payment') && (
+                  <DropdownMenuItem onClick={(e) => {
+                    e.stopPropagation();
+                    onEditAppointment(notification.metadata!.appointmentId!);
+                  }}>
+                    <Eye className="h-4 w-4 mr-2" />
+                    <span className="text-sm">View Details</span>
+                  </DropdownMenuItem>
+                )}
+                {!notification.isRead && onMarkAsRead && (
+                  <DropdownMenuItem onClick={(e) => {
+                    e.stopPropagation();
+                    onMarkAsRead(notification.id);
+                  }}>
+                    <Check className="h-4 w-4 mr-2" />
+                    <span className="text-sm">Mark as read</span>
+                  </DropdownMenuItem>
+                )}
+                {notification.isRead && onMarkAsUnread && (
+                  <DropdownMenuItem onClick={(e) => {
+                    e.stopPropagation();
+                    onMarkAsUnread(notification.id);
+                  }}>
+                    <Bell className="h-4 w-4 mr-2" />
+                    <span className="text-sm">Mark as unread</span>
+                  </DropdownMenuItem>
+                )}
+
+                {!isLog && notification.type === 'appointment' && notification.metadata?.appointmentId && !(portal === 'patient' && (notification.type !== 'appointment' || !notification.metadata?.appointmentId || status === 'cancelled')) && (
                   <>
-                    {acceptStatuses.has(status) && status !== 'scheduled' && (
-                      <DropdownMenuItem onClick={(e) => {
-                        e.stopPropagation();
-                        onUpdateAppointmentStatus(notification.metadata!.appointmentId!, 'scheduled', notification.id);
-                      }}>
-                        <CheckCircle className="h-4 w-4 mr-2 text-green-600" />
-                        <span className="text-sm">{status === 'cancelled' ? 'Re-accept Appointment' : 'Accept Appointment'}</span>
-                      </DropdownMenuItem>
+                    {portal !== 'patient' && onUpdateAppointmentStatus && (
+                      <>
+                        {acceptStatuses.has(status) && status !== 'scheduled' && (
+                          <DropdownMenuItem onClick={(e) => {
+                            e.stopPropagation();
+                            onUpdateAppointmentStatus(notification.metadata!.appointmentId!, 'scheduled', notification.id);
+                          }}>
+                            <CheckCircle className="h-4 w-4 mr-2 text-green-600" />
+                            <span className="text-sm">{status === 'cancelled' ? 'Re-accept Appointment' : 'Accept Appointment'}</span>
+                          </DropdownMenuItem>
+                        )}
+                        {cancelStatuses.has(status) && status !== 'cancelled' && (
+                          <DropdownMenuItem onClick={(e) => {
+                            e.stopPropagation();
+                            onUpdateAppointmentStatus(notification.metadata!.appointmentId!, 'cancelled', notification.id);
+                          }}>
+                            <X className="h-4 w-4 mr-2 text-red-600" />
+                            <span className="text-sm">{['scheduled'].includes(status) ? 'Cancel Appointment' : 'Decline Request'}</span>
+                          </DropdownMenuItem>
+                        )}
+                      </>
                     )}
-                    {cancelStatuses.has(status) && status !== 'cancelled' && (
-                      <DropdownMenuItem onClick={(e) => {
-                        e.stopPropagation();
-                        onUpdateAppointmentStatus(notification.metadata!.appointmentId!, 'cancelled', notification.id);
-                      }}>
-                        <X className="h-4 w-4 mr-2 text-red-600" />
-                        <span className="text-sm">{['scheduled'].includes(status) ? 'Cancel Appointment' : 'Decline Request'}</span>
-                      </DropdownMenuItem>
+                    
+                    {portal === 'patient' && status !== 'cancelled' && (
+                      <>
+                        {onReschedule && (
+                          <DropdownMenuItem onClick={(e) => {
+                            e.stopPropagation();
+                            onReschedule(notification.metadata!.appointmentId!);
+                          }}>
+                            <Edit2 className="h-4 w-4 mr-2 text-violet-600" />
+                            <span className="text-sm">Reschedule</span>
+                          </DropdownMenuItem>
+                        )}
+                        {onCancelAppointment && (
+                          <DropdownMenuItem onClick={(e) => {
+                            e.stopPropagation();
+                            onCancelAppointment(notification.metadata!.appointmentId!);
+                          }}>
+                            <Ban className="h-4 w-4 mr-2 text-red-600" />
+                            <span className="text-sm">Cancel Appointment</span>
+                          </DropdownMenuItem>
+                        )}
+                      </>
                     )}
                   </>
                 )}
-                
-                {portal === 'patient' && status !== 'cancelled' && (
-                  <>
-                    {onReschedule && (
-                      <DropdownMenuItem onClick={(e) => {
-                        e.stopPropagation();
-                        onReschedule(notification.metadata!.appointmentId!);
-                      }}>
-                        <Edit2 className="h-4 w-4 mr-2 text-violet-600" />
-                        <span className="text-sm">Reschedule</span>
-                      </DropdownMenuItem>
-                    )}
-                    {onCancelAppointment && (
-                      <DropdownMenuItem onClick={(e) => {
-                        e.stopPropagation();
-                        onCancelAppointment(notification.metadata!.appointmentId!);
-                      }}>
-                        <Ban className="h-4 w-4 mr-2 text-red-600" />
-                        <span className="text-sm">Cancel Appointment</span>
-                      </DropdownMenuItem>
-                    )}
-                  </>
+
+                {onDelete && (
+                  <DropdownMenuItem 
+                    className="text-red-600 focus:text-red-600" 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete(notification.id);
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    <span className="text-sm">Delete notification</span>
+                  </DropdownMenuItem>
                 )}
               </>
             )}
 
-            {onDelete && (
+            {/* Show restore option only if notification IS deleted */}
+            {notification.deleted && onRestore && (
               <DropdownMenuItem 
-                className="text-red-600 focus:text-red-600" 
+                className="text-violet-600 focus:text-violet-600" 
                 onClick={(e) => {
                   e.stopPropagation();
-                  onDelete(notification.id);
+                  onRestore(notification.id);
                 }}
               >
-                <Trash2 className="h-4 w-4 mr-2" />
-                <span className="text-sm">Delete notification</span>
+                <RotateCcw className="h-4 w-4 mr-2" />
+                <span className="text-sm">Restore notification</span>
               </DropdownMenuItem>
             )}
           </DropdownMenuContent>

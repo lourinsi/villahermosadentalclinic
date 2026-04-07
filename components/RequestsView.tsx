@@ -451,6 +451,10 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
             aVal = getAppointmentTypeName(a.type, a.customType).toLowerCase();
             bVal = getAppointmentTypeName(b.type, b.customType).toLowerCase();
             break;
+          case "date":
+            aVal = new Date(`${a.date}T${a.time}`).getTime();
+            bVal = new Date(`${b.date}T${b.time}`).getTime();
+            break;
           case "status":
             aVal = canonicalStatus(a.status);
             bVal = canonicalStatus(b.status);
@@ -663,7 +667,21 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                             </TableCell>
                           )}
                           <TableCell>
-                            {getStatusBadge(request.status)}
+                            <Select 
+                              value={request.status} 
+                              onValueChange={(newStatus) => handleHistoryStatusChange(request.id, newStatus)}
+                            >
+                              <SelectTrigger className="w-auto h-auto p-0 bg-transparent border-0 hover:opacity-80 transition-opacity [&>svg]:text-gray-400">
+                                <div className="cursor-pointer">
+                                  {getStatusBadge(request.status)}
+                                </div>
+                              </SelectTrigger>
+                              <SelectContent>
+                                {APPOINTMENT_STATUSES.map((status: any) => (
+                                  <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                           </TableCell>
                           <TableCell>
                             <Select 
@@ -797,7 +815,11 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           Service {getSortIcon("service", false)}
                         </div>
                       </TableHead>
-                      <TableHead className="font-bold text-gray-900 uppercase text-[11px] tracking-wider">Schedule</TableHead>
+                      <TableHead className="font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("date")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Schedule {getSortIcon("date", false)}
+                        </div>
+                      </TableHead>
                       <TableHead className="font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("status")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
                           Status {getSortIcon("status", false)}
@@ -832,8 +854,22 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     ) : (
                       sortedHistory.map((item) => (
                         <TableRow key={item.id} className="hover:bg-gray-50 transition-colors border-b border-gray-50">
-                          <TableCell className="py-4 font-bold text-gray-900">{item.patientName}</TableCell>
-                          <TableCell className="font-semibold text-gray-700">{getAppointmentTypeName(item.type, item.customType)}</TableCell>
+                          <TableCell className="py-4">
+                            <div className="flex items-center gap-3">
+                              <Avatar className="h-10 w-10 border-2 border-white shadow-sm">
+                                <AvatarFallback className="bg-violet-100 text-violet-700 font-bold text-xs uppercase">
+                                  {getInitials(item.patientName)}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div>
+                                <div className="font-bold text-gray-900">{item.patientName}</div>
+                                <div className="text-[10px] text-gray-500 font-medium uppercase tracking-tight">ID: {item.id.slice(0, 8)}</div>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <span className="font-semibold text-gray-700">{getAppointmentTypeName(item.type, item.customType)}</span>
+                          </TableCell>
                           <TableCell>
                             <div className="flex flex-col">
                               <span className="font-bold text-gray-900">{parseBackendDateToLocal(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
@@ -904,7 +940,10 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       </Tabs>
 
       <AlertDialog open={isConfirmOpen} onOpenChange={setIsConfirmOpen}>
-        <AlertDialogContent className="rounded-2xl border-none shadow-2xl">
+        <AlertDialogContent 
+          className="rounded-2xl border-none shadow-2xl"
+          onEscapeKeyDown={(e) => e.preventDefault()}
+        >
           <AlertDialogHeader>
             <AlertDialogTitle className="text-2xl font-black text-gray-900 uppercase tracking-tight">Confirm Status Change</AlertDialogTitle>
             <AlertDialogDescription className="text-gray-500 font-medium">
@@ -924,7 +963,10 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       </AlertDialog>
 
       <AlertDialog open={isApproveConfirmOpen} onOpenChange={setIsApproveConfirmOpen}>
-        <AlertDialogContent className="rounded-2xl border-none shadow-2xl">
+        <AlertDialogContent 
+          className="rounded-2xl border-none shadow-2xl"
+          onEscapeKeyDown={(e) => e.preventDefault()}
+        >
           <AlertDialogHeader>
             <AlertDialogTitle className="text-2xl font-black text-gray-900 uppercase tracking-tight">Approve Appointment?</AlertDialogTitle>
             <AlertDialogDescription className="text-gray-500 font-medium">
@@ -989,7 +1031,10 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       </AlertDialog>
 
       <AlertDialog open={isRejectConfirmOpen} onOpenChange={setIsRejectConfirmOpen}>
-        <AlertDialogContent className="rounded-2xl border-none shadow-2xl">
+        <AlertDialogContent 
+          className="rounded-2xl border-none shadow-2xl"
+          onEscapeKeyDown={(e) => e.preventDefault()}
+        >
           <AlertDialogHeader>
             <AlertDialogTitle className="text-2xl font-black text-gray-900 uppercase tracking-tight">Reject Appointment?</AlertDialogTitle>
             <AlertDialogDescription className="text-gray-500 font-medium">
