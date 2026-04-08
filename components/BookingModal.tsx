@@ -17,6 +17,7 @@ import { formatTimeTo12h } from "@/lib/time-slots";
 import { APPOINTMENT_PRICES, APPOINTMENT_TYPES, getAppointmentTypeName } from "@/lib/appointmentTypes";
 import { Dialog as SmallDialog, DialogContent as SmallDialogContent, DialogFooter as SmallDialogFooter } from "@/components/ui/dialog";
 import { toast } from 'sonner';
+import AppointmentHistoryView from "./AppointmentHistoryView";
 
 // Helper function to get appointment type index from name
 const getAppointmentTypeIndex = (typeName: string): number => {
@@ -83,6 +84,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [selectedDate, setSelectedDate] = useState<Date>(defaultDate ?? new Date());
   const [selectedTime, setSelectedTime] = useState<string>(defaultTime ?? "");
   const [isBooking, setIsBooking] = useState(false);
+  const [appointmentLogs, setAppointmentLogs] = useState<any[]>([]);
+  const [paymentLogs, setPaymentLogs] = useState<any[]>([]);
+  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+  const [isLoadingPaymentLogs, setIsLoadingPaymentLogs] = useState(false);
 
   // New states for two-step flow
   const [modalStep, setModalStep] = useState<"details" | "payment">("details");
@@ -94,11 +99,81 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [paymentStatusChangedByUser, setPaymentStatusChangedByUser] = useState<number>(0);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isConfirmSummaryOpen, setIsConfirmSummaryOpen] = useState(false);
+  const [snapshotToView, setSnapshotToView] = useState<any>(null);
+  const [isSnapshotModalOpen, setIsSnapshotModalOpen] = useState(false);
 
   // read-only for patient viewing their own booked/reserved appointment: only notes editable
   const isCancelled = (appointmentStatus || appointmentToEdit?.status || '').toLowerCase() === 'cancelled';
   const isPatientReadonly = Boolean(appointmentToEdit && user?.role === 'patient');
   const isEditMode = Boolean(appointmentToEdit);
+
+  // Fetch logs when appointment is being edited
+  useEffect(() => {
+    if (open && appointmentToEdit?.id) {
+      console.log(`[BookingModal] 🔍 FETCHING LOGS for appointment: ${appointmentToEdit.id}`);
+      const fetchLogs = async () => {
+        setIsLoadingLogs(true);
+        // Add a small delay to ensure backend has finished saving before fetching
+        await new Promise(resolve => setTimeout(resolve, 500));
+        try {
+          const res = await fetch(`http://localhost:3001/api/appointments/${appointmentToEdit.id}/logs`, { credentials: 'include' });
+          if (res.ok) {
+            const json = await res.json();
+            console.log(`[BookingModal] ✅ LOGS FETCHED:`, { 
+              count: json.data?.length, 
+              logs: json.data 
+            });
+            if (json.success) {
+              setAppointmentLogs(json.data || []);
+            }
+          } else if (res.status === 404) {
+            // 404 is expected if logs endpoint doesn't exist or no logs available yet
+            console.log(`[BookingModal] ℹ️ No logs available for this appointment`);
+            setAppointmentLogs([]);
+          } else {
+            console.warn(`[BookingModal] ⚠️ Failed to fetch logs with status:`, res.status);
+            setAppointmentLogs([]);
+          }
+        } catch (err) {
+          console.warn("[BookingModal] ⚠️ Could not fetch appointment logs:", err);
+          setAppointmentLogs([]);
+        } finally {
+          setIsLoadingLogs(false);
+        }
+      };
+      fetchLogs();
+    } else if (!open) {
+      setAppointmentLogs([]);
+    }
+  }, [open, appointmentToEdit]);
+
+  // Fetch payment logs when appointment is being edited
+  useEffect(() => {
+    if (open && appointmentToEdit?.id) {
+      const fetchPaymentLogs = async () => {
+        setIsLoadingPaymentLogs(true);
+        // Add a small delay to ensure backend has finished saving before fetching
+        await new Promise(resolve => setTimeout(resolve, 500));
+        try {
+          const res = await fetch(`http://localhost:3001/api/appointments/${appointmentToEdit.id}/payments`, { credentials: 'include' });
+          if (res.ok) {
+            const json = await res.json();
+            if (json.success) {
+              setPaymentLogs(json.data || []);
+            }
+          }
+        } catch (err) {
+          console.warn("[BookingModal] ⚠️ Could not fetch payment logs:", err);
+          setPaymentLogs([]);
+        } finally {
+          setIsLoadingPaymentLogs(false);
+        }
+      };
+      fetchPaymentLogs();
+    } else if (!open) {
+      setPaymentLogs([]);
+    }
+  }, [open, appointmentToEdit]);
 
   // Map appointment types to default durations (in minutes)
   const appointmentTypeDurations: Record<string, number> = {
@@ -200,20 +275,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     if (appointmentToEdit) {
       console.log('[BookingModal] 📂 OPENING APPOINTMENT FOR EDITING:', {
         appointmentId: appointmentToEdit.id,
-        patientId: appointmentToEdit.patientId,
         patientName: appointmentToEdit.patientName,
-        date: appointmentToEdit.date,
-        time: appointmentToEdit.time,
-        type: appointmentToEdit.type,
-        customType: appointmentToEdit.customType,
-        duration: appointmentToEdit.duration,
-        price: appointmentToEdit.price,
-        status: appointmentToEdit.status,
-        paymentStatus: appointmentToEdit.paymentStatus,
+        currentStatus: appointmentToEdit.status,
+        currentPaymentStatus: appointmentToEdit.paymentStatus,
         totalPaid: appointmentToEdit.totalPaid,
         balance: appointmentToEdit.balance,
-        doctor: appointmentToEdit.doctor,
-        notes: appointmentToEdit.notes,
+        logsCount: appointmentLogs.length,
+        paymentLogsCount: paymentLogs.length,
         timestamp: new Date().toISOString()
       });
 
@@ -396,6 +464,26 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   // Final step: save after confirmation
   const handleConfirmSummary = async () => {
     if (!selectedPatient || !appointmentType) return;
+    
+    // Log the current state and history logs before submitting
+    console.log('[BookingModal] 🚀 SUBMITTING APPOINTMENT:', {
+      mode: appointmentToEdit ? 'EDIT' : 'CREATE',
+      appointmentId: appointmentToEdit?.id,
+      patientId: selectedPatient,
+      type: appointmentType,
+      date: formatDateToYYYYMMDD(selectedDate),
+      time: selectedTime,
+      price: finalPrice,
+      payment: {
+        amountToPay,
+        method: paymentMethod,
+        previouslyPaid: previouslyPaidAmount,
+        remaining: remainingBalance
+      },
+      historyLogs: appointmentLogs,
+      timestamp: new Date().toISOString()
+    });
+
     setIsBooking(true);
     setIsConfirmSummaryOpen(false);
     try {
@@ -667,7 +755,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
           {modalStep === 'details' ? (
             <>
-              <div className="space-y-6">
+              <div className="space-y-6 max-h-[65vh] overflow-y-auto pr-2 custom-scrollbar py-2">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-4">
                     <div className="space-y-2">
@@ -695,7 +783,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                           <SelectItem value="Root Canal">Root Canal</SelectItem>
                           <SelectItem value="Extraction">Extraction</SelectItem>
                           <SelectItem value="Whitening">Whitening</SelectItem>
-                          <SelectItem value="Other">{customAppointmentTypeName || "Other"}</SelectItem>
+                          <SelectItem value="Other">Other</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -717,7 +805,17 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label className="text-sm font-bold text-gray-700">Duration (mins)</Label>
-                        <Input type="number" value={duration} onChange={(e: any) => setDuration(e.target.value)} placeholder="30" className="h-11 rounded-lg border-gray-200" disabled={isPatientReadonly} />
+                        <Select value={duration} onValueChange={setDuration} disabled={isPatientReadonly}>
+                          <SelectTrigger className="h-11 rounded-lg border-gray-200">
+                            <SelectValue placeholder="Select duration" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="30">30</SelectItem>
+                            <SelectItem value="60">60</SelectItem>
+                            <SelectItem value="90">90</SelectItem>
+                            <SelectItem value="120">120</SelectItem>
+                          </SelectContent>
+                        </Select>
                         {user?.role === 'patient' && <p className="text-xs text-gray-500">Set based on appointment type</p>}
                       </div>
                       {appointmentType === "Other" ? (
@@ -806,6 +904,212 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                     disabled={isPatientReadonly && isCancelled}
                   />
                 </div>
+
+                {/* Appointment History Logs */}
+                {isEditMode && (appointmentLogs.length > 0 || paymentLogs.length > 0) && (
+                  <div className="space-y-3 pt-4 border-t border-gray-100">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm font-bold text-blue-800 flex items-center gap-2">
+                        <Award className="h-4 w-4" />
+                        Appointment History
+                      </Label>
+                      <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full uppercase tracking-wider">Logs</span>
+                    </div>
+                    <div className="space-y-2 max-h-[150px] overflow-y-auto pr-2 custom-scrollbar">
+                      {(() => {
+                        console.log(`[HistoryLog] Rendering History: appointmentLogs=${appointmentLogs.length}, paymentLogs=${paymentLogs.length}`);
+                        // Merge and deduplicate: if an appointment log exists for the same time as a payment log,
+                        // we prefer the appointment log because it can show BOTH status and payment.
+                        const allCombinedLogs = [
+                          ...appointmentLogs.map(l => ({ ...l, logType: 'appointment' as const })),
+                          ...paymentLogs.map(l => ({ ...l, logType: 'payment' as const, changedAt: l.changedAt }))
+                        ];
+
+                        // Simple deduplication logic: if two logs happen within 2 seconds of each other 
+                        // and one is appointment while other is payment, we'll favor the appointment one
+                        // but only if we can merge the amount into it.
+                        const sorted = allCombinedLogs.sort((a, b) => new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime());
+                        
+                        const filteredLogs: typeof sorted = [];
+                        for (let i = 0; i < sorted.length; i++) {
+                          const current = sorted[i];
+                          const prev = filteredLogs[filteredLogs.length - 1];
+                          
+                          if (prev && 
+                              Math.abs(new Date(current.changedAt).getTime() - new Date(prev.changedAt).getTime()) < 3000 &&
+                              ((current.logType === 'payment' && prev.logType === 'appointment') || 
+                               (current.logType === 'appointment' && prev.logType === 'payment'))) {
+                            
+                            // MERGE LOGIC: ensure the combined log has the higher amount
+                            const currentAmount = (current as any).amount || 0;
+                            const prevAmount = (prev as any).amount || 0;
+                            const maxAmount = Math.max(currentAmount, prevAmount);
+
+                            if (prev.logType === 'appointment') {
+                              (prev as any).amount = maxAmount;
+                              // Ensure current also has maxAmount in case logic continues
+                              (current as any).amount = maxAmount;
+                              // If current was a payment log, it might have extra info
+                              if (current.logType === 'payment') {
+                                (prev as any).paymentMethod = (current as any).paymentMethod;
+                                (prev as any).newBalance = (current as any).newBalance;
+                              }
+                              console.log(`[HistoryLog] Merged payment into existing appointment log: ${prev.id}, amount=${maxAmount}`);
+                              continue;
+                            } else if (current.logType === 'appointment') {
+                              (current as any).amount = maxAmount;
+                              // Ensure prev also has maxAmount in case logic continues
+                              (prev as any).amount = maxAmount;
+                              // Replace the previous payment log with this richer appointment log
+                              filteredLogs[filteredLogs.length - 1] = current;
+                              console.log(`[HistoryLog] Replaced payment log with merged appointment log: ${current.id}, amount=${maxAmount}`);
+                              continue;
+                            }
+                          }
+                          filteredLogs.push(current);
+                        }
+
+                        return filteredLogs.map((log) => {
+                          const paidAmount = (log as any).amount || 0;
+                          const hasPaymentInfo = (log as any).amount !== undefined;
+                          const isInitialCreation = !log.previousState?.id || log.previousState?.status === 'none';
+                          
+                          // Prioritize the payment amount (e.g. ₱100) in the upper right badge if present
+                          let badgeText = "";
+                          if (hasPaymentInfo) {
+                            badgeText = `₱${paidAmount.toLocaleString()}`;
+                          } else {
+                            // If it's a status change, show the new status
+                            badgeText = log.newState?.status || log.previousState?.status || (isInitialCreation ? "New" : "Updated");
+                          }
+
+                          console.log(`[HistoryLog] Render Card: id=${log.id} badgeText=${badgeText} logType=${log.logType} amount=${paidAmount} initial=${isInitialCreation}`);
+
+                          return (
+                            <div key={log.id} className="p-2.5 bg-gray-50 rounded-lg border border-gray-200 text-[11px] space-y-1.5 shadow-sm">
+                              <div className="flex justify-between items-start gap-2 text-gray-500 font-medium">
+                                <span className="flex items-center gap-1.5 opacity-80">
+                                  <Clock className="h-3 w-3" />
+                                  {new Date(log.changedAt).toLocaleString('en-PH', { 
+                                    month: 'numeric', 
+                                    day: 'numeric', 
+                                    year: 'numeric', 
+                                    hour: '2-digit', 
+                                    minute: '2-digit',
+                                    second: '2-digit'
+                                  })}
+                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  <span className={`px-2 py-0.5 rounded-md uppercase font-black text-[9px] tracking-tight border ${
+                                    hasPaymentInfo ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-gray-100 text-gray-600 border-gray-300'
+                                  }`}>
+                                    {badgeText}
+                                  </span>
+                                  <button 
+                                    onClick={() => {
+                                      // Get historical snapshot
+                                      const historicalData = (log.logType === 'appointment' && log.newState && Object.keys(log.newState).length > 3) 
+                                        ? { ...appointmentToEdit, ...log.newState, changedAt: log.changedAt, changedByName: (log as any).changedByName } 
+                                        : { ...appointmentToEdit, ...log.previousState, changedAt: log.changedAt, changedByName: (log as any).changedByName };
+                                      
+                                      console.log('[HistoryLog] Opening historical snapshot:', historicalData.id);
+                                      setSnapshotToView(historicalData);
+                                      setIsSnapshotModalOpen(true);
+                                    }}
+                                    className="p-1 hover:bg-white rounded-md border border-transparent hover:border-gray-200 transition-colors text-gray-400 hover:text-blue-600"
+                                    title="View snapshot"
+                                  >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="text-gray-800 leading-relaxed font-medium">
+                                {log.logType === 'payment' ? (
+                                  <div className="space-y-0.5">
+                                    <p>
+                                      {user?.role === 'patient' 
+                                        ? `Payment of ₱${(log.amount || 0).toLocaleString()} made`
+                                        : `Payment of ₱${(log.amount || 0).toLocaleString()} received via ${log.paymentMethod || 'cash'}`
+                                      }
+                                    </p>
+                                    <p className="text-[10px] text-gray-500 italic">
+                                      {user?.role === 'patient'
+                                        ? `Your balance is now ₱${(log.newBalance || 0).toLocaleString()}`
+                                        : `Account marked as ${log.paymentStatus?.replace('-', ' ') || 'paid'} by ${log.changedByName || log.changedBy} • Balance: ₱${(log.newBalance || 0).toLocaleString()}`
+                                      }
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <div className="space-y-0.5">
+                                    {/* Status Summary for Patients vs Technical for Staff */}
+                                    {user?.role === 'patient' ? (
+                                      <div className="mb-1 text-[10px]">
+                                        <p className="text-gray-600">
+                                          Status is <span className="font-bold text-purple-700 uppercase">{log.newState?.status || log.previousState?.status || 'scheduled'}</span>
+                                          {log.newState?.paymentStatus && ` • Payment: ${log.newState.paymentStatus.replace('-', ' ')}`}
+                                        </p>
+                                      </div>
+                                    ) : (
+                                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] mb-1">
+                                        <p className="text-gray-500">
+                                          Status: <span className="font-bold text-purple-700 uppercase tracking-tight">{log.newState?.status || log.previousState?.status || '—'}</span>
+                                        </p>
+                                        <p className="text-gray-500">
+                                          Payment: <span className="font-bold text-emerald-700 uppercase tracking-tight">{(log.newState?.paymentStatus || log.previousState?.paymentStatus || '—').replace('-', ' ')}</span>
+                                        </p>
+                                        {log.amount !== undefined && (
+                                          <p className="text-gray-500">
+                                            Paid: <span className="font-bold text-gray-700">₱{(log.amount || 0).toLocaleString()}</span>
+                                          </p>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    {/* Significant changes list */}
+                                    <div className="space-y-0.5 border-l-2 border-gray-100 pl-2 mt-1.5">
+                                      {/* Show reschedule if it occurred (ONLY if not initial creation and schedule actually changed) */}
+                                      {!isInitialCreation && log.previousState?.date && (
+                                        (log.newState?.date && log.newState.date !== log.previousState?.date) || 
+                                        (log.newState?.time && log.newState.time !== log.previousState?.time)
+                                      ) ? (
+                                        <p className="text-[10px]">
+                                          {user?.role === 'patient' ? 'Appointment moved to' : 'Schedule moved to'} <span className="font-bold text-blue-700">{log.newState?.date || log.previousState?.date}</span> at <span className="font-bold text-blue-700">{log.newState?.time || log.previousState?.time}</span>
+                                        </p>
+                                      ) : null}
+
+                                      {/* Default message if no specific significant change detected but it was an update or creation */}
+                                      {((!log.changeType || log.changeType === 'update' || log.changeType === 'notes_update' || isInitialCreation) && 
+                                       !(log.newState?.status && log.previousState?.status && log.newState.status !== log.previousState?.status) &&
+                                       !(log.previousState?.date && ((log.newState?.date && log.newState.date !== log.previousState?.date) || (log.newState?.time && log.newState.time !== log.previousState?.time))) &&
+                                       !(log.newState?.paymentStatus && log.previousState?.paymentStatus && log.newState.paymentStatus !== log.previousState?.paymentStatus)) && (
+                                        <p className="text-[10px]">
+                                          {user?.role === 'patient' 
+                                            ? (isInitialCreation ? 'Appointment record created' : 'Appointment details updated')
+                                            : (isInitialCreation ? `Appointment created by ${log.changedByName || log.changedBy}` : `Appointment updated by ${log.changedByName || log.changedBy}`)
+                                          }
+                                        </p>
+                                      )}
+                                    </div>
+
+                                    {/* Show notes if they were updated or exist in this log AND are not empty */}
+                                    {(log.newState?.notes !== undefined && log.newState.notes !== log.previousState?.notes && log.newState.notes.trim() !== '' && log.newState.notes.trim() !== '-') && (
+                                      <div className="mt-1.5 p-1.5 bg-blue-50/50 rounded border border-blue-100/50">
+                                        <p className="text-[10px] text-blue-800 font-semibold mb-0.5">{user?.role === 'patient' ? 'Note added:' : 'Notes updated:'}</p>
+                                        <p className="text-[10px] text-gray-600 italic line-clamp-2">
+                                          {log.newState.notes}
+                                        </p>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <DialogFooter className="flex gap-3 pt-6 border-t">
@@ -837,7 +1141,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             </>
           ) : (
             <>
-              <div className="space-y-6">
+              <div className="space-y-6 max-h-[65vh] overflow-y-auto pr-2 custom-scrollbar py-2">
                 <div className="bg-gray-50 p-4 rounded-lg space-y-3">
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-500">Service:</span>
@@ -1104,6 +1408,17 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Historical Snapshot View-only Modal */}
+      <AppointmentHistoryView
+        open={isSnapshotModalOpen}
+        onOpenChange={(val) => {
+          setIsSnapshotModalOpen(val);
+          if (!val) setSnapshotToView(null);
+        }}
+        appointmentSnapshot={snapshotToView}
+        logDate={snapshotToView?.changedAt || new Date().toISOString()}
+      />
     </>
    );
  }

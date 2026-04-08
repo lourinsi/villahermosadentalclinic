@@ -70,9 +70,16 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
       if (!doctorName) return;
       try {
         setIsLoadingAvailability(true);
-        const response = await fetch(
-          `http://localhost:3001/api/appointments?doctor=${encodeURIComponent(doctorName)}&startDate=${dateRange.start}&endDate=${dateRange.end}&includeUnpaid=true`
-        );
+        
+        let url = `http://localhost:3001/api/appointments?doctor=${encodeURIComponent(doctorName)}&startDate=${dateRange.start}&endDate=${dateRange.end}&includeUnpaid=true`;
+        
+        // If we have a patientId (logged in patient), include it in the query with OR logic
+        // This will return appointments for THIS doctor OR for THIS patient (any doctor)
+        if (user?.patientId) {
+          url += `&patientId=${user.patientId}&parentId=${user.patientId}&matchType=or`;
+        }
+
+        const response = await fetch(url);
         const result = await response.json();
         if (result.success) {
           setAppointments(result.data);
@@ -98,13 +105,22 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
     return () => {
       window.removeEventListener('appointments:updated', handler as EventListener);
     };
-  }, [dateRange, doctorName]);
+  }, [dateRange, doctorName, user]);
 
   const getDaySlots = useCallback((date: Date) => {
     const dateStr = formatDateToYYYYMMDD(date);
-    const dayAppointments = appointments.filter(apt =>
-      apt.date === dateStr && apt.status !== 'cancelled'
-    );
+    // For display purposes: show own cancelled appointments for reference
+    // For availability: exclude all cancelled appointments (they don't block slots)
+    const dayAppointmentsForDisplay = appointments.filter(apt => {
+      if (apt.date !== dateStr) return false;
+      // Only show own cancelled appointments for visual reference
+      if (user && apt.patientId === user.patientId && apt.status === 'cancelled') return true;
+      // For actual blocking: exclude cancelled entirely, only show active appointments
+      return apt.status !== 'cancelled';
+    });
+    
+    // For checking actual availability (blocked slots)
+    const dayAppointmentsForAvailability = dayAppointmentsForDisplay.filter(apt => apt.status !== 'cancelled');
     
     const now = new Date();
     const todayStr = formatDateToYYYYMMDD(now);
@@ -129,19 +145,48 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
       
       let isBooked = false;
       let isTentative = false;
+      let isCancelled = false;
+      let isOtherDoctor = false;
       let slotAppointment: Appointment | undefined;
+      let cancelledAppointment: Appointment | undefined;
       
-      for (const apt of dayAppointments) {
+      // Check for active appointments that actually block availability
+      for (const apt of dayAppointmentsForAvailability) {
         const aptStart = timeToMinutes(apt.time);
         const aptEnd = aptStart + (apt.duration || 30);
         
         if (slotMinutes < aptEnd && slotEndMinutes > aptStart) {
           isBooked = true;
           slotAppointment = apt;
+
+          // Check if this appointment is with a different doctor
+          // Normalize names for comparison (remove "Dr. " prefix)
+          const currentDocNormalized = doctorName.replace(/^Dr\.\s+/i, "").toLowerCase();
+          const aptDocNormalized = apt.doctor.replace(/^Dr\.\s+/i, "").toLowerCase();
+          
+          if (aptDocNormalized !== currentDocNormalized) {
+            isOtherDoctor = true;
+          }
+
           if (apt.status === 'tentative' || apt.status === 'pending' || apt.status === 'reserved' || apt.paymentStatus === 'half-paid') {
             isTentative = true;
           }
           break;
+        }
+      }
+
+      // Only check for cancelled appointments IF the slot is not already booked/blocked
+      // This allows showing the "CANCELLED" state only when the slot is otherwise open
+      if (!isBooked) {
+        for (const apt of dayAppointmentsForDisplay.filter(a => a.status === 'cancelled')) {
+          const aptStart = timeToMinutes(apt.time);
+          const aptEnd = aptStart + (apt.duration || 30);
+          
+          if (slotMinutes < aptEnd && slotEndMinutes > aptStart) {
+            isCancelled = true;
+            cancelledAppointment = apt;
+            break;
+          }
         }
       }
       
@@ -150,11 +195,13 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
         isAvailable: !isBooked && !isPast,
         isBooked,
         isTentative,
+        isCancelled,
+        isOtherDoctor,
         isPast,
-        appointment: slotAppointment
+        appointment: slotAppointment || cancelledAppointment
       };
     });
-  }, [appointments]);
+  }, [appointments, user]);
 
   const isOwnAppointment = (apt: Appointment | undefined): boolean => {
     if (!apt || !user) return false;
@@ -242,6 +289,8 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
                         ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                         : slot.isAvailable
                         ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 cursor-pointer'
+                        : slot.isOtherDoctor
+                        ? 'bg-blue-700 text-white cursor-pointer'
                         : slot.isTentative
                         ? 'bg-yellow-50 text-yellow-700 border border-yellow-200 cursor-pointer'
                         : 'bg-emerald-700 text-white cursor-pointer'
@@ -254,11 +303,15 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
                         className={`text-[10px] font-bold ${
                           slot.isPast ? 'bg-gray-200 text-gray-600' :
                           slot.isAvailable ? 'bg-emerald-100 text-emerald-700' :
+                          slot.isOtherDoctor ? 'bg-blue-100 text-blue-700' :
                           slot.isTentative ? 'bg-yellow-100 text-yellow-700' :
                           'bg-emerald-600 text-white'
                         }`}
                       >
-                        {slot.isPast ? 'PASSED' : slot.isAvailable ? 'OPEN' : slot.isTentative ? 'RESERVED' : 'BOOKED'}
+                        {slot.isPast ? 'PASSED' : 
+                          (slot.isAvailable ? 'OPEN' : 
+                          (slot.isOtherDoctor ? 'OTHER APPOINTMENT' : 
+                          (slot.isTentative ? 'RESERVED' : 'BOOKED')))}
                       </Badge>
                     </div>
                   </button>

@@ -35,7 +35,7 @@ export const APPOINTMENT_TYPE_DURATIONS: Record<string, number> = {
 };
 
 export const getAppointmentTypeName = (typeIndex: number, customType?: string): string => {
-  // Type 6 (index) is always "Other" type, use customType if available
+  // Type 6 (index) is the "Other" type
   if (typeIndex === 6) {
     return customType || "Other";
   }
