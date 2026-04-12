@@ -10,6 +10,7 @@ import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal } from "../lib/utils";
 import { useAuth } from "@/hooks/useAuth";
+import BookingModal from "./BookingModal";
 import { NextAppointmentCard } from "./NextAppointmentCard";
 
 export function PatientDashboard() {
@@ -17,6 +18,8 @@ export function PatientDashboard() {
   const { user } = useAuth();
   const [viewMode, setViewMode] = useState<"upcoming" | "past">("upcoming");
   const [isLoadingView, setIsLoadingView] = useState(false);
+  const [bookingModalOpen, setBookingModalOpen] = useState(false);
+  const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
 
   // Extract first name from user
   const firstName = user?.username ? user.username.split('@')[0] : "there";
@@ -168,7 +171,8 @@ export function PatientDashboard() {
             role="patient"
             sameTimeAppointments={sameTimeAppointments}
             onViewDetails={(apt) => {
-              openEditModal(apt);
+              setSelectedAppointment(apt);
+              setBookingModalOpen(true);
             }}
             showHeader={true}
           />
@@ -222,7 +226,8 @@ export function PatientDashboard() {
                     key={appointment.id} 
                     className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
                     onClick={() => {
-                      openEditModal(appointment);
+                      setSelectedAppointment(appointment);
+                      setBookingModalOpen(true);
                     }}
                   >
                     <div className="flex items-center space-x-3 flex-1">
@@ -357,6 +362,17 @@ export function PatientDashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Booking Modal */}
+      <BookingModal
+        open={bookingModalOpen}
+        onOpenChange={setBookingModalOpen}
+        appointmentToEdit={selectedAppointment}
+        onBooked={() => {
+          setSelectedAppointment(null);
+          setBookingModalOpen(false);
+        }}
+      />
     </div>
   );
 }

@@ -117,7 +117,7 @@ export function ScheduleAppointmentModal() {
     const newEnd = newStart + duration;
 
     return dateAppointments.some(apt => {
-      if (apt.status === 'cancelled') return false;
+      if (apt.status === 'cancelled' || apt.status === 'pending') return false;
       
       const [aptHours, aptMinutes] = apt.time.split(':').map(Number);
       const aptStart = aptHours * 60 + aptMinutes;

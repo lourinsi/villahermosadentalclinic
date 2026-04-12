@@ -10,6 +10,7 @@ import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal } from "../lib/utils";
 import { useAuth } from "@/hooks/useAuth.tsx";
+import BookingModal from "./BookingModal";
 import { NextAppointmentCard } from "./NextAppointmentCard";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend, AreaChart, Area } from "recharts";
 
@@ -18,6 +19,8 @@ export function DoctorDashboard() {
   const { user } = useAuth();
   const [viewMode, setViewMode] = useState<"day" | "week" | "month">("day");
   const [isLoadingView, setIsLoadingView] = useState(false);
+  const [bookingModalOpen, setBookingModalOpen] = useState(false);
+  const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
 
   // Filter appointments to only show this doctor's appointments
   const doctorName = user?.username || "";
@@ -252,7 +255,8 @@ export function DoctorDashboard() {
                     key={appointment.id}
                     className="group flex items-center justify-between p-4 hover:bg-violet-50/50 transition-all duration-300 cursor-pointer"
                     onClick={() => {
-                      openEditModal(appointment);
+                      setSelectedAppointment(appointment);
+                      setBookingModalOpen(true);
                     }}
                   >
                     <div className="flex items-center space-x-4">
@@ -405,7 +409,8 @@ export function DoctorDashboard() {
             role="doctor"
             sameTimeAppointments={sameTimeAppointments}
             onViewDetails={(apt) => {
-              openEditModal(apt);
+              setSelectedAppointment(apt);
+              setBookingModalOpen(true);
             }}
           />
         )}
@@ -486,6 +491,17 @@ export function DoctorDashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Booking Modal */}
+      <BookingModal
+        open={bookingModalOpen}
+        onOpenChange={setBookingModalOpen}
+        appointmentToEdit={selectedAppointment}
+        onBooked={() => {
+          setSelectedAppointment(null);
+          setBookingModalOpen(false);
+        }}
+      />
     </div>
   );
 }

@@ -343,7 +343,7 @@ export function CreateAppointmentModal() {
       const newEnd = newStart + formData.duration;
 
       const hasOverlapSameDoctor = dateAppointments.some(apt => {
-        if (apt.status === 'cancelled') return false;
+        if (apt.status === 'cancelled' || apt.status === 'pending') return false;
         if (String(apt.doctor) !== String(formData.doctor)) return false;
         const [aptH, aptM] = apt.time.split(':').map(Number);
         const aptStart = aptH * 60 + aptM;
@@ -352,7 +352,7 @@ export function CreateAppointmentModal() {
       });
 
       const hasOverlapSamePatient = dateAppointments.some(apt => {
-        if (apt.status === 'cancelled') return false;
+        if (apt.status === 'cancelled' || apt.status === 'pending') return false;
         const samePatient = (patientId && apt.patientId && String(apt.patientId) === String(patientId)) || (!patientId && String(apt.patientName) === String(patientName)) || (patientId && !apt.patientId && String(apt.patientName) === String(patientName));
         if (!samePatient) return false;
         const [aptH, aptM] = apt.time.split(':').map(Number);
@@ -980,7 +980,7 @@ export function CreateAppointmentModal() {
       const newEnd = newStart + formData.duration;
 
       const hasOverlapSameDoctor = dateAppointments.some(apt => {
-        if (apt.status === 'cancelled') return false;
+        if (apt.status === 'cancelled' || apt.status === 'pending') return false;
         if (String(apt.doctor) !== String(formData.doctor)) return false;
         const [aptH, aptM] = apt.time.split(':').map(Number);
         const aptStart = aptH * 60 + aptM;
@@ -989,7 +989,7 @@ export function CreateAppointmentModal() {
       });
 
       const hasOverlapSamePatient = dateAppointments.some(apt => {
-        if (apt.status === 'cancelled') return false;
+        if (apt.status === 'cancelled' || apt.status === 'pending') return false;
         const samePatient = (patientId && apt.patientId && String(apt.patientId) === String(patientId)) || (!patientId && String(apt.patientName) === String(patientName)) || (patientId && !apt.patientId && String(apt.patientName) === String(patientName));
         if (!samePatient) return false;
         const [aptH, aptM] = apt.time.split(':').map(Number);

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -11,13 +11,18 @@ import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
 import { usePaymentStatuses } from "@/hooks/usePaymentStatuses";
-import { Calendar as CalendarIcon, Clock, Award, Loader2, CheckCircle2, CreditCard, Banknote, Stethoscope, ChevronLeft } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, Award, Loader2, CheckCircle2, CreditCard, Banknote, Stethoscope, ChevronLeft, AlertCircle } from "lucide-react";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import { APPOINTMENT_PRICES, APPOINTMENT_TYPES, getAppointmentTypeName } from "@/lib/appointmentTypes";
 import { Dialog as SmallDialog, DialogContent as SmallDialogContent, DialogFooter as SmallDialogFooter } from "@/components/ui/dialog";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 import { toast } from 'sonner';
 import AppointmentHistoryView from "./AppointmentHistoryView";
+
+import { DatePickerModal } from "./DatePickerModal";
+import { TimePickerModal } from "./TimePickerModal";
+import { useDoctors } from "@/hooks/useDoctors";
 
 // Helper function to get appointment type index from name
 const getAppointmentTypeIndex = (typeName: string): number => {
@@ -65,9 +70,21 @@ interface BookingModalProps {
   onDeleted?: () => void; // callback when appointment is deleted
 }
 
+// Map appointment types to default durations (in minutes)
+const appointmentTypeDurations: Record<string, number> = {
+  "Routine Cleaning": 30,
+  "Checkup": 30,
+  "Filling": 60,
+  "Root Canal": 90,
+  "Extraction": 60,
+  "Whitening": 60,
+  "Other": 30,
+};
+
 export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, onBooked, appointmentToEdit, title, isReschedule, onDeleted }: BookingModalProps) {
   const { user } = useAuth();
-  const { addAppointment, updateAppointment, isPaymentFlow } = useAppointmentModal();
+  const { doctors } = useDoctors();
+  const { addAppointment, updateAppointment, isPaymentFlow, openEditModal } = useAppointmentModal();
   const { openPatientPaymentFor } = usePaymentModal();
   const { statuses: appointmentStatuses, isLoading: isLoadingStatuses } = useAppointmentStatuses();
   const { statuses: paymentStatuses, isLoading: isLoadingPaymentStatuses } = usePaymentStatuses();
@@ -75,6 +92,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [patients, setPatients] = useState<any[]>([]);
   const [isLoadingPatients, setIsLoadingPatients] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState<string>("");
+  const [selectedDoctor, setSelectedDoctor] = useState<string>(doctorName || "");
   const [appointmentType, setAppointmentType] = useState<string>("");
   const [customAppointmentTypeName, setCustomAppointmentTypeName] = useState<string>("");
   const [duration, setDuration] = useState<string>("30");
@@ -88,6 +106,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [paymentLogs, setPaymentLogs] = useState<any[]>([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const [isLoadingPaymentLogs, setIsLoadingPaymentLogs] = useState(false);
+  const [durationConflict, setDurationConflict] = useState<string>("");
 
   // New states for two-step flow
   const [modalStep, setModalStep] = useState<"details" | "payment">("details");
@@ -101,8 +120,114 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [isConfirmSummaryOpen, setIsConfirmSummaryOpen] = useState(false);
   const [snapshotToView, setSnapshotToView] = useState<any>(null);
   const [isSnapshotModalOpen, setIsSnapshotModalOpen] = useState(false);
+  const [isRescheduling, setIsRescheduling] = useState(false);
+  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+  const [isTimePickerOpen, setIsTimePickerOpen] = useState(false);
+  const [dailyAppointments, setDailyAppointments] = useState<any[]>([]);
+  const [patientConflict, setPatientConflict] = useState("");
+  const [patientAppointments, setPatientAppointments] = useState<any[]>([]);
 
-  // read-only for patient viewing their own booked/reserved appointment: only notes editable
+  // Fetch all appointments for the day to check conflicts across all doctors and patients
+  useEffect(() => {
+    if (!open || !selectedDate) return;
+    
+    const fetchDailyAppointments = async () => {
+      try {
+        const dateStr = formatDateToYYYYMMDD(selectedDate);
+        const res = await fetch(
+          `http://localhost:3001/api/appointments?startDate=${dateStr}&endDate=${dateStr}`,
+          { credentials: 'include' }
+        );
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success) {
+            // Exclude cancelled appointments and current appointment being edited
+            const filtered = (json.data || []).filter((apt: any) => 
+              apt.status !== 'cancelled' && apt.id !== appointmentToEdit?.id
+            );
+            
+            // Group appointments by doctor and status for detailed logging
+            const byDoctor: Record<string, any[]> = {};
+            const byStatus: Record<string, any[]> = {};
+            
+            filtered.forEach((apt: any) => {
+              // Group by doctor
+              if (!byDoctor[apt.doctor]) byDoctor[apt.doctor] = [];
+              byDoctor[apt.doctor].push(apt);
+              
+              // Group by status
+              if (!byStatus[apt.status]) byStatus[apt.status] = [];
+              byStatus[apt.status].push(apt);
+            });
+            
+            // Log comprehensive schedule information
+            console.log('[BookingModal] 📅 DAILY SCHEDULE - ALL APPOINTMENTS:', {
+              date: dateStr,
+              formattedDate: selectedDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }),
+              totalAppointments: filtered.length,
+              
+              // Summary by status
+              summary: {
+                scheduled: byStatus['scheduled']?.length || 0,
+                reserved: byStatus['reserved']?.length || 0,
+                pending: byStatus['pending']?.length || 0,
+                completed: byStatus['completed']?.length || 0,
+              },
+              
+              // Detailed breakdown by doctor
+              byDoctor: Object.keys(byDoctor).sort().map(doctor => ({
+                doctor,
+                appointments: byDoctor[doctor].map((apt: any) => ({
+                  time: apt.time,
+                  duration: `${apt.duration} mins`,
+                  endTime: (() => {
+                    const [h, m] = (apt.time || '00:00').split(':').map(Number);
+                    const end = new Date(selectedDate);
+                    end.setHours(h, m + apt.duration, 0, 0);
+                    return `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
+                  })(),
+                  status: apt.status,
+                  patient: apt.patientName,
+                  patientId: apt.patientId
+                }))
+              })),
+              
+              // Alternative view: all appointments in chronological order
+              chronological: filtered
+                .sort((a: any, b: any) => {
+                  const aTime = a.time.split(':').map(Number);
+                  const bTime = b.time.split(':').map(Number);
+                  return (aTime[0] * 60 + aTime[1]) - (bTime[0] * 60 + bTime[1]);
+                })
+                .map((apt: any) => ({
+                  time: apt.time,
+                  duration: `${apt.duration} mins`,
+                  status: apt.status,
+                  doctor: apt.doctor,
+                  patient: apt.patientName
+                }))
+            });
+            
+            setDailyAppointments(filtered);
+            
+            // Also filter for current patient if one is selected
+            if (selectedPatient) {
+              const pAppts = filtered.filter((apt: any) => String(apt.patientId) === String(selectedPatient));
+              setPatientAppointments(pAppts);
+            } else {
+              setPatientAppointments([]);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("[BookingModal] Could not fetch daily appointments:", err);
+      }
+    };
+    
+    fetchDailyAppointments();
+  }, [open, selectedDate, selectedPatient, appointmentToEdit?.id]);
+
+  // Read-only for patient viewing their own booked/reserved appointment: only notes editable
   const isCancelled = (appointmentStatus || appointmentToEdit?.status || '').toLowerCase() === 'cancelled';
   const isPatientReadonly = Boolean(appointmentToEdit && user?.role === 'patient');
   const isEditMode = Boolean(appointmentToEdit);
@@ -175,19 +300,364 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     }
   }, [open, appointmentToEdit]);
 
-  // Map appointment types to default durations (in minutes)
-  const appointmentTypeDurations: Record<string, number> = {
-    "Routine Cleaning": 30,
-    "Checkup": 30,
-    "Filling": 60,
-    "Root Canal": 90,
-    "Extraction": 45,
-    "Whitening": 45,
-    "Other": 30,
-  };
+  // Check if a time + duration combination overlaps with existing appointments for selected doctor
+  const checkDurationConflict = useCallback((time: string, durationMins: number): boolean => {
+    if (!time || !selectedDate || !selectedDoctor) return false;
 
-  // Update duration when appointment type changes
+    const [hours, minutes] = time.split(':').map(Number);
+    const slotStartDate = new Date(selectedDate);
+    slotStartDate.setHours(hours, minutes, 0, 0);
+    const slotEndDate = new Date(slotStartDate.getTime() + durationMins * 60000);
+
+    // Normalize doctor name for more robust matching (remove "Dr. " prefix and case-insensitive)
+    const normalizeName = (name: string) => (name || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim();
+    const targetDoctor = normalizeName(selectedDoctor);
+
+    // Filter daily appointments for the selected doctor - exclude pending as they can be overridden
+    const doctorAppts = dailyAppointments.filter(apt => 
+      normalizeName(apt.doctor) === targetDoctor && 
+      (apt.status || "").toLowerCase() !== "pending"
+    );
+    
+    // DEBUG: Log the filtering process
+    console.log('[BookingModal] 🔍 DOCTOR NAME MATCHING DEBUG:', {
+      selectedDoctor,
+      targetDoctor,
+      totalDailyAppointments: dailyAppointments.length,
+      allDoctorNames: Array.from(new Set(dailyAppointments.map(apt => apt.doctor))),
+      normalizedDoctorNames: Array.from(new Set(dailyAppointments.map(apt => normalizeName(apt.doctor)))),
+      matchedCount: doctorAppts.length
+    });
+
+    for (const apt of doctorAppts) {
+      // Parse the appointment date - it might be YYYY-MM-DD format
+      let aptStart: Date;
+      if (typeof apt.date === 'string' && apt.date.includes('-') && !apt.date.includes(':')) {
+        const [aptHours, aptMinutes] = (apt.time || '00:00').split(':').map(Number);
+        aptStart = new Date(apt.date);
+        aptStart.setHours(aptHours, aptMinutes, 0, 0);
+      } else {
+        aptStart = new Date(apt.date);
+      }
+      
+      const aptDurationMins = parseInt(String(apt.duration), 10) || 30;
+      const aptEnd = new Date(aptStart.getTime() + aptDurationMins * 60000);
+
+      // Check if times overlap
+      if (slotStartDate < aptEnd && slotEndDate > aptStart) {
+        return true;
+      }
+    }
+
+    return false;
+  }, [selectedDate, selectedDoctor, dailyAppointments]);
+
+  // Get conflict info for a specific duration
+  const getDurationConflictInfo = useCallback((durationMins: number): { hasConflict: boolean; conflictTime?: string; conflictPatient?: string; conflictDuration?: number } => {
+    if (!selectedTime || !selectedDate || !selectedDoctor) return { hasConflict: false };
+    
+    const hasConflict = checkDurationConflict(selectedTime, durationMins);
+    if (!hasConflict) return { hasConflict: false };
+
+    // Find the conflicting appointment details
+    const [hours, minutes] = selectedTime.split(':').map(Number);
+    const slotStartDate = new Date(selectedDate);
+    slotStartDate.setHours(hours, minutes, 0, 0);
+    const slotEndDate = new Date(slotStartDate.getTime() + durationMins * 60000);
+
+    const normalizeName = (name: string) => (name || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim();
+    const targetDoctor = normalizeName(selectedDoctor);
+    const doctorAppts = dailyAppointments.filter(apt => 
+      normalizeName(apt.doctor) === targetDoctor && 
+      (apt.status || "").toLowerCase() !== "pending"
+    );
+
+    for (const apt of doctorAppts) {
+      let aptStart: Date;
+      if (typeof apt.date === 'string' && apt.date.includes('-') && !apt.date.includes(':')) {
+        const [aptHours, aptMinutes] = (apt.time || '00:00').split(':').map(Number);
+        aptStart = new Date(apt.date);
+        aptStart.setHours(aptHours, aptMinutes, 0, 0);
+      } else {
+        aptStart = new Date(apt.date);
+      }
+      
+      const aptDurationMins = parseInt(String(apt.duration), 10) || 30;
+      const aptEnd = new Date(aptStart.getTime() + aptDurationMins * 60000);
+      
+      if (slotStartDate < aptEnd && slotEndDate > aptStart) {
+        return { 
+          hasConflict: true, 
+          conflictTime: `${String(aptStart.getHours()).padStart(2, '0')}:${String(aptStart.getMinutes()).padStart(2, '0')}`,
+          conflictPatient: apt.patientName || 'Patient',
+          conflictDuration: aptDurationMins
+        };
+      }
+    }
+
+    return { hasConflict: true };
+  }, [selectedTime, selectedDate, selectedDoctor, dailyAppointments, checkDurationConflict]);
+
+  // Check if a specific duration option is available (no conflict)
+  const isDurationAvailable = useCallback((durationMins: number): boolean => {
+    if (!selectedTime) return true;
+    return !checkDurationConflict(selectedTime, durationMins);
+  }, [selectedTime, checkDurationConflict]);
+
+  // Get tooltip text for duration conflict
+  const getDurationTooltipText = useCallback((durationMins: number): string => {
+    const info = getDurationConflictInfo(durationMins);
+    if (!info.hasConflict) return '';
+    
+    if (info.conflictPatient && info.conflictTime) {
+      return `${info.conflictPatient} already has appointment scheduled at ${info.conflictTime}`;
+    }
+    return 'Conflicts with another appointment';
+  }, [getDurationConflictInfo]);
+
+  // Update conflict status when duration changes
   useEffect(() => {
+    if (!selectedTime || !selectedDoctor) {
+      setDurationConflict("");
+      return;
+    }
+
+    const durationMins = parseInt(duration, 10) || 30;
+    const conflict = getDurationConflictInfo(durationMins);
+    
+    if (conflict.hasConflict) {
+      setDurationConflict(`Conflicts with appointment at ${conflict.conflictTime || 'this time'}`);
+    } else {
+      setDurationConflict("");
+    }
+
+    // Log available durations when time is set
+    const availableDurations = [30, 60, 90, 120].filter(dur => isDurationAvailable(dur));
+    const unavailableDurations = [30, 60, 90, 120].filter(dur => !isDurationAvailable(dur));
+    
+    console.log('[BookingModal] ⏱️ DURATION AVAILABILITY AT TIME:', {
+      doctor: selectedDoctor,
+      date: selectedDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }),
+      selectedTime: selectedTime,
+      currentDuration: `${durationMins} mins`,
+      availableDurations: availableDurations.length > 0 ? availableDurations.map(d => `${d} mins`) : '❌ NONE',
+      unavailableDurations: unavailableDurations.length > 0 ? unavailableDurations.map(d => `${d} mins`) : 'None',
+      
+      // DEBUG: Show all doctor appointments being checked
+      debugDoctorAppts: dailyAppointments
+        .filter(apt => (apt.doctor || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim() === (selectedDoctor || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim())
+        .map(apt => ({ time: apt.time, duration: apt.duration, status: apt.status, patient: apt.patientName })),
+      
+      // Show which appointments are blocking each unavailable duration
+      blockedBy: unavailableDurations.length > 0 ? unavailableDurations.map(dur => {
+        const [hours, minutes] = selectedTime.split(':').map(Number);
+        const slotStart = new Date(selectedDate);
+        slotStart.setHours(hours, minutes, 0, 0);
+        const slotEnd = new Date(slotStart.getTime() + dur * 60000);
+        
+        const normalizeName = (name: string) => (name || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim();
+        const targetDoctor = normalizeName(selectedDoctor);
+        const doctorAppts = dailyAppointments.filter(apt => 
+      normalizeName(apt.doctor) === targetDoctor && 
+      (apt.status || "").toLowerCase() !== "pending"
+    );
+        
+        const blockingAppts = doctorAppts.filter((apt: any) => {
+          let aptStart: Date;
+          if (typeof apt.date === 'string' && apt.date.includes('-') && !apt.date.includes(':')) {
+            const [aptHours, aptMinutes] = (apt.time || '00:00').split(':').map(Number);
+            aptStart = new Date(apt.date);
+            aptStart.setHours(aptHours, aptMinutes, 0, 0);
+          } else {
+            aptStart = new Date(apt.date);
+          }
+          const aptDurationMins = parseInt(String(apt.duration), 10) || 30;
+          const aptEnd = new Date(aptStart.getTime() + aptDurationMins * 60000);
+          return slotStart < aptEnd && slotEnd > aptStart;
+        });
+        
+        return {
+          duration: `${dur} mins`,
+          blocked: blockingAppts.length > 0,
+          blockingAppointments: blockingAppts.map((apt: any) => ({
+            time: apt.time,
+            duration: `${apt.duration} mins`,
+            status: apt.status,
+            patient: apt.patientName
+          }))
+        };
+      }) : []
+    });
+  }, [duration, selectedTime, getDurationConflictInfo, isDurationAvailable, selectedDoctor, selectedDate, dailyAppointments]);
+
+  // Check if patient has a conflicting appointment at the selected time
+  const checkPatientConflict = useCallback((time: string, durationMins: number): boolean => {
+    if (!time || !selectedDate) return false;
+
+    const [hours, minutes] = time.split(':').map(Number);
+    const slotStartDate = new Date(selectedDate);
+    slotStartDate.setHours(hours, minutes, 0, 0);
+    const slotEndDate = new Date(slotStartDate.getTime() + durationMins * 60000);
+
+    for (const apt of patientAppointments) {
+      let aptStart: Date;
+      if (typeof apt.date === 'string' && apt.date.includes('-') && !apt.date.includes(':')) {
+        const [aptHours, aptMinutes] = (apt.time || '00:00').split(':').map(Number);
+        aptStart = new Date(apt.date);
+        aptStart.setHours(aptHours, aptMinutes, 0, 0);
+      } else {
+        aptStart = new Date(apt.date);
+      }
+      
+      const aptDurationMins = parseInt(String(apt.duration), 10) || 30;
+      const aptEnd = new Date(aptStart.getTime() + aptDurationMins * 60000);
+
+      // Check if times overlap
+      if (slotStartDate < aptEnd && slotEndDate > aptStart) {
+        return true;
+      }
+    }
+
+    return false;
+  }, [selectedDate, patientAppointments]);
+
+  // Get conflict info for patient
+  const getPatientConflictInfo = useCallback(() => {
+    if (!selectedTime || !selectedDate) return { hasConflict: false };
+    
+    const durationMins = parseInt(duration, 10) || 30;
+    const hasConflict = checkPatientConflict(selectedTime, durationMins);
+    if (!hasConflict) return { hasConflict: false };
+
+    // Find the conflicting appointment
+    const [hours, minutes] = selectedTime.split(':').map(Number);
+    const slotStartDate = new Date(selectedDate);
+    slotStartDate.setHours(hours, minutes, 0, 0);
+    const slotEndDate = new Date(slotStartDate.getTime() + durationMins * 60000);
+
+    for (const apt of patientAppointments) {
+      let aptStart: Date;
+      if (typeof apt.date === 'string' && apt.date.includes('-') && !apt.date.includes(':')) {
+        const [aptHours, aptMinutes] = (apt.time || '00:00').split(':').map(Number);
+        aptStart = new Date(apt.date);
+        aptStart.setHours(aptHours, aptMinutes, 0, 0);
+      } else {
+        aptStart = new Date(apt.date);
+      }
+      
+      const aptDurationMins = parseInt(String(apt.duration), 10) || 30;
+      const aptEnd = new Date(aptStart.getTime() + aptDurationMins * 60000);
+      
+      if (slotStartDate < aptEnd && slotEndDate > aptStart) {
+        return { 
+          hasConflict: true, 
+          conflictTime: `${String(aptStart.getHours()).padStart(2, '0')}:${String(aptStart.getMinutes()).padStart(2, '0')}`,
+          conflictDoctor: apt.doctor || 'Another Doctor'
+        };
+      }
+    }
+
+    return { hasConflict: true };
+  }, [selectedTime, selectedDate, duration, checkPatientConflict, patientAppointments]);
+
+  // Update conflict status when patient, time, or duration changes
+  useEffect(() => {
+    if (!selectedTime || !selectedPatient) {
+      setPatientConflict("");
+      return;
+    }
+
+    // Get the selected patient's name
+    const selectedPatientObj = patients.find(p => String(p.id) === String(selectedPatient));
+    const selectedPatientName = selectedPatientObj?.name || 'Patient';
+
+    const conflict = getPatientConflictInfo();
+    
+    if (conflict.hasConflict) {
+      setPatientConflict(`${selectedPatientName} has appointment with ${conflict.conflictDoctor} at ${conflict.conflictTime}`);
+    } else {
+      setPatientConflict("");
+    }
+  }, [selectedPatient, selectedTime, duration, patients, getPatientConflictInfo]);
+
+  // Compute which patients have conflicts for the selected time/duration/date
+  const computePatientConflicts = useCallback((): Set<string> => {
+    if (!selectedTime || !selectedDate) return new Set();
+    
+    const durationMins = parseInt(duration, 10) || 30;
+    const [hours, minutes] = selectedTime.split(':').map(Number);
+    const slotStartDate = new Date(selectedDate);
+    slotStartDate.setHours(hours, minutes, 0, 0);
+    const slotEndDate = new Date(slotStartDate.getTime() + durationMins * 60000);
+
+    const conflictingPatientIds = new Set<string>();
+
+    // For each appointment in dailyAppointments, check if it overlaps with our selected time slot
+    for (const apt of dailyAppointments) {
+      if ((apt.status || "").toLowerCase() === "pending") continue;
+      let aptStart: Date;
+      if (typeof apt.date === 'string' && apt.date.includes('-') && !apt.date.includes(':')) {
+        const [aptHours, aptMinutes] = (apt.time || '00:00').split(':').map(Number);
+        aptStart = new Date(apt.date);
+        aptStart.setHours(aptHours, aptMinutes, 0, 0);
+      } else {
+        aptStart = new Date(apt.date);
+      }
+      
+      const aptDurationMins = parseInt(String(apt.duration), 10) || 30;
+      const aptEnd = new Date(aptStart.getTime() + aptDurationMins * 60000);
+      
+      if (slotStartDate < aptEnd && slotEndDate > aptStart) {
+        if (apt.patientId) {
+          conflictingPatientIds.add(String(apt.patientId));
+        }
+      }
+    }
+
+    return conflictingPatientIds;
+  }, [selectedTime, selectedDate, duration, dailyAppointments]);
+
+  const patientConflictSet = computePatientConflicts();
+
+  // Log patient conflicts when date/time changes
+  useEffect(() => {
+    if (!open || !selectedDate || !selectedTime) return;
+
+    const durationMins = parseInt(duration, 10) || 30;
+    const dateStr = selectedDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+    const disabledPatients = Array.from(patientConflictSet);
+    const enabledPatients = patients.filter(p => !patientConflictSet.has(p.id));
+
+    console.log('[BookingModal] 👥 PATIENT AVAILABILITY:', {
+      date: dateStr,
+      time: selectedTime,
+      duration: `${durationMins} mins`,
+      totalPatients: patients.length,
+      availablePatients: enabledPatients.length,
+      disabledPatients: disabledPatients.length,
+      available: enabledPatients.map(p => p.name),
+      disabled: disabledPatients.map(id => {
+        const patient = patients.find(p => p.id === id);
+        const appts = patientAppointments.filter((apt: any) => apt.patientId === id);
+        return {
+          name: patient?.name,
+          conflicts: appts.map((apt: any) => ({
+            time: apt.time,
+            duration: `${apt.duration} mins`,
+            doctor: apt.doctor
+          }))
+        };
+      })
+    });
+  }, [selectedDate, selectedTime, duration, patientConflictSet, patients, patientAppointments, open]);
+
+  // Update duration when appointment type changes - always reset to default when type changes
+  useEffect(() => {
+    if (!appointmentType) {
+      setDuration("");
+      return;
+    }
+    // Always set default duration when appointment type changes
     const defaultDur = appointmentTypeDurations[appointmentType] || 30;
     setDuration(String(defaultDur));
   }, [appointmentType]);
@@ -200,12 +670,17 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     setSelectedTime(defaultTime ?? "");
   }, [defaultTime]);
 
+  // Sync doctorName prop to selectedDoctor state when it changes
+  useEffect(() => {
+    if (doctorName) {
+      setSelectedDoctor(doctorName);
+    }
+  }, [doctorName]);
+
   // Price calculations - handle custom types
-  // In edit mode, use the appointment's stored price. In create mode, calculate from form
+  // finalPrice is the base price (before discount) - used in payment calculations
   const basePrice = appointmentType === "Other" ? Number(customPrice) : (APPOINTMENT_PRICES[appointmentType] || 0);
-  const finalPrice = appointmentToEdit 
-    ? appointmentToEdit.price  // Use stored price when editing
-    : (appointmentType === "Other" ? basePrice : Math.max(0, basePrice - (Number(discount) || 0)));
+  const finalPrice = Number(customPrice) > 0 ? Number(customPrice) : basePrice;
 
   // Log appointment type changes with price
   useEffect(() => {
@@ -219,8 +694,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         userRole: user?.role,
         timestamp: new Date().toISOString()
       });
+      // Reset custom price when appointment type changes (unless in edit mode)
+      if (!isEditMode) {
+        setCustomPrice("0");
+      }
     }
-  }, [appointmentType, user?.role, duration]);
+  }, [appointmentType, user?.role, duration, isEditMode]);
 
   useEffect(() => {
     if (!open) return;
@@ -300,20 +779,35 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       if (appointmentToEdit.type === 6) {
         setAppointmentType("Other");
         setCustomAppointmentTypeName(appointmentToEdit.customType || "");
-        setCustomPrice(String(appointmentToEdit.price || 0));
       } else {
         setAppointmentType(typeName);
       }
       
+      // Always set the stored price (whether custom or standard type)
+      setCustomPrice(String(appointmentToEdit.price || 0));
       setDuration(String(appointmentToEdit.duration || 30));
-      setDiscount(String(0));
+      // Prefill discount if it exists in the appointment (from discount field)
+      setDiscount(String(appointmentToEdit.discount || 0));
       setNotes(appointmentToEdit.notes || '');
       setSelectedDate(appointmentToEdit.date ? new Date(appointmentToEdit.date) : (defaultDate ?? new Date()));
       setSelectedTime(appointmentToEdit.time || (defaultTime ?? ''));
+      // Set doctor from the appointment
+      if (appointmentToEdit.doctor) {
+        setSelectedDoctor(appointmentToEdit.doctor);
+      }
       // For editing, initialize payment amount to empty so user enters NEW payment amount
       setAmountToPay('');
-      setAppointmentStatus(appointmentToEdit.status || 'scheduled');
-      setPaymentStatus(appointmentToEdit.paymentStatus || 'unpaid');
+      
+      // Use most recent status from logs, fallback to appointmentToEdit status
+      const mostRecentLog = appointmentLogs && appointmentLogs.length > 0 ? appointmentLogs[appointmentLogs.length - 1] : null;
+      const statusFromLog = mostRecentLog?.newStatus || appointmentToEdit.status || 'scheduled';
+      setAppointmentStatus(statusFromLog);
+      
+      // Use most recent payment status from logs, fallback to appointmentToEdit payment status
+      const mostRecentPaymentLog = paymentLogs && paymentLogs.length > 0 ? paymentLogs[paymentLogs.length - 1] : null;
+      const paymentStatusFromLog = mostRecentPaymentLog?.newStatus || appointmentToEdit.paymentStatus || 'unpaid';
+      setPaymentStatus(paymentStatusFromLog);
+      
       setPaymentMethod(appointmentToEdit.paymentMethod || '');
       // Reset the flag when opening for edit
       setStatusChangedByUser(0);
@@ -322,6 +816,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       // Only skip to payment step if explicitly marked as payment flow (e.g., "Pay Now" click)
       // Otherwise, always start with details step
       setModalStep(isPaymentFlow ? 'payment' : 'details');
+      setIsRescheduling(false);
     } else {
       // Reset form when creating new appointment
       setSelectedPatient(patients.length > 0 ? patients[0].id : '');
@@ -354,7 +849,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     : (appointmentToEdit?.price !== undefined && appointmentToEdit?.balance !== undefined)
       ? Math.max(0, appointmentToEdit.price - appointmentToEdit.balance)
       : 0;
-  const remainingBalance = Math.max(0, finalPrice - previouslyPaidAmount);
+  const discountedPrice = Math.max(0, finalPrice - Number(discount));
+  const remainingBalance = Math.max(0, discountedPrice - previouslyPaidAmount);
 
   // Handler for status changes that sets the flag
   const handleStatusChange = (newStatus: string) => {
@@ -539,6 +1035,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
           duration: Number(duration) || 30,
           price: finalPrice,
+          discount: Number(discount) || 0,
           notes,
           status: updateAppointmentStatus as any,
           paymentStatus: updatePaymentStatus as any,
@@ -602,19 +1099,60 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         const newApt = await addAppointment({
           patientId: selectedPatient,
           patientName: patients.find(p => p.id === selectedPatient)?.name || selectedPatient,
-          doctor: doctorName || '',
+          doctor: selectedDoctor || '',
           date: dateStr,
           time: selectedTime,
           type: getAppointmentTypeIndex(appointmentType),
           customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
           duration: Number(duration) || 30,
           price: finalPrice,
+          discount: Number(discount) || 0,
           notes,
           status: autoStatus as any,
           paymentStatus: paymentStatus as any,
           totalPaid: amountPaid,
           balance: newBalance,
         });
+
+        // Auto-cancel any overlapping pending appointments for the same doctor
+        if (newApt && dailyAppointments.length > 0) {
+          const timeToMinutes = (time: string): number => {
+            const [h, m] = time.split(':').map(Number);
+            return h * 60 + m;
+          };
+
+          const newSlotStart = timeToMinutes(selectedTime);
+          const newSlotEnd = newSlotStart + (Number(duration) || 30);
+
+          const pendingToCancel = dailyAppointments.filter((apt: any) => {
+            // Only cancel pending appointments
+            if (apt.status !== 'pending') return false;
+            // For the same doctor - use selectedDoctor (the actually selected doctor), not the prop
+            const currentDocNormalized = (selectedDoctor || '').replace(/^Dr\.\s+/i, "").toLowerCase();
+            const aptDocNormalized = apt.doctor.replace(/^Dr\.\s+/i, "").toLowerCase();
+            if (aptDocNormalized !== currentDocNormalized) return false;
+            // On the same date
+            if (apt.date !== dateStr) return false;
+            // That overlap with the new appointment
+            const aptStart = timeToMinutes(apt.time);
+            const aptEnd = aptStart + (apt.duration || 30);
+            return newSlotStart < aptEnd && newSlotEnd > aptStart;
+          });
+
+          // Cancel all overlapping pending appointments
+          for (const pendingApt of pendingToCancel) {
+            await updateAppointment(pendingApt.id, {
+              ...pendingApt,
+              status: 'cancelled',
+            });
+            console.log('[BookingModal] 🔄 Auto-cancelled overlapping pending appointment:', {
+              pendingId: pendingApt.id,
+              pendingPatient: pendingApt.patientName,
+              newAppointmentId: newApt.id,
+              reason: 'Overlapping time slot',
+            });
+          }
+        }
 
         // Log the new appointment details
         console.log('[BookingModal Payment] ✅ APPOINTMENT CREATED SUCCESSFULLY:', {
@@ -679,6 +1217,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   const handleClose = () => {
     setModalStep("details");
+    setIsRescheduling(false);
     setAmountToPay("");
     setCustomAppointmentTypeName("");
     setCustomPrice("0");
@@ -688,7 +1227,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   return (
     <>
       <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); else onOpenChange(true); }}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-4xl max-h-[90vh]">
           <DialogHeader>
             <div className="flex items-center justify-between mb-4">
               {/* Calendar icon on step 1, Back button on step 2 */}
@@ -761,13 +1300,59 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                     <div className="space-y-2">
                       <Label className="text-sm font-bold text-gray-700">Who is this appointment for?</Label>
                       <Select value={selectedPatient} onValueChange={setSelectedPatient} disabled={isLoadingPatients || isPatientReadonly}>
-                        <SelectTrigger className="h-11 rounded-lg border-gray-200">
+                        <SelectTrigger className={`h-11 rounded-lg transition-colors ${
+                          patientConflict
+                            ? 'border-red-500 bg-red-50 hover:bg-red-50'
+                            : 'border-gray-200'
+                        }`}>
                           <SelectValue placeholder={isLoadingPatients ? 'Loading...' : 'Select patient'} />
                         </SelectTrigger>
                         <SelectContent>
-                          {patients.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                          {patients.map(p => {
+                            const hasConflict = patientConflictSet.has(p.id);
+                            const conflictAppts = dailyAppointments.filter((apt: any) => String(apt.patientId) === String(p.id));
+                            const conflictInfo = conflictAppts.length > 0 && hasConflict 
+                              ? { 
+                                  doctor: conflictAppts[0]?.doctor || 'Another Doctor',
+                                  time: conflictAppts[0]?.time
+                                }
+                              : null;
+                            return (
+                              <SelectItem 
+                                key={p.id}
+                                value={p.id} 
+                                disabled={hasConflict}
+                                className={hasConflict ? 'opacity-50 cursor-not-allowed' : ''}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span>{p.name}</span>
+                                  {hasConflict && (
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <div 
+                                          className="pointer-events-auto" 
+                                          title={conflictInfo ? `Patient has appointment with ${conflictInfo.doctor} at ${conflictInfo.time}` : 'Has conflict'}
+                                        >
+                                          <AlertCircle className="h-4 w-4 text-red-500 flex-shrink-0" />
+                                        </div>
+                                      </TooltipTrigger>
+                                      <TooltipContent side="right" className="z-[9999] bg-red-700 border-red-600 text-white font-bold">
+                                        {conflictInfo ? `Patient has appointment with ${conflictInfo.doctor} at ${conflictInfo.time}` : 'Has conflict'}
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  )}
+                                </div>
+                              </SelectItem>
+                            );
+                          })}
                         </SelectContent>
                       </Select>
+                      {patientConflict && (
+                        <div className="flex items-center gap-2 text-xs text-red-600 font-semibold bg-red-50 p-2 rounded-lg">
+                          <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                          <span>{patientConflict}</span>
+                        </div>
+                      )}
                     </div>
 
                     <div className="space-y-2">
@@ -802,53 +1387,198 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                       </div>
                     )}
 
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label className="text-sm font-bold text-gray-700">Duration (mins)</Label>
-                        <Select value={duration} onValueChange={setDuration} disabled={isPatientReadonly}>
-                          <SelectTrigger className="h-11 rounded-lg border-gray-200">
-                            <SelectValue placeholder="Select duration" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="30">30</SelectItem>
-                            <SelectItem value="60">60</SelectItem>
-                            <SelectItem value="90">90</SelectItem>
-                            <SelectItem value="120">120</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        {user?.role === 'patient' && <p className="text-xs text-gray-500">Set based on appointment type</p>}
+                    {/* Price - Moved here with appointment type styling */}
+                    <div className="space-y-2">
+                      <Label className="text-sm font-bold text-gray-700">Price</Label>
+                      <div className="h-11 rounded-lg border border-gray-200 bg-white px-3 py-2.5 flex items-center">
+                        <span className="text-gray-400 text-sm font-bold mr-2">₱</span>
+                        {appointmentType === "Other" || (user?.role === "admin" || user?.role === "doctor") ? (
+                          <Input 
+                            type="number" 
+                            min="0" 
+                            step="1" 
+                            value={Number(customPrice) > 0 ? customPrice : basePrice} 
+                            onChange={(e: any) => {
+                              const newPrice = parseFloat(e.target.value) || 0;
+                              setCustomPrice(String(newPrice));
+                            }} 
+                            placeholder="Enter price"
+                            className="h-full px-2 rounded-lg border-0 text-sm w-full font-bold text-blue-600 focus:ring-1 focus:ring-blue-500 focus:outline-none" 
+                            disabled={isPatientReadonly || isEditMode}
+                          />
+                        ) : (
+                          <span className="text-sm font-bold text-blue-700 flex-1">{basePrice.toLocaleString()}</span>
+                        )}
                       </div>
-                      {appointmentType === "Other" ? (
-                        <div className="space-y-2">
-                          <Label className="text-sm font-bold text-gray-700">Price ($)</Label>
-                          <Input type="number" min="0" step="0.01" value={customPrice} onChange={(e: any) => setCustomPrice(e.target.value)} placeholder="0.00" className="h-11 rounded-lg border-gray-200" disabled={isPatientReadonly} />
-                        </div>
-                      ) : user?.role !== 'patient' ? (
-                        <div className="space-y-2">
-                          <Label className="text-sm font-bold text-gray-700">Discount</Label>
-                          <Input type="number" value={discount} onChange={(e: any) => setDiscount(e.target.value)} placeholder="0" className="h-11 rounded-lg border-gray-200" disabled={isPatientReadonly} />
-                        </div>
-                      ) : null}
                     </div>
 
+                    {/* Discount Input */}
                     <div className="space-y-2">
-                      <Label className="text-sm font-bold text-gray-700">Total Price</Label>
-                      <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
-                        <div className="text-lg font-bold text-blue-700">₱{finalPrice.toLocaleString()}</div>
-                        <p className="text-xs text-gray-500 mt-1">Base price for {appointmentType === "Other" ? (customAppointmentTypeName || "Other") : (appointmentType || 'selected type')}</p>
+                      <Label className="text-sm font-bold text-gray-700">Discount</Label>
+                      <div className="h-11 rounded-lg border border-gray-200 bg-white px-3 py-2.5 flex items-center">
+                        <span className="text-gray-400 text-sm font-bold mr-2">₱</span>
+                        <Input 
+                          type="number" 
+                          min="0" 
+                          step="1" 
+                          value={discount} 
+                          onChange={(e: any) => setDiscount(e.target.value)} 
+                          placeholder="Enter discount amount"
+                          className="h-full px-2 rounded-lg border-0 text-sm w-full font-bold text-orange-600 focus:ring-1 focus:ring-orange-500 focus:outline-none" 
+                          disabled={isPatientReadonly || isEditMode}
+                        />
                       </div>
+                      {Number(discount) > 0 && (
+                        <div className="flex items-center gap-2 text-xs text-orange-600 font-semibold">
+                          <span>💰 Savings: ₱{Number(discount).toLocaleString()}</span>
+                        </div>
+                      )}
                     </div>
+
+                    {/* Final Price Display with Strikethrough if Discounted */}
+                    {Number(discount) > 0 && (
+                      <div className="space-y-2">
+                        <Label className="text-sm font-bold text-gray-700">Final Price</Label>
+                        <div className="p-3 bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg border-2 border-green-200 space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-gray-500">Original:</span>
+                            <span className="text-base font-bold text-gray-400 line-through">₱{finalPrice.toLocaleString()}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-lg">
+                            <span className="font-bold text-gray-700">Now:</span>
+                            <span className="text-2xl font-black text-green-600">₱{Math.max(0, finalPrice - Number(discount)).toLocaleString()}</span>
+                            <span className="text-xs font-bold bg-green-200 text-green-800 px-2 py-0.5 rounded-full">SAVE {((Number(discount) / finalPrice) * 100).toFixed(0)}%</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-2">
-                    <Label className="text-sm font-bold text-gray-700">Selected Schedule</Label>
-                    <div className="p-3 bg-white rounded-lg border border-gray-100 shadow-sm space-y-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-3 text-sm text-gray-700">
-                          <CalendarIcon className="h-4 w-4 text-violet-500" />
-                          <div className="font-medium">{selectedDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</div>
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm font-bold text-gray-700">Selected Schedule</Label>
+                    </div>
+
+                    <div className="p-4 bg-white rounded-lg border border-gray-100 shadow-sm space-y-3">
+                      {/* Date - Clickable Button */}
+                      <div className="flex items-center justify-between gap-3 pb-3 border-b border-gray-100">
+                        <div className="flex items-center gap-3">
+                          <CalendarIcon className="h-4 w-4 text-blue-600" />
+                          <span className="text-xs font-bold text-gray-600 uppercase">Date</span>
                         </div>
-                        {/* Status - Dropdown for Admin/Doctor, Badge for Patient */}
+                        <button
+                          onClick={() => setIsDatePickerOpen(true)}
+                          className="px-3 py-1.5 rounded-lg border border-gray-300 hover:border-blue-400 hover:bg-blue-50 text-sm font-semibold text-gray-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-gray-300 disabled:hover:bg-white"
+                          disabled={isPatientReadonly || !selectedDoctor}
+                        >
+                          {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </button>
+                      </div>
+
+                      {/* Time - Clickable Button */}
+                      <div className="flex items-center justify-between gap-3 pb-3 border-b border-gray-100">
+                        <div className="flex items-center gap-3">
+                          <Clock className="h-4 w-4 text-blue-600" />
+                          <span className="text-xs font-bold text-gray-600 uppercase">Time</span>
+                        </div>
+                        <button
+                          onClick={() => setIsTimePickerOpen(true)}
+                          className="px-3 py-1.5 rounded-lg border border-gray-300 hover:border-blue-400 hover:bg-blue-50 text-sm font-semibold text-gray-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-gray-300 disabled:hover:bg-white"
+                          disabled={isPatientReadonly || !selectedDoctor}
+                        >
+                          {selectedTime ? formatTimeTo12h(selectedTime) : '—'}
+                        </button>
+                      </div>
+
+                      {/* Doctor - Select Dropdown */}
+                      <div className="flex items-center justify-between gap-3 pb-3 border-b border-gray-100">
+                        <div className="flex items-center gap-3">
+                          <Stethoscope className="h-4 w-4 text-blue-600" />
+                          <span className="text-xs font-bold text-gray-600 uppercase">Doctor</span>
+                        </div>
+                        <Select value={selectedDoctor} onValueChange={(newDoctor) => {
+                          setSelectedDoctor(newDoctor);
+                        }} disabled={isPatientReadonly}>
+                          <SelectTrigger className="h-9 w-auto rounded-lg border-gray-300 text-sm font-semibold px-3 bg-white hover:bg-gray-50 transition-colors">
+                            <SelectValue placeholder="Select doctor" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {doctors.map((doc) => (
+                              <SelectItem key={doc.id} value={doc.name}>
+                                {doc.name.replace(/^Dr\.\s+/i, "Dr. ")}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Duration - Integrated in schedule card */}
+                      <div className="pb-3 border-b border-gray-100">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <Clock className="h-4 w-4 text-blue-600" />
+                            <span className="text-xs font-bold text-gray-600 uppercase">Duration</span>
+                          </div>
+                          <Select value={duration} onValueChange={setDuration} disabled={isPatientReadonly}>
+                            <SelectTrigger className={`h-9 w-auto rounded-lg text-sm font-semibold px-3 transition-colors ${
+                              durationConflict 
+                                ? 'border-red-500 bg-red-50 hover:bg-red-50 text-red-700' 
+                                : 'border-gray-300 bg-white hover:bg-gray-50 text-gray-900'
+                            }`}>
+                              <SelectValue>
+                                {duration ? `${duration} Mins` : 'Select Duration'}
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent className="overflow-visible">
+                              {[30, 60, 90, 120].map(dur => {
+                                const hasConflict = !isDurationAvailable(dur);
+                                const tooltipText = getDurationTooltipText(dur);
+                                return (
+                                  <Tooltip key={dur}>
+                                    <TooltipTrigger asChild>
+                                      <div 
+                                        className="w-full" 
+                                        title={hasConflict ? tooltipText : undefined}
+                                      >
+                                        <SelectItem 
+                                          value={String(dur)} 
+                                          disabled={hasConflict}
+                                          className={`${hasConflict ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                        >
+                                          <div className="flex items-center gap-2">
+                                            <span>{dur} Mins</span>
+                                            {hasConflict && (
+                                              <AlertCircle className="h-4 w-4 text-red-500 flex-shrink-0" />
+                                            )}
+                                          </div>
+                                        </SelectItem>
+                                      </div>
+                                    </TooltipTrigger>
+                                    {hasConflict && (
+                                      <TooltipContent side="right" align="center" sideOffset={10} className="z-[9999] bg-red-700 border-red-600 text-white font-bold px-3 py-2 shadow-xl">
+                                        {tooltipText}
+                                      </TooltipContent>
+                                    )}
+                                  </Tooltip>
+                                );
+                              })}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {durationConflict && (
+                          <div className="mt-2 flex items-center gap-2 text-xs text-red-600 font-semibold bg-red-50 p-2 rounded-lg">
+                            <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                            <span>{durationConflict}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Status - Dropdown for Admin/Doctor, Badge for Patient */}
+                      <div className="flex items-center justify-between gap-3 pt-2">
+                        <div className="flex items-center gap-3">
+                          <Award className="h-4 w-4 text-blue-600" />
+                          <span className="text-xs font-bold text-gray-600 uppercase">Status</span>
+                        </div>
                         {user?.role === "admin" || user?.role === "doctor" ? (
                           <Select value={appointmentStatus} onValueChange={handleStatusChange}>
                             <SelectTrigger className={`h-8 px-3 rounded-full text-xs font-bold border-0 w-auto ${
@@ -875,17 +1605,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                             {getStatusLabel(appointmentStatus, appointmentStatuses)}
                           </span>
                         )}
-                      </div>
-
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-3 text-sm text-gray-700">
-                          <Clock className="h-4 w-4 text-violet-500" />
-                          <div className="font-medium">{selectedTime ? formatTimeTo12h(selectedTime) : '—'}</div>
-                        </div>
-                        <div className="flex items-center gap-3 text-sm text-gray-700">
-                          <Stethoscope className="h-4 w-4 text-violet-500" />
-                          <div className="font-medium">Dr. {displayDoctor}</div>
-                        </div>
                       </div>
                     </div>
                   </div>
@@ -1009,8 +1728,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                     onClick={() => {
                                       // Get historical snapshot
                                       const historicalData = (log.logType === 'appointment' && log.newState && Object.keys(log.newState).length > 3) 
-                                        ? { ...appointmentToEdit, ...log.newState, changedAt: log.changedAt, changedByName: (log as any).changedByName } 
-                                        : { ...appointmentToEdit, ...log.previousState, changedAt: log.changedAt, changedByName: (log as any).changedByName };
+                                        ? { ...appointmentToEdit, ...log.newState, changedAt: log.changedAt, changedByName: (log as any).changedByName, cancellationReason: log.notes } 
+                                        : { ...appointmentToEdit, ...log.previousState, changedAt: log.changedAt, changedByName: (log as any).changedByName, cancellationReason: log.notes };
                                       
                                       console.log('[HistoryLog] Opening historical snapshot:', historicalData.id);
                                       setSnapshotToView(historicalData);
@@ -1034,7 +1753,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                     </p>
                                     <p className="text-[10px] text-gray-500 italic">
                                       {user?.role === 'patient'
-                                        ? `Your balance is now ₱${(log.newBalance || 0).toLocaleString()}`
+                                        ? `Your balance is now ₱${(log.newBalance || 0).toLocaleString()} ${log.changedByName ? `• Recorded by ${log.changedByName}` : ''}`
                                         : `Account marked as ${log.paymentStatus?.replace('-', ' ') || 'paid'} by ${log.changedByName || log.changedBy} • Balance: ₱${(log.newBalance || 0).toLocaleString()}`
                                       }
                                     </p>
@@ -1047,6 +1766,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                         <p className="text-gray-600">
                                           Status is <span className="font-bold text-purple-700 uppercase">{log.newState?.status || log.previousState?.status || 'scheduled'}</span>
                                           {log.newState?.paymentStatus && ` • Payment: ${log.newState.paymentStatus.replace('-', ' ')}`}
+                                          {log.changedByName && ` • By: ${log.changedByName}`}
                                         </p>
                                       </div>
                                     ) : (
@@ -1062,6 +1782,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                             Paid: <span className="font-bold text-gray-700">₱{(log.amount || 0).toLocaleString()}</span>
                                           </p>
                                         )}
+                                        <p className="text-gray-500">
+                                          By: <span className="font-bold text-gray-700">{log.changedByName || log.changedBy}</span>
+                                        </p>
                                       </div>
                                     )}
 
@@ -1131,8 +1854,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 ) : (
                   <Button 
                     onClick={handleConfirmBooking} 
-                    disabled={isBooking || !appointmentType || !selectedPatient} 
-                    className="bg-blue-600 hover:bg-blue-700 text-white gap-2 h-11 px-8 rounded-lg shadow-lg shadow-blue-100"
+                    disabled={isBooking || !appointmentType || !selectedPatient || !!durationConflict || !!patientConflict} 
+                    title={durationConflict ? "Please resolve the scheduling conflict before proceeding" : patientConflict ? "Patient has a conflicting appointment" : ""}
+                    className={`gap-2 h-11 px-8 rounded-lg shadow-lg ${
+                      durationConflict || patientConflict
+                        ? "bg-gray-300 hover:bg-gray-300 text-gray-500 cursor-not-allowed"
+                        : "bg-blue-600 hover:bg-blue-700 text-white"
+                    }`}
                   >
                     {isBooking ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Next: Payment'}
                   </Button>
@@ -1157,18 +1885,36 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   </div>
                   <div className="flex justify-between items-center pt-3 border-t">
                     <span className="font-bold">Total Price:</span>
-                    <span className="font-bold text-lg text-gray-900">₱{finalPrice.toLocaleString()}</span>
+                    {Number(discount) > 0 ? (
+                      <span className="font-bold text-lg text-gray-400 line-through">₱{finalPrice.toLocaleString()}</span>
+                    ) : (
+                      <span className="font-bold text-lg text-gray-900">₱{finalPrice.toLocaleString()}</span>
+                    )}
                   </div>
+                  {Number(discount) > 0 && (
+                    <>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-gray-600">Discount:</span>
+                        <span className="text-sm font-semibold text-orange-600">-₱{Number(discount).toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between items-center pt-2 border-t">
+                        <span className="font-bold">Final Price:</span>
+                        <span className="font-bold text-lg text-green-600">₱{Math.max(0, finalPrice - Number(discount)).toLocaleString()}</span>
+                      </div>
+                    </>
+                  )}
                   {appointmentToEdit && previouslyPaidAmount > 0 && (
                     <div className="flex justify-between items-center">
                       <span className="text-sm text-gray-600">Already Paid:</span>
                       <span className="text-sm font-semibold text-green-600">₱{previouslyPaidAmount.toLocaleString()}</span>
                     </div>
                   )}
-                  <div className="flex justify-between items-center">
-                    <span className="font-bold">Remaining Balance:</span>
-                    <span className="font-bold text-lg text-blue-600">₱{remainingBalance.toLocaleString()}</span>
-                  </div>
+                  {isEditMode && (
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold">Remaining Balance:</span>
+                      <span className="font-bold text-lg text-blue-600">₱{remainingBalance.toLocaleString()}</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -1377,8 +2123,20 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 <div className="border-t border-blue-100 pt-2 mt-2">
                   <div className="flex justify-between font-bold">
                     <span>Total Price:</span>
-                    <span className="text-blue-700">₱{finalPrice.toLocaleString()}</span>
+                    <span className={`${Number(discount) > 0 ? 'text-gray-400 line-through' : 'text-blue-700'}`}>₱{finalPrice.toLocaleString()}</span>
                   </div>
+                  {Number(discount) > 0 && (
+                    <>
+                      <div className="flex justify-between text-orange-600 font-semibold">
+                        <span>Discount:</span>
+                        <span>-₱{Number(discount).toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between text-green-600 font-bold text-lg">
+                        <span>Final Price:</span>
+                        <span>₱{(finalPrice - Number(discount)).toLocaleString()}</span>
+                      </div>
+                    </>
+                  )}
                 </div>
                 {previouslyPaidAmount > 0 && (
                   <div className="flex justify-between text-green-600 font-semibold">
@@ -1392,7 +2150,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 </div>
                 <div className="flex justify-between text-blue-700 font-semibold">
                   <span>Remaining Balance:</span>
-                  <span>₱{Math.max(0, finalPrice - previouslyPaidAmount - (parseFloat(amountToPay) || 0)).toLocaleString()}</span>
+                  <span>₱{Math.max(0, (finalPrice - Number(discount)) - previouslyPaidAmount - (parseFloat(amountToPay) || 0)).toLocaleString()}</span>
                 </div>
               </div>
             </div>
@@ -1418,6 +2176,30 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         }}
         appointmentSnapshot={snapshotToView}
         logDate={snapshotToView?.changedAt || new Date().toISOString()}
+      />
+
+      {/* Date Picker Modal */}
+      <DatePickerModal
+        open={isDatePickerOpen}
+        onOpenChange={setIsDatePickerOpen}
+        selectedDate={selectedDate}
+        onDateSelect={setSelectedDate}
+        doctorName={selectedDoctor}
+        selectedTime={selectedTime}
+        duration={duration}
+      />
+
+      {/* Time Picker Modal */}
+      <TimePickerModal
+        open={isTimePickerOpen}
+        onOpenChange={setIsTimePickerOpen}
+        selectedDate={selectedDate}
+        selectedTime={selectedTime}
+        doctorName={selectedDoctor}
+        duration={duration}
+        onTimeSelect={setSelectedTime}
+        onDateChange={setSelectedDate}
+        excludeAppointmentId={appointmentToEdit?.id}
       />
     </>
    );

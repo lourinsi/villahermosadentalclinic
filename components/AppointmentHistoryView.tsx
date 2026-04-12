@@ -102,6 +102,14 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
             </div>
           </div>
 
+          {/* Cancellation Reason - shown when appointment is cancelled */}
+          {appointmentSnapshot.status === 'cancelled' && appointmentSnapshot.cancellationReason && (
+            <div className="bg-red-50 p-3 rounded-lg border border-red-200">
+              <Label className="text-[10px] uppercase text-red-600 font-bold tracking-wider">Cancellation Reason</Label>
+              <p className="mt-1 text-sm text-red-700 font-medium">{appointmentSnapshot.cancellationReason}</p>
+            </div>
+          )}
+
           <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-3">
             <div className="flex justify-between items-center">
               <div className="flex items-center gap-2">
@@ -127,7 +135,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
           <div className="bg-white p-3 rounded-lg border border-slate-200">
             <Label className="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Notes</Label>
             <p className="mt-1 text-sm text-slate-700 whitespace-pre-wrap italic">
-              {appointmentSnapshot.notes || "—"}
+              {appointmentSnapshot.notes || (appointmentSnapshot.status === 'cancelled' && appointmentSnapshot.cancellationReason ? appointmentSnapshot.cancellationReason : "—")}
             </p>
           </div>
         </div>

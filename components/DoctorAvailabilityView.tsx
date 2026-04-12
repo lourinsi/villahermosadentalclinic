@@ -18,10 +18,12 @@ import {
   ChevronRight,
   Award, 
   Mail,
+  Eye,
 } from "lucide-react";
 import { TIME_SLOTS } from "@/lib/time-slots";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import ViewMode from "@/components/viewMode";
 import { toast } from "sonner";
 
@@ -120,7 +122,11 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
     });
     
     // For checking actual availability (blocked slots)
-    const dayAppointmentsForAvailability = dayAppointmentsForDisplay.filter(apt => apt.status !== 'cancelled');
+    // PENDING appointments do NOT block availability - they can be overridden
+    // Only scheduled, reserved, tentative, and completed block availability
+    const dayAppointmentsForAvailability = dayAppointmentsForDisplay.filter(apt => 
+      apt.status !== 'cancelled' && apt.status !== 'pending'
+    );
     
     const now = new Date();
     const todayStr = formatDateToYYYYMMDD(now);
@@ -149,6 +155,17 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
       let isOtherDoctor = false;
       let slotAppointment: Appointment | undefined;
       let cancelledAppointment: Appointment | undefined;
+      let pendingAppointments: Appointment[] = [];
+      
+      // Collect pending appointments that overlap this slot (they don't block, but we'll show the count)
+      for (const apt of dayAppointmentsForDisplay.filter(a => a.status === 'pending')) {
+        const aptStart = timeToMinutes(apt.time);
+        const aptEnd = aptStart + (apt.duration || 30);
+        
+        if (slotMinutes < aptEnd && slotEndMinutes > aptStart) {
+          pendingAppointments.push(apt);
+        }
+      }
       
       // Check for active appointments that actually block availability
       for (const apt of dayAppointmentsForAvailability) {
@@ -168,7 +185,7 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
             isOtherDoctor = true;
           }
 
-          if (apt.status === 'tentative' || apt.status === 'pending' || apt.status === 'reserved' || apt.paymentStatus === 'half-paid') {
+          if (apt.status === 'tentative' || apt.status === 'reserved' || apt.paymentStatus === 'half-paid') {
             isTentative = true;
           }
           break;
@@ -198,6 +215,7 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
         isCancelled,
         isOtherDoctor,
         isPast,
+        pendingAppointments,
         appointment: slotAppointment || cancelledAppointment
       };
     });
@@ -209,7 +227,12 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
   };
 
   const handleSlotClick = async (slot: any) => {
-    if (!slot.isAvailable && slot.isBooked && slot.appointment) {
+    // If slot is available (including slots with pending appointments that can be overridden),
+    // always open the booking modal
+    if (slot.isAvailable) {
+      openPatientBookingModal(selectedDate, slot.time, doctorName);
+    } else if (!slot.isAvailable && slot.isBooked && slot.appointment) {
+      // Only open edit modal for actually booked/blocked slots (not pending)
       if (portal === "patient") {
         // Patient can only view their own appointments
         if (isOwnAppointment(slot.appointment)) {
@@ -232,8 +255,6 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
         // Admin can view all appointments
         openEditModal(slot.appointment);
       }
-    } else if (slot.isAvailable) {
-      openPatientBookingModal(selectedDate, slot.time, doctorName);
     }
   };
 
@@ -298,21 +319,57 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
                   >
                     <div className="flex items-center justify-between">
                       <span>{slot.time}</span>
-                      <Badge 
-                        variant="secondary" 
-                        className={`text-[10px] font-bold ${
-                          slot.isPast ? 'bg-gray-200 text-gray-600' :
-                          slot.isAvailable ? 'bg-emerald-100 text-emerald-700' :
-                          slot.isOtherDoctor ? 'bg-blue-100 text-blue-700' :
-                          slot.isTentative ? 'bg-yellow-100 text-yellow-700' :
-                          'bg-emerald-600 text-white'
-                        }`}
-                      >
-                        {slot.isPast ? 'PASSED' : 
-                          (slot.isAvailable ? 'OPEN' : 
-                          (slot.isOtherDoctor ? 'OTHER APPOINTMENT' : 
-                          (slot.isTentative ? 'RESERVED' : 'BOOKED')))}
-                      </Badge>
+                      <div className="flex items-center gap-1">
+                        <Badge 
+                          variant="secondary" 
+                          className={`text-[10px] font-bold ${
+                            slot.isPast ? 'bg-gray-200 text-gray-600' :
+                            slot.isAvailable ? 'bg-emerald-100 text-emerald-700' :
+                            slot.isOtherDoctor ? 'bg-blue-100 text-blue-700' :
+                            slot.isTentative ? 'bg-yellow-100 text-yellow-700' :
+                            'bg-emerald-600 text-white'
+                          }`}
+                        >
+                          {slot.isPast ? 'PASSED' : 
+                            (slot.isAvailable ? 'OPEN' : 
+                            (slot.isOtherDoctor ? 'OTHER APPOINTMENT' : 
+                            (slot.isTentative ? 'RESERVED' : 'BOOKED')))}
+                        </Badge>
+                        {slot.isAvailable && slot.pendingAppointments.length > 0 && (
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px] font-bold cursor-pointer hover:bg-emerald-700 transition-colors">
+                                  {slot.pendingAppointments.length}
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="max-w-xs">
+                                <div className="space-y-2">
+                                  <p className="font-semibold text-sm">Pending Appointments:</p>
+                                  {slot.pendingAppointments.map((apt, idx) => (
+                                    <div key={idx} className="text-xs border-t border-emerald-700 pt-1 flex items-center justify-between">
+                                      <div>
+                                        <p className="font-medium">{apt.patientName}</p>
+                                        <p className="text-emerald-200">{apt.time} - {apt.duration} min</p>
+                                      </div>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          openEditModal(apt);
+                                        }}
+                                        className="ml-2 p-1 hover:bg-emerald-600 rounded transition-colors"
+                                        title="View appointment"
+                                      >
+                                        <Eye size={14} className="text-emerald-200" />
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        )}
+                      </div>
                     </div>
                   </button>
                 ))}
