@@ -4,6 +4,8 @@ import { Button } from "./ui/button";
 import { Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { useAuth } from "@/hooks/useAuth";
+import { useAppointments } from "@/hooks/useAppointments";
 import { CalendarView } from "./CalendarView";
 import { Suspense } from "react";
 
@@ -15,7 +17,67 @@ interface CalendarPageLayoutProps {
 
 export function CalendarPageLayout({ portal, doctorName, defaultStatusFilter }: CalendarPageLayoutProps) {
   const { openCreateModal } = useAppointmentModal();
+  const { user } = useAuth();
+  const { appointments } = useAppointments();
   const router = useRouter();
+
+  // Find next available time slot for doctor
+  const getNextAvailableSlot = () => {
+    const now = new Date();
+    const doctorName = user?.username;
+    if (!doctorName) return { date: new Date(), time: undefined };
+
+    // Start checking from tomorrow at 8:00 AM
+    const nextDay = new Date(now);
+    nextDay.setDate(nextDay.getDate() + 1);
+    nextDay.setHours(8, 0, 0, 0);
+
+    // Search for next 30 days
+    for (let i = 0; i < 30; i++) {
+      const checkDate = new Date(nextDay);
+      checkDate.setDate(checkDate.getDate() + i);
+
+      // Skip weekends (0 = Sunday, 6 = Saturday)
+      if (checkDate.getDay() === 0 || checkDate.getDay() === 6) continue;
+
+      // Check each hour from 8 AM to 5 PM
+      for (let hour = 8; hour < 17; hour++) {
+        for (let min of [0, 30]) {
+          const testTime = `${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+          const dateStr = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`;
+
+          // Check if this slot is available (no conflicting appointments)
+          const hasConflict = appointments.some(apt => {
+            const aptDoctorNorm = (apt.doctor || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim();
+            const doctorNorm = doctorName.replace(/^Dr\.\s+/i, "").toLowerCase().trim();
+            
+            if (aptDoctorNorm !== doctorNorm || apt.date !== dateStr) return false;
+            if ((apt.status || "").toLowerCase() === "pending") return false;
+
+            const [aptHour, aptMin] = apt.time.split(':').map(Number);
+            const aptDuration = apt.duration || 30;
+            const aptStart = new Date(checkDate);
+            aptStart.setHours(aptHour, aptMin);
+            const aptEnd = new Date(aptStart);
+            aptEnd.setMinutes(aptEnd.getMinutes() + aptDuration);
+
+            const testStart = new Date(checkDate);
+            testStart.setHours(hour, min);
+            const testEnd = new Date(testStart);
+            testEnd.setMinutes(testEnd.getMinutes() + 30);
+
+            return testStart < aptEnd && testEnd > aptStart;
+          });
+
+          if (!hasConflict) {
+            return { date: checkDate, time: testTime };
+          }
+        }
+      }
+    }
+
+    return { date: new Date(), time: undefined };
+  };
 
   // Determine title, button text, and button action based on portal
   const getTitleAndAction = () => {
@@ -27,13 +89,15 @@ export function CalendarPageLayout({ portal, doctorName, defaultStatusFilter }: 
           buttonColor: "bg-violet-600 hover:bg-violet-700",
           onClick: () => openCreateModal(new Date()),
         };
-      case "doctor":
+      case "doctor": {
+        const { date, time } = getNextAvailableSlot();
         return {
           title: "My Schedule",
           buttonText: "New Appointment",
           buttonColor: "bg-violet-600 hover:bg-violet-700",
-          onClick: () => openCreateModal(new Date()),
+          onClick: () => openCreateModal(date, time, user?.username),
         };
+      }
       case "patient":
         return {
           title: "My Appointments",

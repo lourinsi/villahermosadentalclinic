@@ -28,7 +28,8 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
     closeCreateModal,
     selectedAppointment,
     newAppointmentDate,
-    newAppointmentTime
+    newAppointmentTime,
+    newAppointmentDoctorName
   } = useAppointmentModal();
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
@@ -153,6 +154,7 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
           appointmentToEdit={selectedAppointment}
           defaultDate={newAppointmentDate}
           defaultTime={newAppointmentTime}
+          doctorName={newAppointmentDoctorName}
         />
       </div>
     </div>

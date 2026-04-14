@@ -7,6 +7,7 @@ import { Users, Calendar, DollarSign, AlertCircle, TrendingUp, Clock, Heart } fr
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 import { Badge } from "./ui/badge";
+import { getNextAvailableSlot } from "../lib/appointment-utils";
 import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal } from "../lib/utils";
@@ -492,7 +493,10 @@ export function Dashboard({ portal }: { portal?: string }) {
               <Button
                 variant="outline"
                 className="group relative flex items-center justify-between p-6 h-auto border-gray-100 hover:border-blue-200 hover:bg-blue-50/50 rounded-2xl transition-all duration-300 overflow-hidden"
-                onClick={() => openCreateModal()}
+                onClick={() => {
+                  const slot = getNextAvailableSlot(appointments);
+                  openCreateModal(slot.date, slot.time);
+                }}
               >
                 <div className="flex items-center space-x-4 relative z-10">
                   <div className="p-3 rounded-xl bg-blue-100 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors duration-300">

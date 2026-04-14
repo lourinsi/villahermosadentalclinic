@@ -42,6 +42,9 @@ import { RecentTransaction } from "../lib/finance-types";
 import { DentalChart } from "./DentalChart";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
+import { useDoctors } from "../hooks/useDoctors";
+import { useAuth } from "@/hooks/useAuth";
+import { getNextAvailableSlot } from "../lib/appointment-utils";
 
 // dummy data removed per request
 
@@ -113,6 +116,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   const [isSaving, setIsSaving] = useState(false);
   const patientDetailsRef = useRef<{ save: () => Promise<boolean>; changedFields: Record<string, { old: any; new: any }> } | null>(null);
   const itemsPerPage = 10;
+  const { user } = useAuth();
   const { openScheduleModal, openAddPatientModal, refreshPatients, refreshTrigger, appointments } = useAppointmentModal();
 
   // Generic confirm dialog state (reusable across this component)
@@ -125,6 +129,9 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   // BookingModal state
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
   const [selectedAppointmentToEdit, setSelectedAppointmentToEdit] = useState<Appointment | null>(null);
+  const [nextAvailableDate, setNextAvailableDate] = useState<Date | undefined>(undefined);
+  const [nextAvailableTime, setNextAvailableTime] = useState<string | undefined>(undefined);
+  const [nextAvailableDoctor, setNextAvailableDoctor] = useState<string>("");
 
   // State to hold doctor's appointments (for filtering patients by doctor)
   const [doctorAppointments, setDoctorAppointments] = useState<Appointment[]>([]);
@@ -532,7 +539,19 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
                             const patientId = String(patient.id || '').trim();
                             console.log("Schedule button clicked. Patient:", patient);
                             console.log("Patient ID value:", patientId, "Type:", typeof patientId);
-                            openScheduleModal(patient.name || '', patient.id);
+                            
+                            // Find next available slot
+                            const slot = getNextAvailableSlot(doctorFilter ? doctorAppointments : appointments, doctorFilter);
+                            setNextAvailableDate(slot.date);
+                            setNextAvailableTime(slot.time);
+                            // For doctor role, pre-select their own name; for admin, leave empty
+                            if (user?.role === 'doctor') {
+                              setNextAvailableDoctor(user?.username || "");
+                            } else {
+                              setNextAvailableDoctor("");
+                            }
+                            setSelectedAppointmentToEdit(null); // New appointment
+                            setBookingModalOpen(true);
                           }}
                         >
                           <Calendar className="h-3 w-3 mr-1" />
@@ -744,13 +763,22 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
       <BookingModal
         open={bookingModalOpen}
         onOpenChange={setBookingModalOpen}
+        defaultDate={nextAvailableDate}
+        defaultTime={nextAvailableTime}
+        doctorName={nextAvailableDoctor}
         appointmentToEdit={selectedAppointmentToEdit}
         onBooked={() => {
           setSelectedAppointmentToEdit(null);
+          setNextAvailableDate(undefined);
+          setNextAvailableTime(undefined);
+          setNextAvailableDoctor("");
           refreshPatients();
         }}
         onDeleted={() => {
           setSelectedAppointmentToEdit(null);
+          setNextAvailableDate(undefined);
+          setNextAvailableTime(undefined);
+          setNextAvailableDoctor("");
           refreshPatients();
         }}
       />

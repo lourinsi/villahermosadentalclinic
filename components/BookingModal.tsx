@@ -415,6 +415,61 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     return 'Conflicts with another appointment';
   }, [getDurationConflictInfo]);
 
+  // Check if current date/time is in the past
+  const isSelectedDateTimePast = useCallback((): boolean => {
+    if (!selectedTime || !selectedDate) return false;
+    
+    const [hours, minutes] = selectedTime.split(':').map(Number);
+    const selectedDateTime = new Date(selectedDate);
+    selectedDateTime.setHours(hours, minutes, 0, 0);
+    
+    const now = new Date();
+    return selectedDateTime < now;
+  }, [selectedTime, selectedDate]);
+
+  // Check if current date is in the past
+  const isSelectedDatePast = useCallback((): boolean => {
+    if (!selectedDate) return false;
+    
+    const dateOnly = new Date(selectedDate);
+    dateOnly.setHours(0, 0, 0, 0);
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    return dateOnly < today;
+  }, [selectedDate]);
+
+  // Check if current date/time/duration selection has a conflict or is in the past
+  const getCurrentScheduleConflict = useCallback((): boolean => {
+    if (!selectedTime || !selectedDate || !selectedDoctor) return false;
+    
+    // Past time takes priority
+    if (isSelectedDateTimePast()) {
+      return true;
+    }
+    
+    const durationMins = parseInt(duration, 10) || 30;
+    return checkDurationConflict(selectedTime, durationMins);
+  }, [selectedTime, selectedDate, selectedDoctor, duration, isSelectedDateTimePast, checkDurationConflict]);
+
+  // Get the reason why date/time is invalid (past, booked, or reserved)
+  const getScheduleConflictReason = useCallback((): string => {
+    if (!selectedTime || !selectedDate || !selectedDoctor) return '';
+    
+    // Past time takes priority
+    if (isSelectedDateTimePast()) {
+      return 'past';
+    }
+    
+    const durationMins = parseInt(duration, 10) || 30;
+    if (checkDurationConflict(selectedTime, durationMins)) {
+      return 'booked'; // Could be booked or reserved, we'll say booked
+    }
+    
+    return '';
+  }, [selectedTime, selectedDate, selectedDoctor, duration, isSelectedDateTimePast, checkDurationConflict]);
+
   // Update conflict status when duration changes
   useEffect(() => {
     if (!selectedTime || !selectedDoctor) {
@@ -1466,13 +1521,30 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                           <CalendarIcon className="h-4 w-4 text-blue-600" />
                           <span className="text-xs font-bold text-gray-600 uppercase">Date</span>
                         </div>
-                        <button
-                          onClick={() => setIsDatePickerOpen(true)}
-                          className="px-3 py-1.5 rounded-lg border border-gray-300 hover:border-blue-400 hover:bg-blue-50 text-sm font-semibold text-gray-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-gray-300 disabled:hover:bg-white"
-                          disabled={isPatientReadonly || !selectedDoctor}
-                        >
-                          {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                        </button>
+                        {isSelectedDatePast() && !isPatientReadonly ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                onClick={() => setIsDatePickerOpen(true)}
+                                className="px-3 py-1.5 rounded-lg border border-red-500 bg-red-50 hover:bg-red-50 text-sm font-semibold text-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-gray-300 disabled:hover:bg-white"
+                                disabled={isPatientReadonly || !selectedDoctor}
+                              >
+                                {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" align="center" sideOffset={10} className="z-[9999] bg-red-700 border-red-600 text-white font-bold px-3 py-2 shadow-xl">
+                              ⚠️ This date is in the past
+                            </TooltipContent>
+                          </Tooltip>
+                        ) : (
+                          <button
+                            onClick={() => setIsDatePickerOpen(true)}
+                            className="px-3 py-1.5 rounded-lg border border-gray-300 hover:border-blue-400 hover:bg-blue-50 text-sm font-semibold text-gray-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-gray-300 disabled:hover:bg-white"
+                            disabled={isPatientReadonly || !selectedDoctor}
+                          >
+                            {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          </button>
+                        )}
                       </div>
 
                       {/* Time - Clickable Button */}
@@ -1481,35 +1553,59 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                           <Clock className="h-4 w-4 text-blue-600" />
                           <span className="text-xs font-bold text-gray-600 uppercase">Time</span>
                         </div>
-                        <button
-                          onClick={() => setIsTimePickerOpen(true)}
-                          className="px-3 py-1.5 rounded-lg border border-gray-300 hover:border-blue-400 hover:bg-blue-50 text-sm font-semibold text-gray-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-gray-300 disabled:hover:bg-white"
-                          disabled={isPatientReadonly || !selectedDoctor}
-                        >
-                          {selectedTime ? formatTimeTo12h(selectedTime) : '—'}
-                        </button>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              onClick={() => setIsTimePickerOpen(true)}
+                              className={`px-3 py-1.5 rounded-lg border text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                                getCurrentScheduleConflict() && !isPatientReadonly
+                                  ? 'border-red-500 bg-red-50 hover:bg-red-50 text-red-700'
+                                  : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50 text-gray-900'
+                              } disabled:hover:border-gray-300 disabled:hover:bg-white`}
+                              disabled={isPatientReadonly || !selectedDoctor}
+                            >
+                              {selectedTime ? formatTimeTo12h(selectedTime) : '—'}
+                            </button>
+                          </TooltipTrigger>
+                          {getCurrentScheduleConflict() && !isPatientReadonly && (
+                            <TooltipContent side="top" align="center" sideOffset={10} className="z-[9999] bg-red-700 border-red-600 text-white font-bold px-3 py-2 shadow-xl">
+                              {getScheduleConflictReason() === 'past' 
+                                ? '⚠️ This date/time is in the past'
+                                : '⚠️ This date/time is booked or reserved'
+                              }
+                            </TooltipContent>
+                          )}
+                        </Tooltip>
                       </div>
 
-                      {/* Doctor - Select Dropdown */}
+                      {/* Doctor - Static for doctor role, dropdown for admin */}
                       <div className="flex items-center justify-between gap-3 pb-3 border-b border-gray-100">
                         <div className="flex items-center gap-3">
                           <Stethoscope className="h-4 w-4 text-blue-600" />
                           <span className="text-xs font-bold text-gray-600 uppercase">Doctor</span>
                         </div>
-                        <Select value={selectedDoctor} onValueChange={(newDoctor) => {
-                          setSelectedDoctor(newDoctor);
-                        }} disabled={isPatientReadonly}>
-                          <SelectTrigger className="h-9 w-auto rounded-lg border-gray-300 text-sm font-semibold px-3 bg-white hover:bg-gray-50 transition-colors">
-                            <SelectValue placeholder="Select doctor" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {doctors.map((doc) => (
-                              <SelectItem key={doc.id} value={doc.name}>
-                                {doc.name.replace(/^Dr\.\s+/i, "Dr. ")}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        {user?.role === 'doctor' ? (
+                          // For doctors: static display of their own name
+                          <div className="px-3 py-1.5 rounded-lg text-sm font-semibold text-gray-900">
+                            {formatDoctorName(selectedDoctor) || 'No doctor assigned'}
+                          </div>
+                        ) : (
+                          // For admin/other: dropdown to select doctor
+                          <Select value={selectedDoctor} onValueChange={(newDoctor) => {
+                            setSelectedDoctor(newDoctor);
+                          }} disabled={isPatientReadonly}>
+                            <SelectTrigger className="h-9 w-auto rounded-lg border-gray-300 text-sm font-semibold px-3 bg-white hover:bg-gray-50 transition-colors">
+                              <SelectValue placeholder="Select doctor" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {doctors.map((doc) => (
+                                <SelectItem key={doc.id} value={doc.name}>
+                                  {doc.name.replace(/^Dr\.\s+/i, "Dr. ")}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
                       </div>
 
                       {/* Duration - Integrated in schedule card */}
@@ -1521,7 +1617,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                           </div>
                           <Select value={duration} onValueChange={setDuration} disabled={isPatientReadonly}>
                             <SelectTrigger className={`h-9 w-auto rounded-lg text-sm font-semibold px-3 transition-colors ${
-                              durationConflict 
+                              durationConflict && !isPatientReadonly
                                 ? 'border-red-500 bg-red-50 hover:bg-red-50 text-red-700' 
                                 : 'border-gray-300 bg-white hover:bg-gray-50 text-gray-900'
                             }`}>
@@ -1531,7 +1627,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                             </SelectTrigger>
                             <SelectContent className="overflow-visible">
                               {[30, 60, 90, 120].map(dur => {
-                                const hasConflict = !isDurationAvailable(dur);
+                                const hasConflict = !isDurationAvailable(dur) && !isPatientReadonly;
                                 const tooltipText = getDurationTooltipText(dur);
                                 return (
                                   <Tooltip key={dur}>
@@ -1565,7 +1661,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                             </SelectContent>
                           </Select>
                         </div>
-                        {durationConflict && (
+                        {durationConflict && !isPatientReadonly && (
                           <div className="mt-2 flex items-center gap-2 text-xs text-red-600 font-semibold bg-red-50 p-2 rounded-lg">
                             <AlertCircle className="h-4 w-4 flex-shrink-0" />
                             <span>{durationConflict}</span>

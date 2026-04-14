@@ -18,7 +18,7 @@ interface AppointmentModalContextType {
   newAppointmentPatientId?: string;
   newAppointmentDoctorName?: string;
   newAppointmentServiceType?: string;
-  openCreateModal: (date?: Date, time?: string) => void;
+  openCreateModal: (date?: Date, time?: string, doctorName?: string) => void;
   closeCreateModal: () => void;
   openScheduleModal: (patientName?: string, patientId?: string) => void;
   closeScheduleModal: () => void;
@@ -72,9 +72,10 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
   const refreshPatients = useCallback(() => setRefreshTrigger(prev => prev + 1), []);
   const refreshFinanceData = useCallback(() => setRefreshTrigger(prev => prev + 1), []);
 
-  const openCreateModal = useCallback((date?: Date, time?: string) => {
+  const openCreateModal = useCallback((date?: Date, time?: string, doctorName?: string) => {
     setNewAppointmentDate(date);
     setNewAppointmentTime(time);
+    if (doctorName !== undefined) setNewAppointmentDoctorName(doctorName ?? "");
     setCreateModalOpen(true);
   }, []);
 

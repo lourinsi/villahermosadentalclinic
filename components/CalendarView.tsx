@@ -82,15 +82,10 @@ export function CalendarView({ portal = 'admin', defaultStatusFilter, defaultDoc
   
   // For doctor portal, automatically filter to logged-in doctor
   useEffect(() => {
-    if (portal === 'doctor' && doctors.length > 0 && user) {
-      // Try to find doctor by matching with user object
-      // Since we don't know the exact user property, set the first doctor as default
-      // The actual filtering will happen based on the backend request
-      if (doctors.length > 0) {
-        setSelectedDoctor(doctors[0].name);
-      }
+    if (portal === 'doctor' && user) {
+      setSelectedDoctor(user.username);
     }
-  }, [portal, doctors]);
+  }, [portal, user]);
   const router = useRouter();
   const searchParams = useSearchParams();
   
@@ -432,7 +427,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                 /* Wide position for empty slots: centered in the main area */
                 <div
                   className="absolute inset-y-2 left-32 right-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-10 hover:bg-violet-50/50 rounded-xl border-2 border-dashed border-transparent hover:border-violet-200/50 group/plus"
-                  onClick={() => openCreateModal(selectedDate, timeSlot)}
+                  onClick={() => openCreateModal(selectedDate, timeSlot, selectedDoctor !== 'all' ? selectedDoctor : undefined)}
                 >
                   <Plus className="h-6 w-6 text-violet-300 transition-colors group-hover/plus:text-violet-600" />
                 </div>

@@ -13,6 +13,7 @@ import { useAuth } from "@/hooks/useAuth.tsx";
 import BookingModal from "./BookingModal";
 import { NextAppointmentCard } from "./NextAppointmentCard";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend, AreaChart, Area } from "recharts";
+import { getNextAvailableSlot } from "../lib/appointment-utils";
 
 export function DoctorDashboard() {
   const { openCreateModal, openAddPatientModal, appointments, openEditModal } = useAppointmentModal();
@@ -427,7 +428,10 @@ export function DoctorDashboard() {
               <Button
                 variant="outline"
                 className="group relative flex items-center justify-between p-6 h-auto border-gray-100 hover:border-violet-200 hover:bg-violet-50/50 rounded-2xl transition-all duration-300 overflow-hidden"
-                onClick={() => openCreateModal()}
+                onClick={() => {
+                  const slot = getNextAvailableSlot(appointments, doctorName);
+                  openCreateModal(slot.date, slot.time, doctorName);
+                }}
               >
                 <div className="flex items-center space-x-4 relative z-10">
                   <div className="p-3 rounded-xl bg-violet-100 text-violet-600 group-hover:bg-violet-600 group-hover:text-white transition-colors duration-300">
