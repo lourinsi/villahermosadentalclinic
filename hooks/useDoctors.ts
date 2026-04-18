@@ -29,8 +29,18 @@ export function useDoctors(refreshKey?: number) {
         headers["Authorization"] = `Bearer ${token}`;
       }
       
+      
       const response = await fetch(STAFF_API, { headers, credentials: "include" });
+      
+      if (!response.ok) {
+        console.error('[useDoctors] Fetch failed with status:', response.status, response.statusText);
+        setDoctors([]);
+        setIsLoadingDoctors(false);
+        return;
+      }
+      
       const result = await response.json();
+      
       if (result?.success && Array.isArray(result.data)) {
         const dentistOnly = result.data.filter((staff: Staff) => {
           const role = String(staff.role || "").toLowerCase();
@@ -52,7 +62,10 @@ export function useDoctors(refreshKey?: number) {
         setDoctors([]);
       }
     } catch (error) {
-      console.error("Failed to load doctors:", error);
+      console.error('[useDoctors] Failed to load doctors:', error);
+      if (error instanceof TypeError && error.message === 'Failed to fetch') {
+        console.error('[useDoctors] Network error - backend server may not be running at', STAFF_API);
+      }
       setDoctors([]);
     } finally {
       setIsLoadingDoctors(false);

@@ -9,17 +9,14 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
-import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
-import { usePaymentStatuses } from "@/hooks/usePaymentStatuses";
-import { Calendar as CalendarIcon, Clock, Award, Loader2, CheckCircle2, CreditCard, Banknote, Stethoscope, ChevronLeft, AlertCircle } from "lucide-react";
+import { useAppointmentStatuses, AppointmentStatusOption } from "@/hooks/useAppointmentStatuses";
+import { usePaymentStatuses, PaymentStatusOption } from "@/hooks/usePaymentStatuses";
+import { Calendar as CalendarIcon, Clock, Award, Loader2, CreditCard, Banknote, Stethoscope, ChevronLeft, AlertCircle } from "lucide-react";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
-import { formatTimeTo12h } from "@/lib/time-slots";
-import { APPOINTMENT_PRICES, APPOINTMENT_TYPES, getAppointmentTypeName } from "@/lib/appointmentTypes";
-import { Dialog as SmallDialog, DialogContent as SmallDialogContent, DialogFooter as SmallDialogFooter } from "@/components/ui/dialog";
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
+import { formatTimeTo12h, TIME_SLOTS } from "@/lib/time-slots";
+import { APPOINTMENT_PRICES, getAppointmentTypeName } from "@/lib/appointmentTypes";
 import { toast } from 'sonner';
 import AppointmentHistoryView from "./AppointmentHistoryView";
-
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
 import { useDoctors } from "@/hooks/useDoctors";
@@ -39,13 +36,13 @@ const getAppointmentTypeIndex = (typeName: string): number => {
 };
 
 // Helper function to get status label from status array
-const getStatusLabel = (statusValue: string, statuses: any[]): string => {
+const getStatusLabel = (statusValue: string, statuses: AppointmentStatusOption[]): string => {
   const status = statuses.find(s => s.value === statusValue);
   return status?.label || statusValue.charAt(0).toUpperCase() + statusValue.slice(1);
 };
 
 // Helper function to get payment status label from payment status array
-const getPaymentStatusLabel = (statusValue: string, statuses: any[]): string => {
+const getPaymentStatusLabel = (statusValue: string, statuses: PaymentStatusOption[]): string => {
   const status = statuses.find(s => s.value === statusValue);
   return status?.label || statusValue.charAt(0).toUpperCase() + statusValue.slice(1);
 };
@@ -66,8 +63,6 @@ interface BookingModalProps {
   onBooked?: (apt?: any) => void;
   appointmentToEdit?: any; // optional appointment object to edit
   title?: string; // optional override for dialog title
-  isReschedule?: boolean; // new prop to indicate if this is a reschedule
-  onDeleted?: () => void; // callback when appointment is deleted
 }
 
 // Map appointment types to default durations (in minutes)
@@ -81,13 +76,12 @@ const appointmentTypeDurations: Record<string, number> = {
   "Other": 30,
 };
 
-export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, onBooked, appointmentToEdit, title, isReschedule, onDeleted }: BookingModalProps) {
+export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, onBooked, appointmentToEdit, title }: BookingModalProps) {
   const { user } = useAuth();
   const { doctors } = useDoctors();
-  const { addAppointment, updateAppointment, isPaymentFlow, openEditModal } = useAppointmentModal();
-  const { openPatientPaymentFor } = usePaymentModal();
-  const { statuses: appointmentStatuses, isLoading: isLoadingStatuses } = useAppointmentStatuses();
-  const { statuses: paymentStatuses, isLoading: isLoadingPaymentStatuses } = usePaymentStatuses();
+  const { addAppointment, updateAppointment, isPaymentFlow } = useAppointmentModal();
+  const { statuses: appointmentStatuses } = useAppointmentStatuses();
+  const { statuses: paymentStatuses } = usePaymentStatuses();
 
   const [patients, setPatients] = useState<any[]>([]);
   const [isLoadingPatients, setIsLoadingPatients] = useState(false);
@@ -104,8 +98,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [isBooking, setIsBooking] = useState(false);
   const [appointmentLogs, setAppointmentLogs] = useState<any[]>([]);
   const [paymentLogs, setPaymentLogs] = useState<any[]>([]);
-  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
-  const [isLoadingPaymentLogs, setIsLoadingPaymentLogs] = useState(false);
   const [durationConflict, setDurationConflict] = useState<string>("");
 
   // New states for two-step flow
@@ -126,6 +118,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [dailyAppointments, setDailyAppointments] = useState<any[]>([]);
   const [patientConflict, setPatientConflict] = useState("");
   const [patientAppointments, setPatientAppointments] = useState<any[]>([]);
+
+  // Log all available statuses when modal opens
+  useEffect(() => {
+    if (open && appointmentStatuses && appointmentStatuses.length > 0) {
+      console.log('[BookingModal] Available appointment statuses:', appointmentStatuses.map(s => s.value));
+    }
+  }, [open, appointmentStatuses]);
 
   // Fetch all appointments for the day to check conflicts across all doctors and patients
   useEffect(() => {
@@ -237,7 +236,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     if (open && appointmentToEdit?.id) {
       console.log(`[BookingModal] 🔍 FETCHING LOGS for appointment: ${appointmentToEdit.id}`);
       const fetchLogs = async () => {
-        setIsLoadingLogs(true);
         // Add a small delay to ensure backend has finished saving before fetching
         await new Promise(resolve => setTimeout(resolve, 500));
         try {
@@ -262,8 +260,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         } catch (err) {
           console.warn("[BookingModal] ⚠️ Could not fetch appointment logs:", err);
           setAppointmentLogs([]);
-        } finally {
-          setIsLoadingLogs(false);
         }
       };
       fetchLogs();
@@ -276,7 +272,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   useEffect(() => {
     if (open && appointmentToEdit?.id) {
       const fetchPaymentLogs = async () => {
-        setIsLoadingPaymentLogs(true);
         // Add a small delay to ensure backend has finished saving before fetching
         await new Promise(resolve => setTimeout(resolve, 500));
         try {
@@ -290,8 +285,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         } catch (err) {
           console.warn("[BookingModal] ⚠️ Could not fetch payment logs:", err);
           setPaymentLogs([]);
-        } finally {
-          setIsLoadingPaymentLogs(false);
         }
       };
       fetchPaymentLogs();
@@ -353,13 +346,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   }, [selectedDate, selectedDoctor, dailyAppointments]);
 
   // Get conflict info for a specific duration
-  const getDurationConflictInfo = useCallback((durationMins: number): { hasConflict: boolean; conflictTime?: string; conflictPatient?: string; conflictDuration?: number } => {
+  const getDurationConflictInfo = useCallback((durationMins: number): { hasConflict: boolean; conflictTime?: string } => {
     if (!selectedTime || !selectedDate || !selectedDoctor) return { hasConflict: false };
     
     const hasConflict = checkDurationConflict(selectedTime, durationMins);
     if (!hasConflict) return { hasConflict: false };
 
-    // Find the conflicting appointment details
+    // Find the conflicting appointment time
     const [hours, minutes] = selectedTime.split(':').map(Number);
     const slotStartDate = new Date(selectedDate);
     slotStartDate.setHours(hours, minutes, 0, 0);
@@ -388,9 +381,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       if (slotStartDate < aptEnd && slotEndDate > aptStart) {
         return { 
           hasConflict: true, 
-          conflictTime: `${String(aptStart.getHours()).padStart(2, '0')}:${String(aptStart.getMinutes()).padStart(2, '0')}`,
-          conflictPatient: apt.patientName || 'Patient',
-          conflictDuration: aptDurationMins
+          conflictTime: `${String(aptStart.getHours()).padStart(2, '0')}:${String(aptStart.getMinutes()).padStart(2, '0')}` 
         };
       }
     }
@@ -403,72 +394,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     if (!selectedTime) return true;
     return !checkDurationConflict(selectedTime, durationMins);
   }, [selectedTime, checkDurationConflict]);
-
-  // Get tooltip text for duration conflict
-  const getDurationTooltipText = useCallback((durationMins: number): string => {
-    const info = getDurationConflictInfo(durationMins);
-    if (!info.hasConflict) return '';
-    
-    if (info.conflictPatient && info.conflictTime) {
-      return `${info.conflictPatient} already has appointment scheduled at ${info.conflictTime}`;
-    }
-    return 'Conflicts with another appointment';
-  }, [getDurationConflictInfo]);
-
-  // Check if current date/time is in the past
-  const isSelectedDateTimePast = useCallback((): boolean => {
-    if (!selectedTime || !selectedDate) return false;
-    
-    const [hours, minutes] = selectedTime.split(':').map(Number);
-    const selectedDateTime = new Date(selectedDate);
-    selectedDateTime.setHours(hours, minutes, 0, 0);
-    
-    const now = new Date();
-    return selectedDateTime < now;
-  }, [selectedTime, selectedDate]);
-
-  // Check if current date is in the past
-  const isSelectedDatePast = useCallback((): boolean => {
-    if (!selectedDate) return false;
-    
-    const dateOnly = new Date(selectedDate);
-    dateOnly.setHours(0, 0, 0, 0);
-    
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    return dateOnly < today;
-  }, [selectedDate]);
-
-  // Check if current date/time/duration selection has a conflict or is in the past
-  const getCurrentScheduleConflict = useCallback((): boolean => {
-    if (!selectedTime || !selectedDate || !selectedDoctor) return false;
-    
-    // Past time takes priority
-    if (isSelectedDateTimePast()) {
-      return true;
-    }
-    
-    const durationMins = parseInt(duration, 10) || 30;
-    return checkDurationConflict(selectedTime, durationMins);
-  }, [selectedTime, selectedDate, selectedDoctor, duration, isSelectedDateTimePast, checkDurationConflict]);
-
-  // Get the reason why date/time is invalid (past, booked, or reserved)
-  const getScheduleConflictReason = useCallback((): string => {
-    if (!selectedTime || !selectedDate || !selectedDoctor) return '';
-    
-    // Past time takes priority
-    if (isSelectedDateTimePast()) {
-      return 'past';
-    }
-    
-    const durationMins = parseInt(duration, 10) || 30;
-    if (checkDurationConflict(selectedTime, durationMins)) {
-      return 'booked'; // Could be booked or reserved, we'll say booked
-    }
-    
-    return '';
-  }, [selectedTime, selectedDate, selectedDoctor, duration, isSelectedDateTimePast, checkDurationConflict]);
 
   // Update conflict status when duration changes
   useEffect(() => {
@@ -732,6 +657,200 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     }
   }, [doctorName]);
 
+  // Auto-preselect first doctor for non-doctor portals when modal opens
+  // BUT: Skip if doctorName was explicitly passed (e.g., from DoctorAvailabilityView)
+  useEffect(() => {
+    if (!open) return;
+    
+    // Only auto-preselect if user is NOT a doctor
+    if (user?.role === 'doctor') return;
+    
+    // If doctorName prop was explicitly passed, don't auto-select a different doctor
+    // The doctorName will be synced via the other useEffect that watches doctorName prop
+    if (doctorName) {
+      console.log('[BookingModal] 📋 Skipping auto-doctor-selection: doctorName explicitly passed from props');
+      return;
+    }
+    
+    // Only auto-preselect if no doctor is currently selected
+    if (selectedDoctor) return;
+    
+    // Only auto-preselect if editing an appointment (use doctor from appointment)
+    if (appointmentToEdit?.doctor) return;
+    
+    // Auto-preselect first available doctor (only when NO doctorName prop passed)
+    if (doctors && doctors.length > 0) {
+      console.log('[BookingModal] 🏥 Auto-selecting first available doctor');
+      setSelectedDoctor(doctors[0].name);
+    }
+  }, [open, user?.role, doctors, selectedDoctor, appointmentToEdit?.doctor, doctorName]);
+
+  // Helper function to find next available slot (date + time)
+  const findNextAvailableSlot = useCallback(async (startDate: Date, doctorToCheck: string, durationToCheck: string): Promise<{ date: Date; time: string } | null> => {
+    if (!doctorToCheck || !durationToCheck) return null;
+    
+    const durationMins = parseInt(durationToCheck, 10) || 30;
+    const maxDaysToCheck = 30; // Check up to 30 days ahead
+    
+    // Helper to get available slots for a given date
+    const getSlotsForDate = async (date: Date): Promise<string[]> => {
+      try {
+        const dateStr = formatDateToYYYYMMDD(date);
+        const res = await fetch(
+          `http://localhost:3001/api/appointments?doctor=${encodeURIComponent(doctorToCheck)}&startDate=${dateStr}&endDate=${dateStr}&includeUnpaid=true`,
+          { credentials: 'include' }
+        );
+        
+        if (!res.ok) return [];
+        
+        const json = await res.json();
+        const appointments = json.data || [];
+        
+        // Calculate available slots
+        const now = new Date();
+        const todayStr = formatDateToYYYYMMDD(now);
+        const isToday = dateStr === todayStr;
+        
+        const currentHour = now.getHours();
+        const currentMinute = now.getMinutes();
+        
+        const timeToMinutes = (time: string): number => {
+          const [h, m] = time.split(':').map(Number);
+          return h * 60 + m;
+        };
+        
+        const availableSlots: string[] = [];
+        
+        for (const slot of TIME_SLOTS) {
+          const [hour, minute] = slot.split(':').map(Number);
+          const isPastTime = isToday && (hour < currentHour || (hour === currentHour && minute <= currentMinute));
+          
+          if (isPastTime) continue;
+          
+          // Check for booking conflicts
+          const slotMinutes = timeToMinutes(slot);
+          const slotEndMinutes = slotMinutes + durationMins;
+          
+          let isConflict = false;
+          for (const apt of appointments) {
+            if (apt.status === 'cancelled') continue;
+            if (apt.status === 'pending') continue; // Pending can be overridden
+            
+            const aptStart = timeToMinutes(apt.time);
+            const aptEnd = aptStart + (apt.duration || 30);
+            
+            if (slotMinutes < aptEnd && slotEndMinutes > aptStart) {
+              isConflict = true;
+              break;
+            }
+          }
+          
+          if (!isConflict) {
+            availableSlots.push(slot);
+          }
+        }
+        
+        return availableSlots;
+      } catch (err) {
+        console.warn(`[BookingModal] Failed to fetch appointments for date ${formatDateToYYYYMMDD(date)}:`, err);
+        return [];
+      }
+    };
+    
+    // Search for next available slot starting from startDate
+    for (let daysAhead = 0; daysAhead < maxDaysToCheck; daysAhead++) {
+      const checkDate = new Date(startDate);
+      checkDate.setDate(startDate.getDate() + daysAhead);
+      
+      // Skip past dates
+      const now = new Date();
+      now.setHours(0, 0, 0, 0);
+      if (checkDate < now) continue;
+      
+      const availableSlots = await getSlotsForDate(checkDate);
+      
+      if (availableSlots.length > 0) {
+        return {
+          date: checkDate,
+          time: availableSlots[0] // Return first available slot
+        };
+      }
+    }
+    
+    return null;
+  }, []);
+
+  // Auto-preselect date, time, and appointment type for all portals
+  useEffect(() => {
+    if (!open || appointmentToEdit) return; // Only for new appointments, not editing
+    
+    // CASE 1: Coming from DoctorAvailabilityView (has defaultDate, defaultTime, and doctorName)
+    // RULE: Only preselect appointment type, respect the passed date/time/doctor
+    if (defaultDate && defaultTime && doctorName) {
+      console.log('[BookingModal] 📍 DoctorAvailabilityView context detected');
+      console.log('[BookingModal] ℹ️ Pre-filled with: date=' + formatDateToYYYYMMDD(defaultDate) + ', time=' + defaultTime + ', doctor=' + doctorName);
+      
+      // Only preselect appointment type if not already set
+      if (!appointmentType) {
+        console.log('[BookingModal] 📋 Preselecting appointment type: Routine Cleaning');
+        setAppointmentType("Routine Cleaning");
+      }
+      return; // Don't do any auto-searching
+    }
+    
+    // CASE 2: Generic booking modal (explicit defaults passed)
+    // Find next available slot automatically
+    if (defaultDate && defaultTime) {
+      // User clicked a specific time slot - respect it
+      console.log('[BookingModal] 📍 Using explicitly passed date/time:', {
+        date: formatDateToYYYYMMDD(defaultDate),
+        time: defaultTime,
+        source: 'clicked_slot'
+      });
+      if (!appointmentType) {
+        setAppointmentType("Routine Cleaning");
+      }
+      return;
+    }
+    
+    // CASE 3: New appointment modal (no defaults at all)
+    // Only preselect if not already set
+    if (appointmentType && selectedTime && selectedDate > new Date()) return;
+    
+    // Preselect first appointment type
+    if (!appointmentType) {
+      console.log('[BookingModal] 📋 Preselecting appointment type: Routine Cleaning');
+      setAppointmentType("Routine Cleaning");
+    }
+    
+    // Find next available slot for preselection (only if no explicit defaults passed)
+    const preSelectSlot = async () => {
+      if (!selectedDoctor) {
+        console.log('[BookingModal] ⏳ Waiting for doctor to be selected...');
+        return;
+      }
+      
+      console.log('[BookingModal] 🔍 Auto-searching for next available slot for ' + selectedDoctor);
+      const defaultDuration = appointmentTypeDurations["Routine Cleaning"] || 30;
+      const nextSlot = await findNextAvailableSlot(new Date(), selectedDoctor, String(defaultDuration));
+      
+      if (nextSlot) {
+        console.log('[BookingModal] ✅ Found next available slot:', {
+          date: formatDateToYYYYMMDD(nextSlot.date),
+          time: nextSlot.time
+        });
+        setSelectedDate(nextSlot.date);
+        setSelectedTime(nextSlot.time);
+      } else {
+        console.warn('[BookingModal] ⚠️ No available slots found within 30 days');
+      }
+    };
+    
+    preSelectSlot();
+    // Fixed dependency array: only include variables that determine when to re-run
+    // Removed appointmentType, selectedTime, selectedDoctor as they're internal state
+  }, [open, appointmentToEdit, defaultDate, defaultTime, doctorName, findNextAvailableSlot]);
+
   // Price calculations - handle custom types
   // finalPrice is the base price (before discount) - used in payment calculations
   const basePrice = appointmentType === "Other" ? Number(customPrice) : (APPOINTMENT_PRICES[appointmentType] || 0);
@@ -783,7 +902,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             source: user?.role === 'patient' ? 'server-filtered' : 'admin-fetch',
             allIds: list.slice(0, 3).map((p: any) => ({ id: p.id, type: typeof p.id, name: p.name }))
           });
-          try { window.dispatchEvent(new CustomEvent('bookingmodal:patients', { detail: { source: user?.role === 'patient' ? 'server-filtered' : 'admin-fetch', count: list.length, patients: list } })); } catch (e) {}
+          try { window.dispatchEvent(new CustomEvent('bookingmodal:patients', { detail: { source: user?.role === 'patient' ? 'server-filtered' : 'admin-fetch', count: list.length, patients: list } })); } catch {}
           setPatients(list);
           // preselect first patient if available
           if (list.length > 0) {
@@ -852,17 +971,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       }
       // For editing, initialize payment amount to empty so user enters NEW payment amount
       setAmountToPay('');
-      
-      // Use most recent status from logs, fallback to appointmentToEdit status
-      const mostRecentLog = appointmentLogs && appointmentLogs.length > 0 ? appointmentLogs[appointmentLogs.length - 1] : null;
-      const statusFromLog = mostRecentLog?.newStatus || appointmentToEdit.status || 'scheduled';
-      setAppointmentStatus(statusFromLog);
-      
-      // Use most recent payment status from logs, fallback to appointmentToEdit payment status
-      const mostRecentPaymentLog = paymentLogs && paymentLogs.length > 0 ? paymentLogs[paymentLogs.length - 1] : null;
-      const paymentStatusFromLog = mostRecentPaymentLog?.newStatus || appointmentToEdit.paymentStatus || 'unpaid';
-      setPaymentStatus(paymentStatusFromLog);
-      
+      setAppointmentStatus(appointmentToEdit.status || 'scheduled');
+      setPaymentStatus(appointmentToEdit.paymentStatus || 'unpaid');
       setPaymentMethod(appointmentToEdit.paymentMethod || '');
       // Reset the flag when opening for edit
       setStatusChangedByUser(0);
@@ -896,7 +1006,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // Derived display values for schedule block
   const displayDoctor = formatDoctorName(appointmentToEdit?.doctor || doctorName);
-  const displayStatus = appointmentToEdit?.status || appointmentStatus;
   
   // Calculate remaining balance for display in payment step
   const previouslyPaidAmount = appointmentToEdit?.totalPaid !== undefined 
@@ -1075,10 +1184,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         });
 
         // Determine payment status
-        let updatePaymentStatus = getProjectedPaymentStatus();
+        const updatePaymentStatus = getProjectedPaymentStatus();
         
         // Determine appointment status using the new function that includes override logic
-        let updateAppointmentStatus = getFinalAppointmentStatus();
+        const updateAppointmentStatus = getFinalAppointmentStatus();
 
         const updated = await updateAppointment(appointmentToEdit.id, {
           patientId: selectedPatient,
@@ -1124,17 +1233,17 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         } else {
           toast.success(`Appointment updated successfully!`);
         }
-        try { window.dispatchEvent(new CustomEvent('appointments:updated', { detail: { appointment: updated } })); } catch (e) {}
+        try { window.dispatchEvent(new CustomEvent('appointments:updated', { detail: { appointment: updated } })); } catch {}
         if (onBooked) onBooked(updated);
         // close modal after updating
         onOpenChange(false);
       } else {
         // create new appointment
         // Determine payment status
-        let paymentStatus = getProjectedPaymentStatus();
+        const paymentStatus = getProjectedPaymentStatus();
         
         // Determine appointment status using the new function that includes override logic
-        let autoStatus = getFinalAppointmentStatus();
+        const autoStatus = getFinalAppointmentStatus();
 
         console.log('[BookingModal Payment] Calculated status:', { paymentStatus, autoStatus, amountPaid, finalPrice });
 
@@ -1233,7 +1342,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         } else {
           toast.success(`Appointment booked successfully!`);
         }
-        try { window.dispatchEvent(new CustomEvent('appointments:updated', { detail: { appointment: newApt } })); } catch (e) {}
+        try { window.dispatchEvent(new CustomEvent('appointments:updated', { detail: { appointment: newApt } })); } catch {}
         if (onBooked) onBooked(newApt);
         // close modal after creating
         onOpenChange(false);
@@ -1258,7 +1367,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         ...appointmentToEdit,
         status: 'cancelled',
       });
-      try { window.dispatchEvent(new CustomEvent('appointments:updated', { detail: { appointment: updated, appointmentId: appointmentToEdit.id, newStatus: 'cancelled' } })); } catch (e) {}
+      try { window.dispatchEvent(new CustomEvent('appointments:updated', { detail: { appointment: updated, appointmentId: appointmentToEdit.id, newStatus: 'cancelled' } })); } catch {}
       if (onBooked) onBooked(updated);
       toast?.success?.('Appointment marked as cancelled');
       onOpenChange(false);
@@ -1382,19 +1491,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                 <div className="flex items-center gap-2">
                                   <span>{p.name}</span>
                                   {hasConflict && (
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <div 
-                                          className="pointer-events-auto" 
-                                          title={conflictInfo ? `Patient has appointment with ${conflictInfo.doctor} at ${conflictInfo.time}` : 'Has conflict'}
-                                        >
-                                          <AlertCircle className="h-4 w-4 text-red-500 flex-shrink-0" />
-                                        </div>
-                                      </TooltipTrigger>
-                                      <TooltipContent side="right" className="z-[9999] bg-red-700 border-red-600 text-white font-bold">
-                                        {conflictInfo ? `Patient has appointment with ${conflictInfo.doctor} at ${conflictInfo.time}` : 'Has conflict'}
-                                      </TooltipContent>
-                                    </Tooltip>
+                                    <div title={conflictInfo ? `Patient has appointment with ${conflictInfo.doctor} at ${conflictInfo.time}` : 'Has conflict'}>
+                                      <AlertCircle className="h-4 w-4 text-red-500 flex-shrink-0" />
+                                    </div>
                                   )}
                                 </div>
                               </SelectItem>
@@ -1521,30 +1620,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                           <CalendarIcon className="h-4 w-4 text-blue-600" />
                           <span className="text-xs font-bold text-gray-600 uppercase">Date</span>
                         </div>
-                        {isSelectedDatePast() && !isPatientReadonly ? (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <button
-                                onClick={() => setIsDatePickerOpen(true)}
-                                className="px-3 py-1.5 rounded-lg border border-red-500 bg-red-50 hover:bg-red-50 text-sm font-semibold text-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-gray-300 disabled:hover:bg-white"
-                                disabled={isPatientReadonly || !selectedDoctor}
-                              >
-                                {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent side="top" align="center" sideOffset={10} className="z-[9999] bg-red-700 border-red-600 text-white font-bold px-3 py-2 shadow-xl">
-                              ⚠️ This date is in the past
-                            </TooltipContent>
-                          </Tooltip>
-                        ) : (
-                          <button
-                            onClick={() => setIsDatePickerOpen(true)}
-                            className="px-3 py-1.5 rounded-lg border border-gray-300 hover:border-blue-400 hover:bg-blue-50 text-sm font-semibold text-gray-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-gray-300 disabled:hover:bg-white"
-                            disabled={isPatientReadonly || !selectedDoctor}
-                          >
-                            {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                          </button>
-                        )}
+                        <button
+                          onClick={() => setIsDatePickerOpen(true)}
+                          className="px-3 py-1.5 rounded-lg border border-gray-300 hover:border-blue-400 hover:bg-blue-50 text-sm font-semibold text-gray-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-gray-300 disabled:hover:bg-white"
+                          disabled={isPatientReadonly || !selectedDoctor}
+                        >
+                          {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </button>
                       </div>
 
                       {/* Time - Clickable Button */}
@@ -1553,59 +1635,35 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                           <Clock className="h-4 w-4 text-blue-600" />
                           <span className="text-xs font-bold text-gray-600 uppercase">Time</span>
                         </div>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              onClick={() => setIsTimePickerOpen(true)}
-                              className={`px-3 py-1.5 rounded-lg border text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                                getCurrentScheduleConflict() && !isPatientReadonly
-                                  ? 'border-red-500 bg-red-50 hover:bg-red-50 text-red-700'
-                                  : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50 text-gray-900'
-                              } disabled:hover:border-gray-300 disabled:hover:bg-white`}
-                              disabled={isPatientReadonly || !selectedDoctor}
-                            >
-                              {selectedTime ? formatTimeTo12h(selectedTime) : '—'}
-                            </button>
-                          </TooltipTrigger>
-                          {getCurrentScheduleConflict() && !isPatientReadonly && (
-                            <TooltipContent side="top" align="center" sideOffset={10} className="z-[9999] bg-red-700 border-red-600 text-white font-bold px-3 py-2 shadow-xl">
-                              {getScheduleConflictReason() === 'past' 
-                                ? '⚠️ This date/time is in the past'
-                                : '⚠️ This date/time is booked or reserved'
-                              }
-                            </TooltipContent>
-                          )}
-                        </Tooltip>
+                        <button
+                          onClick={() => setIsTimePickerOpen(true)}
+                          className="px-3 py-1.5 rounded-lg border border-gray-300 hover:border-blue-400 hover:bg-blue-50 text-sm font-semibold text-gray-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-gray-300 disabled:hover:bg-white"
+                          disabled={isPatientReadonly || !selectedDoctor}
+                        >
+                          {selectedTime ? formatTimeTo12h(selectedTime) : '—'}
+                        </button>
                       </div>
 
-                      {/* Doctor - Static for doctor role, dropdown for admin */}
+                      {/* Doctor - Select Dropdown */}
                       <div className="flex items-center justify-between gap-3 pb-3 border-b border-gray-100">
                         <div className="flex items-center gap-3">
                           <Stethoscope className="h-4 w-4 text-blue-600" />
                           <span className="text-xs font-bold text-gray-600 uppercase">Doctor</span>
                         </div>
-                        {user?.role === 'doctor' ? (
-                          // For doctors: static display of their own name
-                          <div className="px-3 py-1.5 rounded-lg text-sm font-semibold text-gray-900">
-                            {formatDoctorName(selectedDoctor) || 'No doctor assigned'}
-                          </div>
-                        ) : (
-                          // For admin/other: dropdown to select doctor
-                          <Select value={selectedDoctor} onValueChange={(newDoctor) => {
-                            setSelectedDoctor(newDoctor);
-                          }} disabled={isPatientReadonly}>
-                            <SelectTrigger className="h-9 w-auto rounded-lg border-gray-300 text-sm font-semibold px-3 bg-white hover:bg-gray-50 transition-colors">
-                              <SelectValue placeholder="Select doctor" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {doctors.map((doc) => (
-                                <SelectItem key={doc.id} value={doc.name}>
-                                  {doc.name.replace(/^Dr\.\s+/i, "Dr. ")}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        )}
+                        <Select value={selectedDoctor} onValueChange={(newDoctor) => {
+                          setSelectedDoctor(newDoctor);
+                        }} disabled={isPatientReadonly}>
+                          <SelectTrigger className="h-9 w-auto rounded-lg border-gray-300 text-sm font-semibold px-3 bg-white hover:bg-gray-50 transition-colors">
+                            <SelectValue placeholder="Select doctor" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {doctors.map((doc) => (
+                              <SelectItem key={doc.id} value={doc.name}>
+                                {doc.name.replace(/^Dr\.\s+/i, "Dr. ")}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
 
                       {/* Duration - Integrated in schedule card */}
@@ -1617,7 +1675,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                           </div>
                           <Select value={duration} onValueChange={setDuration} disabled={isPatientReadonly}>
                             <SelectTrigger className={`h-9 w-auto rounded-lg text-sm font-semibold px-3 transition-colors ${
-                              durationConflict && !isPatientReadonly
+                              durationConflict 
                                 ? 'border-red-500 bg-red-50 hover:bg-red-50 text-red-700' 
                                 : 'border-gray-300 bg-white hover:bg-gray-50 text-gray-900'
                             }`}>
@@ -1625,43 +1683,31 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                 {duration ? `${duration} Mins` : 'Select Duration'}
                               </SelectValue>
                             </SelectTrigger>
-                            <SelectContent className="overflow-visible">
+                            <SelectContent>
                               {[30, 60, 90, 120].map(dur => {
-                                const hasConflict = !isDurationAvailable(dur) && !isPatientReadonly;
-                                const tooltipText = getDurationTooltipText(dur);
+                                const hasConflict = !isDurationAvailable(dur);
                                 return (
-                                  <Tooltip key={dur}>
-                                    <TooltipTrigger asChild>
-                                      <div 
-                                        className="w-full" 
-                                        title={hasConflict ? tooltipText : undefined}
-                                      >
-                                        <SelectItem 
-                                          value={String(dur)} 
-                                          disabled={hasConflict}
-                                          className={`${hasConflict ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                        >
-                                          <div className="flex items-center gap-2">
-                                            <span>{dur} Mins</span>
-                                            {hasConflict && (
-                                              <AlertCircle className="h-4 w-4 text-red-500 flex-shrink-0" />
-                                            )}
-                                          </div>
-                                        </SelectItem>
-                                      </div>
-                                    </TooltipTrigger>
-                                    {hasConflict && (
-                                      <TooltipContent side="right" align="center" sideOffset={10} className="z-[9999] bg-red-700 border-red-600 text-white font-bold px-3 py-2 shadow-xl">
-                                        {tooltipText}
-                                      </TooltipContent>
-                                    )}
-                                  </Tooltip>
+                                  <SelectItem 
+                                    key={dur}
+                                    value={String(dur)} 
+                                    disabled={hasConflict}
+                                    className={hasConflict ? 'opacity-50 cursor-not-allowed' : ''}
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <span>{dur} Mins</span>
+                                      {hasConflict && (
+                                        <div title={`Conflicts with another appointment`}>
+                                          <AlertCircle className="h-4 w-4 text-red-500 flex-shrink-0" />
+                                        </div>
+                                      )}
+                                    </div>
+                                  </SelectItem>
                                 );
                               })}
                             </SelectContent>
                           </Select>
                         </div>
-                        {durationConflict && !isPatientReadonly && (
+                        {durationConflict && (
                           <div className="mt-2 flex items-center gap-2 text-xs text-red-600 font-semibold bg-red-50 p-2 rounded-lg">
                             <AlertCircle className="h-4 w-4 flex-shrink-0" />
                             <span>{durationConflict}</span>
@@ -1805,14 +1851,21 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                               <div className="flex justify-between items-start gap-2 text-gray-500 font-medium">
                                 <span className="flex items-center gap-1.5 opacity-80">
                                   <Clock className="h-3 w-3" />
-                                  {new Date(log.changedAt).toLocaleString('en-PH', { 
-                                    month: 'numeric', 
-                                    day: 'numeric', 
-                                    year: 'numeric', 
-                                    hour: '2-digit', 
-                                    minute: '2-digit',
-                                    second: '2-digit'
-                                  })}
+                                  <span className="flex flex-col">
+                                    <span>{new Date(log.changedAt).toLocaleString('en-PH', { 
+                                      month: 'numeric', 
+                                      day: 'numeric', 
+                                      year: 'numeric', 
+                                      hour: '2-digit', 
+                                      minute: '2-digit',
+                                      second: '2-digit'
+                                    })}</span>
+                                    {(log as any).changedByName && (
+                                      <span className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider">
+                                        by {(log as any).changedByName}
+                                      </span>
+                                    )}
+                                  </span>
                                 </span>
                                 <div className="flex items-center gap-1.5">
                                   <span className={`px-2 py-0.5 rounded-md uppercase font-black text-[9px] tracking-tight border ${
@@ -1824,8 +1877,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                     onClick={() => {
                                       // Get historical snapshot
                                       const historicalData = (log.logType === 'appointment' && log.newState && Object.keys(log.newState).length > 3) 
-                                        ? { ...appointmentToEdit, ...log.newState, changedAt: log.changedAt, changedByName: (log as any).changedByName, cancellationReason: log.notes } 
-                                        : { ...appointmentToEdit, ...log.previousState, changedAt: log.changedAt, changedByName: (log as any).changedByName, cancellationReason: log.notes };
+                                        ? { ...appointmentToEdit, ...log.newState, changedAt: log.changedAt, changedByName: (log as any).changedByName } 
+                                        : { ...appointmentToEdit, ...log.previousState, changedAt: log.changedAt, changedByName: (log as any).changedByName };
                                       
                                       console.log('[HistoryLog] Opening historical snapshot:', historicalData.id);
                                       setSnapshotToView(historicalData);
@@ -1849,7 +1902,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                     </p>
                                     <p className="text-[10px] text-gray-500 italic">
                                       {user?.role === 'patient'
-                                        ? `Your balance is now ₱${(log.newBalance || 0).toLocaleString()} ${log.changedByName ? `• Recorded by ${log.changedByName}` : ''}`
+                                        ? `Your balance is now ₱${(log.newBalance || 0).toLocaleString()}`
                                         : `Account marked as ${log.paymentStatus?.replace('-', ' ') || 'paid'} by ${log.changedByName || log.changedBy} • Balance: ₱${(log.newBalance || 0).toLocaleString()}`
                                       }
                                     </p>
@@ -1862,7 +1915,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                         <p className="text-gray-600">
                                           Status is <span className="font-bold text-purple-700 uppercase">{log.newState?.status || log.previousState?.status || 'scheduled'}</span>
                                           {log.newState?.paymentStatus && ` • Payment: ${log.newState.paymentStatus.replace('-', ' ')}`}
-                                          {log.changedByName && ` • By: ${log.changedByName}`}
                                         </p>
                                       </div>
                                     ) : (
@@ -1878,9 +1930,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                             Paid: <span className="font-bold text-gray-700">₱{(log.amount || 0).toLocaleString()}</span>
                                           </p>
                                         )}
-                                        <p className="text-gray-500">
-                                          By: <span className="font-bold text-gray-700">{log.changedByName || log.changedBy}</span>
-                                        </p>
                                       </div>
                                     )}
 

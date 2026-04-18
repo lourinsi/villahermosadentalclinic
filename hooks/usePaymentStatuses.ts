@@ -5,6 +5,8 @@ export interface PaymentStatusOption {
   value: string;
   label: string;
   description: string;
+  bgColor?: string;
+  textColor?: string;
 }
 
 interface UsePaymentStatusesReturn {
@@ -12,6 +14,7 @@ interface UsePaymentStatusesReturn {
   isLoading: boolean;
   error: Error | null;
   refetch: () => Promise<void>;
+  getPaymentStatusColors: (status: string) => { bgColor: string; textColor: string };
 }
 
 /**
@@ -22,6 +25,18 @@ export const usePaymentStatuses = (): UsePaymentStatusesReturn => {
   const [statuses, setStatuses] = useState<PaymentStatusOption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+
+  const getPaymentStatusColors = useCallback((status: string): { bgColor: string; textColor: string } => {
+    const statusOption = statuses.find(s => s.value === status);
+    if (statusOption?.bgColor && statusOption?.textColor) {
+      return {
+        bgColor: statusOption.bgColor,
+        textColor: statusOption.textColor
+      };
+    }
+    // Fallback colors
+    return { bgColor: 'bg-gray-50', textColor: 'text-gray-700' };
+  }, [statuses]);
 
   const fetchStatuses = useCallback(async () => {
     setIsLoading(true);
@@ -53,37 +68,41 @@ export const usePaymentStatuses = (): UsePaymentStatusesReturn => {
           key: 1,
           value: "paid",
           label: "Paid",
-          description: "Payment completed in full"
+          description: "Payment completed in full",
+          bgColor: "bg-emerald-50",
+          textColor: "text-emerald-700"
         },
         {
           key: 2,
           value: "unpaid",
           label: "Unpaid",
-          description: "Payment not yet made"
+          description: "Payment not yet made",
+          bgColor: "bg-gray-50",
+          textColor: "text-gray-700"
         },
         {
           key: 3,
           value: "half-paid",
           label: "Half Paid",
-          description: "Partial payment received"
+          description: "Partial payment received",
+          bgColor: "bg-orange-50",
+          textColor: "text-orange-700"
         },
         {
           key: 4,
           value: "overdue",
           label: "Overdue",
-          description: "Payment past due date"
+          description: "Payment past due date",
+          bgColor: "bg-red-50",
+          textColor: "text-red-700"
         },
         {
           key: 5,
           value: "pay-at-clinic",
           label: "Pay at Clinic",
-          description: "Payment to be made at clinic"
-        },
-        {
-          key: 6,
-          value: "partially-paid-at-clinic",
-          label: "Partially Paid at Clinic",
-          description: "Partial payment made at clinic"
+          description: "Payment to be made at clinic",
+          bgColor: "bg-blue-50",
+          textColor: "text-blue-700"
         },
       ];
       
@@ -102,6 +121,7 @@ export const usePaymentStatuses = (): UsePaymentStatusesReturn => {
     statuses,
     isLoading,
     error,
-    refetch: fetchStatuses
+    refetch: fetchStatuses,
+    getPaymentStatusColors
   };
 };

@@ -1,5 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { Appointment } from "../hooks/useAppointments";
+import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
+import { usePaymentStatuses } from "@/hooks/usePaymentStatuses";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import {
   Table,
@@ -44,6 +46,9 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
   onDelete,
   isCart 
 }) => {
+  const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
+  const { statuses: PAYMENT_STATUSES } = usePaymentStatuses();
+
   const displayStatus = (s?: string) => {
     if (!s) return "";
     if (s.toLowerCase() === 'tentative') return 'Reserved';
@@ -133,21 +138,33 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
   };
 
   const getStatusBadgeClass = (status: string = "") => {
-    switch (status.toLowerCase()) {
+    const k = status.toLowerCase().trim();
+    const statusOption = APPOINTMENT_STATUSES.find(s => s.value.toLowerCase() === k);
+    if (statusOption) {
+      return `${statusOption.bgColor} ${statusOption.textColor} border-none`;
+    }
+
+    switch (k) {
       case "scheduled": return "bg-violet-100 text-violet-700 border-violet-200";
       case "confirmed": return "bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200";
       case "completed": return "bg-green-100 text-green-700 border-green-200";
       case "cancelled": return "bg-red-100 text-red-700 border-red-200";
       case "pending": return "bg-amber-100 text-amber-700 border-amber-200";
       case "to pay": return "bg-cyan-100 text-cyan-700 border-cyan-200";
-  case "tentative": return "bg-emerald-200 text-emerald-800 border-emerald-200"; // Reserved (visible green)
-  case "booked": return "bg-emerald-700 text-white border-emerald-800"; // Booked (brighter green)
+      case "tentative": return "bg-emerald-200 text-emerald-800 border-emerald-200"; // Reserved (visible green)
+      case "booked": return "bg-emerald-700 text-white border-emerald-800"; // Booked (brighter green)
       default: return "bg-gray-100 text-gray-700 border-gray-200";
     }
   };
 
   const getPaymentBadgeClass = (status: string = "") => {
-    switch (status.toLowerCase()) {
+    const k = status.toLowerCase().trim();
+    const statusOption = PAYMENT_STATUSES.find(s => s.value.toLowerCase() === k);
+    if (statusOption) {
+      return `${statusOption.bgColor} ${statusOption.textColor} border-none`;
+    }
+
+    switch (k) {
       case "paid": return "bg-green-100 text-green-700 border-green-200";
       case "unpaid": return "bg-orange-100 text-orange-700 border-orange-200";
       case "half-paid": return "bg-blue-100 text-blue-700 border-blue-200";

@@ -10,6 +10,7 @@ export const APPOINTMENT_STATUSES = {
   RESERVED: 'reserved',     // Tentatively reserved
   CANCELLED: 'cancelled',   // Appointment cancelled
   COMPLETED: 'completed',   // Appointment completed
+  TBD: 'tbd',               // Past appointment awaiting completion status
 } as const;
 
 export type AppointmentStatus = typeof APPOINTMENT_STATUSES[keyof typeof APPOINTMENT_STATUSES];
@@ -23,6 +24,7 @@ export const STATUS_DESCRIPTIONS: Record<AppointmentStatus, string> = {
   [APPOINTMENT_STATUSES.RESERVED]: 'Time slot is tentatively reserved',
   [APPOINTMENT_STATUSES.CANCELLED]: 'Appointment has been cancelled',
   [APPOINTMENT_STATUSES.COMPLETED]: 'Appointment has been completed',
+  [APPOINTMENT_STATUSES.TBD]: 'Past appointment awaiting completion status',
 } as const;
 
 /**
@@ -34,6 +36,7 @@ export const STATUS_COLORS: Record<AppointmentStatus, { bgColor: string; textCol
   [APPOINTMENT_STATUSES.RESERVED]: { bgColor: 'bg-amber-100', textColor: 'text-amber-700' },
   [APPOINTMENT_STATUSES.CANCELLED]: { bgColor: 'bg-red-100', textColor: 'text-red-700' },
   [APPOINTMENT_STATUSES.COMPLETED]: { bgColor: 'bg-blue-100', textColor: 'text-blue-700' },
+  [APPOINTMENT_STATUSES.TBD]: { bgColor: 'bg-red-100', textColor: 'text-red-700' },
 } as const;
 
 /**
@@ -45,6 +48,7 @@ export const getStatusOptions = () => [
   { label: 'Reserved', value: APPOINTMENT_STATUSES.RESERVED },
   { label: 'Cancelled', value: APPOINTMENT_STATUSES.CANCELLED },
   { label: 'Completed', value: APPOINTMENT_STATUSES.COMPLETED },
+  { label: 'TBD', value: APPOINTMENT_STATUSES.TBD },
 ];
 
 /**

@@ -3,20 +3,21 @@
 import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
-import { Users, Calendar, Clock, CheckCircle, AlertCircle, Plus, TrendingUp, Heart } from "lucide-react";
+import { Users, Calendar, Clock, CheckCircle, AlertCircle, Plus } from "lucide-react";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
-import { Badge } from "./ui/badge";
+import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
 import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal } from "../lib/utils";
 import { useAuth } from "@/hooks/useAuth.tsx";
 import BookingModal from "./BookingModal";
 import { NextAppointmentCard } from "./NextAppointmentCard";
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend, AreaChart, Area } from "recharts";
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import { getNextAvailableSlot } from "../lib/appointment-utils";
 
 export function DoctorDashboard() {
-  const { openCreateModal, openAddPatientModal, appointments, openEditModal } = useAppointmentModal();
+  const { openCreateModal, openAddPatientModal, appointments } = useAppointmentModal();
+  const { statuses } = useAppointmentStatuses();
   const { user } = useAuth();
   const [viewMode, setViewMode] = useState<"day" | "week" | "month">("day");
   const [isLoadingView, setIsLoadingView] = useState(false);
@@ -75,7 +76,16 @@ export function DoctorDashboard() {
   }, [myAppointments, viewMode]);
 
   const filteredAppointments = useMemo(() => {
-    return appointmentsByDate.filter(apt => apt.status !== "pending");
+    // Canonical status helper
+    const canonicalStatus = (s?: string) => String(s || "").toLowerCase().trim();
+    
+    // Statuses that represent "Requests" (action required)
+    const isRequestStatus = (status?: string) => {
+      const k = canonicalStatus(status);
+      return k === "pending" || k === "reserved" || k === "tentative" || k === "tbd";
+    };
+
+    return appointmentsByDate.filter(apt => !isRequestStatus(apt.status));
   }, [appointmentsByDate]);
 
   // Get next upcoming appointment (regardless of view mode)
@@ -83,7 +93,6 @@ export function DoctorDashboard() {
     const now = new Date();
     const allFutureAppointments = myAppointments
       .filter((apt: Appointment) => {
-        const aptDate = parseBackendDateToLocal(apt.date);
         const aptDateTime = new Date(`${apt.date}T${apt.time}`);
         return aptDateTime > now && apt.status !== "cancelled";
       })
@@ -115,12 +124,17 @@ export function DoctorDashboard() {
 
   // Count pending appointments
   const pendingAppointmentsCount = useMemo(() => {
-    return appointmentsByDate.filter(apt => apt.status === "pending" || apt.status === "tentative" || apt.status === "To Pay").length;
+    const canonicalStatus = (s?: string) => String(s || "").toLowerCase().trim();
+    return appointmentsByDate.filter(apt => {
+      const k = canonicalStatus(apt.status);
+      return k === "pending" || k === "reserved" || k === "tentative" || k === "tbd";
+    }).length;
   }, [appointmentsByDate]);
 
   // Count completed appointments
   const completedAppointments = useMemo(() => {
-    return appointmentsByDate.filter(apt => apt.status === "completed").length;
+    const canonicalStatus = (s?: string) => String(s || "").toLowerCase().trim();
+    return appointmentsByDate.filter(apt => canonicalStatus(apt.status) === "completed").length;
   }, [appointmentsByDate]);
 
   const dynamicStats = [

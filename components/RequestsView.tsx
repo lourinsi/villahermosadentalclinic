@@ -93,6 +93,13 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     refreshAppointments({ includeUnpaid: true });
   }, [refreshAppointments]);
 
+  // Log available statuses when RequestsView loads
+  useEffect(() => {
+    if (APPOINTMENT_STATUSES && APPOINTMENT_STATUSES.length > 0) {
+      console.log('[RequestsView] Available appointment statuses:', APPOINTMENT_STATUSES.map(s => s.value));
+    }
+  }, [APPOINTMENT_STATUSES]);
+
   // Normalize status strings to canonical backend keys for reliable comparisons
   const canonicalStatus = (s?: string) => {
     if (!s) return "";
@@ -111,10 +118,11 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     return k === "scheduled" || k === "completed" || k === "cancelled";
   };
 
-  // Pending requests include these statuses
+  // Pending requests include these statuses (action required)
   const isPendingRequestStatus = (status?: string) => {
     const k = canonicalStatus(status);
-    return k === "pending" || k === "reserved" || k === "tentative" || k === "to-pay" || k === "half-paid";
+    // TBD also appears in requests because it needs action (marking completed/cancelled)
+    return k === "pending" || k === "reserved" || k === "tentative" || k === "to-pay" || k === "half-paid" || k === "tbd";
   };
 
   // Pending filters state
@@ -155,10 +163,14 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   };
 
   const requests = useMemo(() => {
-    return appointments.filter((apt) => {
+    const result = appointments.filter((apt) => {
       const matchesDoctor = !doctorFilter || (apt.doctor || "").toLowerCase() === doctorFilter.toLowerCase();
-      // Requests are those with pending statuses
-      if (!isPendingRequestStatus(apt.status) || !matchesDoctor) return false;
+      const isPending = isPendingRequestStatus(apt.status);
+      
+      // Requests are those with pending statuses (including TBD)
+      if (!isPendingRequestStatus(apt.status) || !matchesDoctor) {
+        return false;
+      }
 
       if (pendingSearchTerm && !apt.patientName.toLowerCase().includes(pendingSearchTerm.toLowerCase()) && 
           !getAppointmentTypeName(apt.type, apt.customType).toLowerCase().includes(pendingSearchTerm.toLowerCase())) {
@@ -182,6 +194,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
 
       return true;
     });
+
+    return result;
   }, [appointments, doctorFilter, pendingSearchTerm, pendingStatusFilter, pendingDoctorFilter, pendingDateFilter, refreshTrigger]);
 
   const history = useMemo(() => {
@@ -225,8 +239,15 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     if (!pendingApproveAppointment) return;
     
     try {
-      // Approve any pending/reserved request to scheduled
-      const newStatus = pendingApproveAppointment.status === "pending" || pendingApproveAppointment.status === "reserved" ? "scheduled" : "scheduled";
+      // Approve pending/reserved requests to scheduled
+      // Approve TBD requests to completed (since TBD is for past appointments)
+      let newStatus = "scheduled";
+      if (pendingApproveAppointment.status === "tbd") {
+        newStatus = "completed";
+      } else if (pendingApproveAppointment.status === "pending" || pendingApproveAppointment.status === "reserved") {
+        newStatus = "scheduled";
+      }
+      
       await updateAppointment(pendingApproveAppointment.id, { status: newStatus });
       toast.success(`Appointment for ${pendingApproveAppointment.patientName} approved`);
       // Refresh notifications to show the new status change notification
@@ -325,36 +346,32 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
 
   const getStatusBadge = (status: string) => {
     const k = canonicalStatus(status);
-    switch (k) {
-      case "pending":
-        return <Badge className="bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 font-medium">Pending</Badge>;
-      case "reserved":
-        return <Badge className="bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100 font-medium">Reserved</Badge>;
-      case "scheduled":
-        return <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 font-medium">Scheduled</Badge>;
-      case "completed":
-        return <Badge className="bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 font-medium">Completed</Badge>;
-      case "cancelled":
-        return <Badge className="bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 font-medium">Cancelled</Badge>;
-      default:
-        return <Badge variant="outline" className="font-medium">{status}</Badge>;
+    const statusOption = APPOINTMENT_STATUSES.find(s => canonicalStatus(s.value) === k);
+    
+    if (statusOption) {
+      return (
+        <Badge className={`${statusOption.bgColor} ${statusOption.textColor} border-none hover:opacity-80 font-medium capitalize`}>
+          {statusOption.label}
+        </Badge>
+      );
     }
+    
+    return <Badge variant="outline" className="font-medium capitalize">{status}</Badge>;
   };
 
   const getPaymentStatusBadge = (paymentStatus: string | undefined) => {
     const k = canonicalStatus(paymentStatus || "unpaid");
-    switch (k) {
-      case "unpaid":
-        return <Badge className="bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100 font-medium">Unpaid</Badge>;
-      case "half-paid":
-        return <Badge className="bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100 font-medium">Half Paid</Badge>;
-      case "paid":
-        return <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 font-medium">Paid</Badge>;
-      case "pay-at-clinic":
-        return <Badge className="bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 font-medium">Pay at Clinic</Badge>;
-      default:
-        return <Badge variant="outline" className="font-medium">{paymentStatus || "Unpaid"}</Badge>;
+    const statusOption = PAYMENT_STATUSES.find(s => canonicalStatus(s.value) === k);
+    
+    if (statusOption) {
+      return (
+        <Badge className={`${statusOption.bgColor} ${statusOption.textColor} border-none hover:opacity-80 font-medium capitalize`}>
+          {statusOption.label}
+        </Badge>
+      );
     }
+    
+    return <Badge variant="outline" className="font-medium capitalize">{paymentStatus || "Unpaid"}</Badge>;
   };
 
   const handlePendingSort = (column: string) => {
@@ -386,7 +403,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   };
 
   const sortedRequests = useMemo(() => {
-    const sorted = [...requests];
+    let sorted = [...requests];
+    
     if (pendingSortColumn) {
       sorted.sort((a, b) => {
         let aVal, bVal;
@@ -417,12 +435,12 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
             bVal = canonicalStatus(b.paymentStatus || "unpaid");
             break;
           case "booked":
-            aVal = new Date(a.createdAt || 0).getTime();
-            bVal = new Date(b.createdAt || 0).getTime();
+            aVal = a.createdAt ? new Date(a.createdAt).getTime() : Number.MIN_VALUE;
+            bVal = b.createdAt ? new Date(b.createdAt).getTime() : Number.MIN_VALUE;
             break;
           case "updated":
-            aVal = new Date(a.updatedAt || 0).getTime();
-            bVal = new Date(b.updatedAt || 0).getTime();
+            aVal = a.updatedAt ? new Date(a.updatedAt).getTime() : Number.MIN_VALUE;
+            bVal = b.updatedAt ? new Date(b.updatedAt).getTime() : Number.MIN_VALUE;
             break;
           default:
             return 0;
@@ -433,11 +451,13 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         return 0;
       });
     }
+    
     return sorted;
   }, [requests, pendingSortColumn, pendingSortDirection]);
 
   const sortedHistory = useMemo(() => {
-    const sorted = [...history];
+    let sorted = [...history];
+    
     if (historySortColumn) {
       sorted.sort((a, b) => {
         let aVal, bVal;
@@ -464,8 +484,12 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
             bVal = canonicalStatus(b.paymentStatus || "unpaid");
             break;
           case "booked":
-            aVal = new Date(a.createdAt || 0).getTime();
-            bVal = new Date(b.createdAt || 0).getTime();
+            aVal = a.createdAt ? new Date(a.createdAt).getTime() : Number.MIN_VALUE;
+            bVal = b.createdAt ? new Date(b.createdAt).getTime() : Number.MIN_VALUE;
+            break;
+          case "updated":
+            aVal = a.updatedAt ? new Date(a.updatedAt).getTime() : Number.MIN_VALUE;
+            bVal = b.updatedAt ? new Date(b.updatedAt).getTime() : Number.MIN_VALUE;
             break;
           default:
             return 0;
@@ -476,6 +500,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         return 0;
       });
     }
+    
     return sorted;
   }, [history, historySortColumn, historySortDirection]);
 
@@ -611,6 +636,11 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           Booked {getSortIcon("booked", true)}
                         </div>
                       </TableHead>
+                      <TableHead className="font-bold text-gray-900 cursor-pointer" onClick={() => handlePendingSort("updated")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Last Updated {getSortIcon("updated", true)}
+                        </div>
+                      </TableHead>
                       <TableHead className="text-right uppercase text-[11px] tracking-wider font-bold text-gray-900">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -706,23 +736,31 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                               <span className="text-xs text-gray-500 font-medium">{request.createdAt ? new Date(request.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}</span>
                             </div>
                           </TableCell>
+                          <TableCell>
+                            <div className="flex flex-col">
+                              <span className="font-bold text-gray-900">{request.updatedAt ? new Date(request.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}</span>
+                              <span className="text-xs text-gray-500 font-medium">{request.updatedAt ? new Date(request.updatedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}</span>
+                            </div>
+                          </TableCell>
                           <TableCell className="text-right">
                             <div className="flex justify-end items-center gap-2">
-                              {request.status === "pending" || request.status === "reserved" ? (
+                              {request.status === "pending" || request.status === "reserved" || request.status === "tbd" ? (
                                 <>
                                   <Button 
                                     size="sm" 
-                                    variant="outline" 
-                                    className="h-9 px-4 border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 rounded-xl font-bold uppercase text-[10px] tracking-wider"
+                                    variant="ghost" 
+                                    className="h-9 w-9 p-0 text-emerald-600 hover:bg-emerald-50 rounded-xl"
                                     onClick={() => handleApprove(request)}
+                                    title={request.status === "tbd" ? "Mark as Completed" : "Approve Appointment"}
                                   >
-                                    Approve
+                                    <CheckCircle className="h-5 w-5" />
                                   </Button>
                                   <Button 
                                     size="sm" 
                                     variant="ghost" 
                                     className="h-9 w-9 p-0 text-rose-600 hover:bg-rose-50 rounded-xl"
                                     onClick={() => handleReject(request)}
+                                    title={request.status === "tbd" ? "Cancel Appointment" : "Reject Appointment"}
                                   >
                                     <XCircle className="h-5 w-5" />
                                   </Button>
@@ -784,9 +822,9 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Status</SelectItem>
-                      <SelectItem value="scheduled">Scheduled</SelectItem>
-                      <SelectItem value="completed">Completed</SelectItem>
-                      <SelectItem value="cancelled">Cancelled</SelectItem>
+                      {APPOINTMENT_STATUSES.filter((s: any) => isHistoryStatus(s.value)).map((status: any) => (
+                        <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
 
@@ -833,6 +871,11 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                       <TableHead className="font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("booked")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
                           Booked {getSortIcon("booked", false)}
+                        </div>
+                      </TableHead>
+                      <TableHead className="font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("updated")}>
+                        <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                          Last Updated {getSortIcon("updated", false)}
                         </div>
                       </TableHead>
                       <TableHead className="text-right uppercase text-[11px] tracking-wider font-bold text-gray-900">Details</TableHead>
@@ -916,6 +959,12 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                               <span className="text-xs text-gray-500 font-medium">{item.createdAt ? new Date(item.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}</span>
                             </div>
                           </TableCell>
+                          <TableCell>
+                            <div className="flex flex-col">
+                              <span className="font-bold text-gray-900">{item.updatedAt ? new Date(item.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}</span>
+                              <span className="text-xs text-gray-500 font-medium">{item.updatedAt ? new Date(item.updatedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}</span>
+                            </div>
+                          </TableCell>
                           <TableCell className="text-right">
                             <Button 
                               size="sm" 
@@ -968,13 +1017,19 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
           onEscapeKeyDown={(e) => e.preventDefault()}
         >
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-2xl font-black text-gray-900 uppercase tracking-tight">Approve Appointment?</AlertDialogTitle>
+            <AlertDialogTitle className="text-2xl font-black text-gray-900 uppercase tracking-tight">
+              {pendingApproveAppointment?.status === "tbd" ? "Mark as Completed?" : "Approve Appointment?"}
+            </AlertDialogTitle>
             <AlertDialogDescription className="text-gray-500 font-medium">
-              Are you sure you want to approve this appointment for <strong>{pendingApproveAppointment?.patientName}</strong>? The status will be set to <strong>Scheduled</strong>.
+              {pendingApproveAppointment?.status === "tbd" ? (
+                <>Are you sure you want to mark this appointment for <strong>{pendingApproveAppointment?.patientName}</strong> as <strong>Completed</strong>?</>
+              ) : (
+                <>Are you sure you want to approve this appointment for <strong>{pendingApproveAppointment?.patientName}</strong>? The status will be set to <strong>Scheduled</strong>.</>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           
-          {/* Payment Status Summary */}
+          {/* Payment Status Summary - show for all statuses */}
           <div className="bg-amber-50 p-3 rounded-lg border border-amber-200 mb-4">
             <p className="text-sm font-medium text-amber-900">
               {(() => {
@@ -994,7 +1049,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
             </p>
           </div>
 
-          <div className="bg-blue-50 p-4 rounded-lg border border-blue-200 space-y-2">
+          <div className={`p-4 rounded-lg border space-y-2 ${pendingApproveAppointment?.status === "tbd" ? "bg-emerald-50 border-emerald-200" : "bg-blue-50 border-blue-200"}`}>
             <div className="text-sm space-y-2">
               <div className="flex justify-between">
                 <span className="text-gray-600">Service:</span>
@@ -1008,11 +1063,11 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                 <span className="text-gray-600">Doctor:</span>
                 <span className="font-semibold text-gray-900">{pendingApproveAppointment?.doctor}</span>
               </div>
-              <div className="border-t border-blue-100 pt-2">
+              <div className={`border-t pt-2 ${pendingApproveAppointment?.status === "tbd" ? "border-emerald-100" : "border-blue-100"}`}>
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Payment Status:</span>
+                  <span className="text-gray-600">Current Status:</span>
                   <div>
-                    {getPaymentStatusBadge(pendingApproveAppointment?.paymentStatus)}
+                    {getStatusBadge(pendingApproveAppointment?.status || "pending")}
                   </div>
                 </div>
               </div>
@@ -1022,9 +1077,9 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
             <AlertDialogCancel className="rounded-xl border-gray-100 font-bold uppercase text-xs tracking-wider">Cancel</AlertDialogCancel>
             <AlertDialogAction 
               onClick={confirmApprove}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold uppercase text-xs tracking-wider"
+              className={`text-white rounded-xl font-bold uppercase text-xs tracking-wider ${pendingApproveAppointment?.status === "tbd" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-emerald-600 hover:bg-emerald-700"}`}
             >
-              Yes, Approve
+              {pendingApproveAppointment?.status === "tbd" ? "Yes, Mark as Completed" : "Yes, Approve"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

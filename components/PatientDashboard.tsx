@@ -3,8 +3,9 @@
 import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
-import { Calendar, Clock, CheckCircle, AlertCircle, User, DollarSign } from "lucide-react";
+import { Calendar, CheckCircle, AlertCircle, User, DollarSign } from "lucide-react";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
 import { Badge } from "./ui/badge";
 import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
@@ -14,7 +15,8 @@ import BookingModal from "./BookingModal";
 import { NextAppointmentCard } from "./NextAppointmentCard";
 
 export function PatientDashboard() {
-  const { openCreateModal, appointments, openEditModal } = useAppointmentModal();
+  const { openCreateModal, appointments } = useAppointmentModal();
+  const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
   const { user } = useAuth();
   const [viewMode, setViewMode] = useState<"upcoming" | "past">("upcoming");
   const [isLoadingView, setIsLoadingView] = useState(false);
@@ -78,7 +80,10 @@ export function PatientDashboard() {
   }, [nextAppointment, upcomingAppointments]);
 
   const totalAppointments = appointments.length;
-  const completedAppointments = appointments.filter((apt: Appointment) => apt.status === "completed").length;
+  const completedAppointments = appointments.filter((apt: Appointment) => {
+    const k = String(apt.status || "").toLowerCase().trim();
+    return k === "completed";
+  }).length;
   const totalSpent = appointments.reduce((sum: number, apt: Appointment) => sum + (apt.price || 0), 0);
   const pendingBalance = appointments.reduce((sum: number, apt: Appointment) => sum + (apt.balance || 0), 0);
 
@@ -118,7 +123,15 @@ export function PatientDashboard() {
   ];
 
   const getStatusColor = (status: string) => {
-    switch (status?.toLowerCase()) {
+    const k = String(status || "").toLowerCase().trim();
+    const statusOption = APPOINTMENT_STATUSES.find(s => s.value.toLowerCase() === k);
+    
+    if (statusOption) {
+      const borderClass = statusOption.bgColor?.replace('bg-', 'border-') || 'border-gray-200';
+      return `${statusOption.bgColor} ${statusOption.textColor} ${borderClass}`;
+    }
+
+    switch (k) {
       case "scheduled":
         return "bg-emerald-50 text-emerald-700 border-emerald-200";
       case "pending":
@@ -138,7 +151,7 @@ export function PatientDashboard() {
     <div className="p-6 space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-gray-900">Welcome back, {firstName}!</h1>
-        <p className="text-muted-foreground">Here's your appointments and health records overview.</p>
+        <p className="text-muted-foreground">Here&apos;s your appointments and health records overview.</p>
       </div>
 
       {/* Stats Cards */}

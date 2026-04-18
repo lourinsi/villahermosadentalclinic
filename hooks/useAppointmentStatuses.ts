@@ -104,6 +104,14 @@ export const useAppointmentStatuses = (): UseAppointmentStatusesReturn => {
           bgColor: "bg-blue-100",
           textColor: "text-blue-700"
         },
+        {
+          key: 6,
+          value: "tbd",
+          label: "TBD",
+          description: "Past appointment awaiting completion status",
+          bgColor: "bg-red-100",
+          textColor: "text-red-700"
+        },
       ];
       
       setStatuses(fallbackStatuses);

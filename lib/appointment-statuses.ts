@@ -42,6 +42,12 @@ export const APPOINTMENT_STATUSES: AppointmentStatusOption[] = [
     label: "Completed",
     description: "Appointment completed"
   },
+  {
+    key: 6,
+    value: "tbd",
+    label: "TBD",
+    description: "Past appointment awaiting completion status"
+  },
 ];
 
 /**

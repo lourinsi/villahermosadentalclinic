@@ -16,6 +16,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
+import { usePaymentStatuses } from "@/hooks/usePaymentStatuses";
 import {
   Search,
   Plus,
@@ -806,6 +808,8 @@ const PatientDetails = React.forwardRef<{
 }, ref) => {
   const { openEditModal, refreshPatients, appointments } = useAppointmentModal();
   const { openPaymentModal, openEditPaymentModal, openPaymentFor } = usePaymentModal();
+  const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
+  const { statuses: PAYMENT_STATUSES } = usePaymentStatuses();
   const [formData, setFormData] = useState({
     firstName: patient.firstName || patient.name?.split(' ')[0] || '',
     lastName: patient.lastName || patient.name?.split(' ').slice(1).join(' ') || '',
@@ -979,18 +983,39 @@ const PatientDetails = React.forwardRef<{
     }
   };
 
+  const getAppointmentStatusBadge = (status: string) => {
+    const k = String(status || "scheduled").toLowerCase().trim();
+    const statusOption = APPOINTMENT_STATUSES.find(s => s.value.toLowerCase() === k);
+    
+    if (statusOption) {
+      return (
+        <Badge className={`${statusOption.bgColor} ${statusOption.textColor} border-none hover:opacity-80 font-medium capitalize`}>
+          {statusOption.label}
+        </Badge>
+      );
+    }
+    
+    return <Badge variant="outline" className="font-medium capitalize">{status}</Badge>;
+  };
+
   const getPaymentStatusBadge = (status: string) => {
-    switch (status) {
-      case 'paid':
-        return <Badge className="bg-green-100 text-green-800">Paid</Badge>;
+    const k = String(status || "unpaid").toLowerCase().trim();
+    const statusOption = PAYMENT_STATUSES.find(s => s.value.toLowerCase() === k);
+    
+    if (statusOption) {
+      return (
+        <Badge className={`${statusOption.bgColor} ${statusOption.textColor} border-none hover:opacity-80 font-medium capitalize`}>
+          {statusOption.label}
+        </Badge>
+      );
+    }
+    
+    // Fallback logic for statuses not in PAYMENT_STATUSES (like over-paid)
+    switch (k) {
       case 'over-paid':
-        return <Badge className="bg-blue-100 text-blue-800">Over-paid</Badge>;
-      case 'half-paid':
-        return <Badge className="bg-yellow-100 text-yellow-800">Partially Paid</Badge>;
-      case 'overdue':
-        return <Badge className="bg-red-100 text-red-800">Overdue</Badge>;
-      default: // unpaid
-        return <Badge className="bg-gray-100 text-gray-800">Unpaid</Badge>;
+        return <Badge className="bg-blue-100 text-blue-800 border-none font-medium">Over-paid</Badge>;
+      default:
+        return <Badge variant="outline" className="font-medium capitalize">{status || "Unpaid"}</Badge>;
     }
   };
 
@@ -1699,11 +1724,10 @@ const PatientDetails = React.forwardRef<{
                             </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="all">All Statuses</SelectItem>
-                                <SelectItem value="paid">Paid</SelectItem>
-                                <SelectItem value="unpaid">Unpaid</SelectItem>
-                                <SelectItem value="half-paid">Partially Paid</SelectItem>
+                                {PAYMENT_STATUSES.map(status => (
+                                    <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                                ))}
                                 <SelectItem value="over-paid">Over-paid</SelectItem>
-                                <SelectItem value="overdue">Overdue</SelectItem>
                             </SelectContent>
                         </Select>
                         {/* Hide doctor filter when viewing as a doctor - they only see their own appointments */}
@@ -1756,7 +1780,10 @@ const PatientDetails = React.forwardRef<{
                                   <div className="font-medium text-base">{appointment.type}</div>
                                   <div className="text-muted-foreground">{appointment.date}</div>
                                 </div>
-                                {getPaymentStatusBadge(String(appointment.paymentStatus || ''))}
+                                <div className="flex gap-2">
+                                  {getAppointmentStatusBadge(String(appointment.status || ''))}
+                                  {getPaymentStatusBadge(String(appointment.paymentStatus || ''))}
+                                </div>
                               </div>
                               <div className="text-sm">
                                 <div className="font-medium">{appointment.doctor}</div>

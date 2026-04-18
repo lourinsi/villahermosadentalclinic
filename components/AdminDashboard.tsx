@@ -3,10 +3,9 @@
 import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
-import { Users, Calendar, DollarSign, AlertCircle, TrendingUp, Clock, Heart } from "lucide-react";
+import { Users, Calendar, DollarSign, AlertCircle, TrendingUp } from "lucide-react";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
-import { Badge } from "./ui/badge";
 import { getNextAvailableSlot } from "../lib/appointment-utils";
 import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
@@ -25,7 +24,7 @@ const revenueData = [
 // Derive appointment types/counts from real appointments
 const colorPalette = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4", "#f97316"];
 
-export function Dashboard({ portal }: { portal?: string }) {
+export function Dashboard() {
   const { openCreateModal, openAddPatientModal, appointments, refreshTrigger, openEditModal } = useAppointmentModal();
   const [viewMode, setViewMode] = useState<"day" | "week" | "month">("day");
   const [totalPatients, setTotalPatients] = useState(0);
@@ -60,11 +59,20 @@ export function Dashboard({ portal }: { portal?: string }) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    // Canonical status helper
+    const canonicalStatus = (s?: string) => String(s || "").toLowerCase().trim();
+    
+    // Statuses that represent "Requests" (action required)
+    const isRequestStatus = (status?: string) => {
+      const k = canonicalStatus(status);
+      return k === "pending" || k === "reserved" || k === "tentative" || k === "tbd";
+    };
+
     if (viewMode === "day") {
       const dayStr = today.toISOString().split("T")[0];
       return appointments
         .filter((apt: Appointment) => parseBackendDateToLocal(apt.date).toISOString().split("T")[0] === dayStr)
-        .filter((apt: Appointment) => apt.status !== "pending");
+        .filter((apt: Appointment) => !isRequestStatus(apt.status));
     } else if (viewMode === "week") {
       const weekStart = new Date(today);
       weekStart.setDate(today.getDate() - today.getDay());
@@ -79,7 +87,7 @@ export function Dashboard({ portal }: { portal?: string }) {
           const aptDate = parseBackendDateToLocal(apt.date);
           return aptDate >= weekStart && aptDate <= weekEnd;
         })
-        .filter((apt: Appointment) => apt.status !== "pending");
+        .filter((apt: Appointment) => !isRequestStatus(apt.status));
     } else {
       // month - today's month
       const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -93,12 +101,16 @@ export function Dashboard({ portal }: { portal?: string }) {
           const aptDate = parseBackendDateToLocal(apt.date);
           return aptDate >= monthStart && aptDate <= monthEnd;
         })
-        .filter((apt: Appointment) => apt.status !== "pending");
+        .filter((apt: Appointment) => !isRequestStatus(apt.status));
     }
   }, [appointments, viewMode]);
 
   const pendingAppointmentsCount = useMemo(() => {
-    return appointments.filter(apt => apt.status === "pending" || apt.status === "tentative" || apt.status === "To Pay").length;
+    const canonicalStatus = (s?: string) => String(s || "").toLowerCase().trim();
+    return appointments.filter(apt => {
+      const k = canonicalStatus(apt.status);
+      return k === "pending" || k === "reserved" || k === "tentative" || k === "tbd";
+    }).length;
   }, [appointments]);
 
   // Get next upcoming appointment (regardless of view mode)
@@ -179,20 +191,6 @@ export function Dashboard({ portal }: { portal?: string }) {
       return today.toLocaleDateString("en-US", { year: "numeric", month: "long" });
     }
   };
-
-  const appointmentTypeCounts = appointments.reduce<Record<string, number>>((acc, apt: Appointment) => {
-    const key = getAppointmentTypeName(apt.type, apt.customType);
-    acc[key] = (acc[key] || 0) + 1;
-    return acc;
-  }, {});
-
-  const totalAppointments = Object.values(appointmentTypeCounts).reduce((s: number, v: number) => s + v, 0) || 1;
-
-  const appointmentTypes = Object.keys(appointmentTypeCounts).map((name, idx) => ({
-    name,
-    value: Math.round((appointmentTypeCounts[name] / totalAppointments) * 100),
-    color: colorPalette[idx % colorPalette.length]
-  }));
 
   return (
     <div className="p-6 space-y-6">
