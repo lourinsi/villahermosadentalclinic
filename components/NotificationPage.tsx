@@ -15,9 +15,11 @@ export function NotificationPage({ portal }: NotificationPageProps) {
   const { 
     notifications, 
     isLoading: notificationsLoading, 
+    error,
     markAsRead,
     markAsUnread,
-    deleteNotification, 
+  deleteNotification, 
+  deleteNotificationWithResult,
     markAllAsRead,
     deleteAllNotifications,
     refreshNotifications,
@@ -120,9 +122,12 @@ export function NotificationPage({ portal }: NotificationPageProps) {
     <div className="max-w-4xl mx-auto">
       <NotificationView 
         notifications={notifications}
+        isLoading={notificationsLoading}
+        error={error}
         onMarkAsRead={markAsRead}
         onMarkAsUnread={markAsUnread}
-        onDelete={deleteNotification}
+  onDelete={deleteNotification}
+  onDeleteWithResult={deleteNotificationWithResult}
         onRestore={handleRestoreNotification}
         onMarkAllAsRead={markAllAsRead}
         onDeleteAll={deleteAllNotifications}

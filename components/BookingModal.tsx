@@ -962,7 +962,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setDuration(String(appointmentToEdit.duration || 30));
       // Prefill discount if it exists in the appointment (from discount field)
       setDiscount(String(appointmentToEdit.discount || 0));
-      setNotes(appointmentToEdit.notes || '');
+  // For both editing and creating via the BookingModal we intentionally
+  // clear the notes field so the modal opens with an empty notes input.
+  // Notes from history remain visible in the AppointmentHistoryView below,
+  // but they are not auto-copied into the editable notes field.
+  setNotes('');
       setSelectedDate(appointmentToEdit.date ? new Date(appointmentToEdit.date) : (defaultDate ?? new Date()));
       setSelectedTime(appointmentToEdit.time || (defaultTime ?? ''));
       // Set doctor from the appointment
@@ -1002,7 +1006,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setPaymentStatusChangedByUser(0);
       setModalStep('details');
     }
-  }, [appointmentToEdit, defaultDate, defaultTime, patients]);
+  }, [open, appointmentToEdit, defaultDate, defaultTime, patients]);
 
   // Derived display values for schedule block
   const displayDoctor = formatDoctorName(appointmentToEdit?.doctor || doctorName);
@@ -1959,10 +1963,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                       )}
                                     </div>
 
-                                    {/* Show notes if they were updated or exist in this log AND are not empty */}
-                                    {(log.newState?.notes !== undefined && log.newState.notes !== log.previousState?.notes && log.newState.notes.trim() !== '' && log.newState.notes.trim() !== '-') && (
+                                    {/* Show notes if they exist in newState AND are not empty (show even if unchanged from previousState) */}
+                                    {(log.newState?.notes && log.newState.notes.trim() !== '' && log.newState.notes.trim() !== '-') && (
                                       <div className="mt-1.5 p-1.5 bg-blue-50/50 rounded border border-blue-100/50">
-                                        <p className="text-[10px] text-blue-800 font-semibold mb-0.5">{user?.role === 'patient' ? 'Note added:' : 'Notes updated:'}</p>
+                                        <p className="text-[10px] text-blue-800 font-semibold mb-0.5">Notes:</p>
                                         <p className="text-[10px] text-gray-600 italic line-clamp-2">
                                           {log.newState.notes}
                                         </p>

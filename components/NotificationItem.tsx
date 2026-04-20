@@ -34,6 +34,7 @@ interface NotificationItemProps {
   onMarkAsRead?: (id: string) => void;
   onMarkAsUnread?: (id: string) => void;
   onDelete?: (id: string) => void;
+  onDeleteWithResult?: (id: string) => Promise<boolean>;
   onRestore?: (id: string) => void;
   onUpdateAppointmentStatus?: (appointmentId: string, status: string, notificationId: string) => void;
   onEditAppointment?: (appointmentId: string) => void;
@@ -48,6 +49,7 @@ export function NotificationItem({
   onMarkAsRead,
   onMarkAsUnread,
   onDelete,
+  onDeleteWithResult,
   onRestore,
   onUpdateAppointmentStatus,
   onEditAppointment,
@@ -307,17 +309,34 @@ export function NotificationItem({
                   </>
                 )}
 
-                {onDelete && (
-                  <DropdownMenuItem 
-                    className="text-red-600 focus:text-red-600" 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDelete(notification.id);
-                    }}
-                  >
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    <span className="text-sm">Delete notification</span>
-                  </DropdownMenuItem>
+                {(
+                  onDeleteWithResult ? (
+                    <DropdownMenuItem 
+                      className="text-red-600 focus:text-red-600" 
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        try {
+                          await onDeleteWithResult(notification.id);
+                        } catch (err) {
+                          console.error('[NotificationItem] onDeleteWithResult error:', err);
+                        }
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      <span className="text-sm">Delete notification</span>
+                    </DropdownMenuItem>
+                  ) : onDelete ? (
+                    <DropdownMenuItem 
+                      className="text-red-600 focus:text-red-600" 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDelete(notification.id);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      <span className="text-sm">Delete notification</span>
+                    </DropdownMenuItem>
+                  ) : null
                 )}
               </>
             )}

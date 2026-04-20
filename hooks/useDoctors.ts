@@ -33,6 +33,18 @@ export function useDoctors(refreshKey?: number) {
       const response = await fetch(STAFF_API, { headers, credentials: "include" });
       
       if (!response.ok) {
+        // If the user is not authenticated, the API may return 401/403.
+        // That's an expected case for public/landing pages — avoid noisy
+        // console.error with full stack traces in that situation.
+        if (response.status === 401 || response.status === 403) {
+          // Use debug-level logging so it can be inspected when needed
+          // but won't create an error stack in normal unauthenticated usage.
+          console.debug('[useDoctors] Unauthenticated - backend returned', response.status, response.statusText);
+          setDoctors([]);
+          setIsLoadingDoctors(false);
+          return;
+        }
+
         console.error('[useDoctors] Fetch failed with status:', response.status, response.statusText);
         setDoctors([]);
         setIsLoadingDoctors(false);

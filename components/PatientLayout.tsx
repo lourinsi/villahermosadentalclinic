@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/useAuth.tsx";
 import { Button } from "@/components/ui/button";
 import { LogOut, User, Home, Users, Calendar, Search, ShoppingBag, ShoppingCart, Bell, LayoutDashboard } from "lucide-react";
 import { toast } from "sonner";
-import { NotificationsOpened } from "./notificationsOpened";
+import NotificationsOpened from "./notificationsOpened";
 import BookingModal from "./BookingModal";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
@@ -14,7 +14,7 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
   const pathname = usePathname();
   const router = useRouter();
   const { logout, user } = useAuth();
-  const { notifications, refreshNotifications, markAsRead, markAsUnread, deleteNotification, markAllAsRead, deleteAllNotifications } = useNotifications();
+  const { notifications, refreshNotifications, markAsRead, markAsUnread, deleteNotification, deleteNotificationWithResult, markAllAsRead, deleteAllNotifications } = useNotifications();
   const { 
     appointments, 
     openEditModal, 
@@ -129,6 +129,7 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
             onMarkAsRead={markAsRead}
             onMarkAsUnread={markAsUnread}
             onDelete={deleteNotification}
+            onDeleteWithResult={deleteNotificationWithResult}
             onMarkAllAsRead={markAllAsRead}
             onDeleteAll={deleteAllNotifications}
             onReschedule={handleReschedule}

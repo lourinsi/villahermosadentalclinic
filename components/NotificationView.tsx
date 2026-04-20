@@ -1,18 +1,18 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Button } from "./ui/button";
 import { Notification } from "../lib/notification-types";
 import { Appointment } from "@/hooks/useAppointments";
 import { useNotificationLogic } from "../hooks/useNotificationLogic";
 import { NotificationItem } from "./NotificationItem";
-import { Bell, MoreHorizontal, Check, Trash2, RotateCcw } from "lucide-react";
+import { Bell, MoreHorizontal, Check, Trash2, Loader } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
+import NotificationsMenuContent from "./NotificationsMenuContent";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 
 interface NotificationViewProps {
@@ -25,9 +25,12 @@ interface NotificationViewProps {
   onUpdateAppointmentStatus?: (appointmentId: string, status: Appointment["status"], notificationId: string) => void;
   onReschedule?: (appointmentId: string) => void;
   onCancelAppointment?: (appointmentId: string) => void;
-  onEditAppointment?: (appointmentId: string) => void; // new optional prop for edit action
-  onRestore?: (id: string) => void; // new optional prop for restore action
+  onEditAppointment?: (appointmentId: string) => void;
+  onRestore?: (id: string) => void;
   portal?: 'admin' | 'doctor' | 'patient';
+  isLoading?: boolean;
+  error?: string | null;
+  onDeleteWithResult?: (id: string) => Promise<boolean>;
 }
 
 export function NotificationView({ 
@@ -37,37 +40,125 @@ export function NotificationView({
   onDelete, 
   onMarkAllAsRead,
   onDeleteAll,
+  onDeleteWithResult,
   onUpdateAppointmentStatus,
   onReschedule,
   onCancelAppointment,
   onEditAppointment,
   onRestore,
-  portal = 'admin'
+  portal = 'admin',
+  isLoading = false,
+  error = null
 }: NotificationViewProps) {
   const [activeTab, setActiveTab] = useState('notifications');
+  const [localNotifications, setLocalNotifications] = useState<Notification[]>([]);
+  // Track IDs we've optimistically marked deleted so parent prop updates don't overwrite them
+  const optimisticDeletedRef = React.useRef<Set<string>>(new Set());
+
+  // Watch for changes in the notifications prop and update local state
+  useEffect(() => {
+    // Merge incoming parent notifications with our optimistic delete markers so
+    // optimistic deletions aren't overwritten by parent refreshes.
+    try {
+      if (!notifications) return;
+
+      console.log('[NotificationView] 📥 Notifications updated from parent (merging optimistic state)');
+      console.log('[NotificationView] Incoming total:', notifications.length);
+
+      // Build a map of incoming notifications
+      const incomingMap = new Map<string, Notification>();
+      notifications.forEach(n => incomingMap.set(n.id, { ...n }));
+
+      // Start with incoming notifications and apply optimistic deleted flags
+      const merged: Notification[] = notifications.map(n => {
+        if (optimisticDeletedRef.current.has(n.id)) {
+          // keep the optimistic deleted flag until server confirms
+          return { ...n, deleted: true, deletedAt: n.deletedAt || new Date().toISOString() };
+        }
+        return { ...n };
+      });
+
+      // There may be local notifications created optimistically that the server hasn't returned yet
+      // (rare). Include any local-only entries so UI doesn't lose them.
+      localNotifications.forEach(local => {
+        if (!incomingMap.has(local.id)) {
+          // keep local-only entries (e.g., newly added notifications) in the merged list
+          merged.push(local);
+        }
+      });
+
+      // If server now reports an item as deleted, clear its optimistic marker
+      merged.forEach(m => {
+        if (m.deleted && optimisticDeletedRef.current.has(m.id)) {
+          optimisticDeletedRef.current.delete(m.id);
+        }
+      });
+
+      setLocalNotifications(merged.sort((a, b) => {
+        const dateA = new Date(a.updatedAt || a.createdAt).getTime();
+        const dateB = new Date(b.updatedAt || b.createdAt).getTime();
+        return dateB - dateA;
+      }));
+    } catch (err) {
+      console.error('[NotificationView] Error merging notifications:', err);
+    }
+  }, [notifications]);
+
+  // No auto-switch: localNotifications updates immediately when onDelete is triggered,
+  // so the Deleted tab content updates without changing the user's active tab.
 
   const handleTabChange = (tabValue: string) => {
     console.log(`[NotificationView] Tab changed to: ${tabValue}`);
     if (tabValue === 'deleted') {
-      console.log(`[NotificationView] Viewing deleted notifications - Total deleted: ${notifications.filter(n => n.deleted).length}`);
-      console.log('[NotificationView] Deleted notifications:', notifications.filter(n => n.deleted));
+      const deletedCount = localNotifications.filter(n => n.deleted).length;
+      console.log(`[NotificationView] Viewing deleted notifications - Total deleted: ${deletedCount}`);
     } else {
-      console.log(`[NotificationView] Viewing active notifications - Total active: ${notifications.filter(n => !n.deleted).length}`);
+      const activeCount = localNotifications.filter(n => !n.deleted).length;
+      console.log(`[NotificationView] Viewing active notifications - Total active: ${activeCount}`);
     }
     setActiveTab(tabValue);
   };
+
+  // Only call useNotificationLogic if we have notifications to avoid errors
   const { 
     filter, 
     setFilter, 
     filteredNotifications, 
     newNotifications, 
     earlierNotifications 
-  } = useNotificationLogic(notifications.filter(n => !n.deleted));
+  } = useNotificationLogic(localNotifications.filter(n => !n.deleted) || []);
 
   // Separate deleted notifications
-  const deletedNotifications = notifications.filter(n => n.deleted);
+  const deletedNotifications = localNotifications.filter(n => n.deleted);
   const deletedNew = deletedNotifications.filter(n => !n.isRead);
   const deletedEarlier = deletedNotifications.filter(n => n.isRead);
+
+  const handleDeleteLocal = async (id: string) => {
+    console.log('[NotificationView] Optimistically marking notification deleted:', id);
+    // remember this id so incoming props don't overwrite the optimistic delete
+    optimisticDeletedRef.current.add(id);
+    const previous = localNotifications;
+    setLocalNotifications(prev => prev.map(n => n.id === id ? { ...n, deleted: true, deletedAt: new Date().toISOString() } : n));
+
+    // If caller provides a promise-returning delete, await it and rollback on failure
+    if (onDeleteWithResult) {
+      const success = await onDeleteWithResult(id);
+      if (!success) {
+        console.error('[NotificationView] Server delete failed, rolling back optimistic delete for', id);
+        // remove optimistic marker and restore previous state
+        optimisticDeletedRef.current.delete(id);
+        setLocalNotifications(previous);
+      }
+      return;
+    }
+
+    // Fallback: call parent fire-and-forget
+    try {
+      onDelete(id);
+    } catch (err) {
+      console.error('[NotificationView] onDelete threw an error:', err);
+    }
+  };
 
   const renderItem = (notification: Notification) => (
     <NotificationItem
@@ -75,7 +166,7 @@ export function NotificationView({
       notification={notification}
       onMarkAsRead={onMarkAsRead}
       onMarkAsUnread={onMarkAsUnread}
-      onDelete={onDelete}
+      onDelete={handleDeleteLocal}
       onRestore={onRestore}
       onUpdateAppointmentStatus={onUpdateAppointmentStatus}
       onEditAppointment={onEditAppointment}
@@ -86,6 +177,39 @@ export function NotificationView({
     />
   );
 
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div className="max-w-[680px] mx-auto bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden p-8">
+        <div className="flex flex-col items-center justify-center">
+          <Loader className="h-8 w-8 text-violet-600 animate-spin mb-4" />
+          <p className="text-gray-600">Loading notifications...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (error) {
+    return (
+      <div className="max-w-[680px] mx-auto bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden p-8">
+        <div className="flex flex-col items-center justify-center text-center">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-red-100 mb-4">
+            <Bell className="h-6 w-6 text-red-600" />
+          </div>
+          <h3 className="text-lg font-medium text-gray-900">Failed to load notifications</h3>
+          <p className="text-gray-500 mt-1">{error}</p>
+          <Button 
+            onClick={() => window.location.reload()} 
+            className="mt-4"
+          >
+            Try Again
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-[680px] mx-auto bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
       <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
@@ -94,24 +218,18 @@ export function NotificationView({
             <h1 className="text-2xl font-bold text-gray-900">Notifications</h1>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="rounded-full">
-                  <MoreHorizontal className="h-6 w-6" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                {activeTab === 'notifications' && (
-                  <DropdownMenuItem onClick={() => onMarkAllAsRead()}>
-                    <Check className="h-4 w-4 mr-2" />
-                    <span className="text-sm">Mark all as read</span>
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem 
-                  className="text-red-600 focus:text-red-600" 
-                  onClick={() => onDeleteAll?.()}
-                >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  <span className="text-sm">Clear all notifications</span>
-                </DropdownMenuItem>
+                  <Button variant="ghost" size="icon" className="rounded-full" onClick={() => {
+                    const options: string[] = [];
+                    if (activeTab === 'notifications') options.push('Mark all as read (visible)');
+                    options.push('Mark all as read (callback present)');
+                    if (onDeleteAll) options.push('Clear all notifications (callback present)');
+                    console.log('[NotificationView] page three-dot clicked; options:', options);
+                  }}>
+                    <MoreHorizontal className="h-6 w-6" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                <NotificationsMenuContent showMarkAll={activeTab === 'notifications'} onMarkAllAsRead={onMarkAllAsRead} onDeleteAll={onDeleteAll} />
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -123,9 +241,9 @@ export function NotificationView({
               onClick={() => handleTabChange('notifications')}
             >
               Notifications
-              {notifications.filter(n => !n.deleted).some(n => !n.isRead) && (
+              {localNotifications.filter(n => !n.deleted).some(n => !n.isRead) && (
                 <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-[10px] font-bold text-white">
-                  {notifications.filter(n => !n.deleted && !n.isRead).length}
+                  {localNotifications.filter(n => !n.deleted && !n.isRead).length}
                 </span>
               )}
             </TabsTrigger>
