@@ -18,6 +18,17 @@ interface DatePickerModalProps {
   duration?: string;
 }
 
+const getAppointmentFetchOptions = (): RequestInit => {
+  const headers: HeadersInit = {
+    "Content-Type": "application/json",
+  };
+  const token = typeof window !== "undefined" ? localStorage.getItem("authToken") : null;
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return { headers, credentials: "include" };
+};
+
 export function DatePickerModal({ 
   open, 
   onOpenChange, 
@@ -29,7 +40,6 @@ export function DatePickerModal({
 }: DatePickerModalProps) {
   const [viewDate, setViewDate] = useState<Date>(new Date(selectedDate));
   const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [isLoadingAppointments, setIsLoadingAppointments] = useState(false);
   const [showTimeConflictAlert, setShowTimeConflictAlert] = useState(false);
   const [conflictMessage, setConflictMessage] = useState<string>("");
 
@@ -53,7 +63,9 @@ export function DatePickerModal({
     });
 
     for (const apt of dayAppointments) {
-      const aptStart = new Date(apt.date);
+      const [aptHours, aptMinutes] = apt.time.split(':').map(Number);
+      const aptStart = new Date(date);
+      aptStart.setHours(aptHours, aptMinutes, 0, 0);
       const aptDurationMins = parseInt(String(apt.duration), 10) || 30;
       const aptEnd = new Date(aptStart.getTime() + aptDurationMins * 60000);
 
@@ -87,7 +99,6 @@ export function DatePickerModal({
 
     const fetchMonthAppointments = async () => {
       try {
-        setIsLoadingAppointments(true);
         const year = viewDate.getFullYear();
         const month = viewDate.getMonth();
         
@@ -100,16 +111,16 @@ export function DatePickerModal({
         
         const url = `http://localhost:3001/api/appointments?doctor=${encodeURIComponent(doctorName)}&startDate=${startDateStr}&endDate=${endDateStr}&includeUnpaid=true`;
         
-        const response = await fetch(url);
+        const response = await fetch(url, getAppointmentFetchOptions());
         const result = await response.json();
         if (result.success) {
           setAppointments(result.data || []);
+        } else {
+          setAppointments([]);
         }
       } catch (error) {
         console.error("Failed to fetch doctor appointments", error);
         setAppointments([]);
-      } finally {
-        setIsLoadingAppointments(false);
       }
     };
 

@@ -4,8 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { TIME_SLOTS, formatTimeTo12h } from "@/lib/time-slots";
 import { formatDateToYYYYMMDD, cn } from "@/lib/utils";
-import { Clock, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { Appointment } from "@/hooks/useAppointments";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 
@@ -20,6 +19,17 @@ interface TimePickerModalProps {
   onDateChange?: (date: Date) => void;
   excludeAppointmentId?: string;
 }
+
+const getAppointmentFetchOptions = (): RequestInit => {
+  const headers: HeadersInit = {
+    "Content-Type": "application/json",
+  };
+  const token = typeof window !== "undefined" ? localStorage.getItem("authToken") : null;
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return { headers, credentials: "include" };
+};
 
 export function TimePickerModal({
   open,
@@ -39,19 +49,25 @@ export function TimePickerModal({
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
 
   const fetchAppointments = useCallback(async (dateToFetch: Date) => {
-    if (!doctorName) return;
+    if (!doctorName) {
+      setAppointments([]);
+      return;
+    }
     try {
       setIsLoading(true);
       const dateStr = formatDateToYYYYMMDD(dateToFetch);
       const url = `http://localhost:3001/api/appointments?doctor=${encodeURIComponent(doctorName)}&startDate=${dateStr}&endDate=${dateStr}&includeUnpaid=true`;
       
-      const response = await fetch(url);
+      const response = await fetch(url, getAppointmentFetchOptions());
       const result = await response.json();
       if (result.success) {
         setAppointments(result.data || []);
+      } else {
+        setAppointments([]);
       }
     } catch (error) {
       console.error("Failed to fetch doctor appointments", error);
+      setAppointments([]);
     } finally {
       setIsLoading(false);
     }

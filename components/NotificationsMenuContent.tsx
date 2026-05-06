@@ -15,11 +15,13 @@ interface Props {
 }
 
 export default function NotificationsMenuContent({ showMarkAll = true, onMarkAllAsRead, onDeleteAll, className, renderMode = "radix" }: Props) {
+  React.useEffect(() => {
+    if (renderMode !== "inline") return;
+    console.log('[NotificationsMenuContent] inline mount');
+    return () => console.log('[NotificationsMenuContent] inline unmount');
+  }, [renderMode]);
+
   if (renderMode === "inline") {
-    React.useEffect(() => {
-      console.log('[NotificationsMenuContent] inline mount');
-      return () => console.log('[NotificationsMenuContent] inline unmount');
-    }, []);
     return (
       <div className={`bg-white rounded-md border p-1 shadow-md ${className || ""}`}>
         {showMarkAll && (

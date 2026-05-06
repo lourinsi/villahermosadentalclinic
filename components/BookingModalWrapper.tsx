@@ -19,6 +19,7 @@ export interface BookingModalProps {
   defaultDate?: Date;
   defaultTime?: string;
   doctorName?: string;
+  defaultPatientId?: string;
   onBooked?: (apt?: any) => void;
   onDeleted?: (apt?: any) => void;
   appointmentToEdit?: any;

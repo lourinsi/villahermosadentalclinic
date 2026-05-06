@@ -95,6 +95,21 @@ interface HistoryAppointment extends Omit<Appointment, 'type' | 'date' | 'transa
   transactions: RecentTransaction[];
 }
 
+type PaymentRow = RecentTransaction & {
+  patientId?: string;
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
+  deleted?: boolean;
+};
+
+const isLegacyPaymentRow = (txn: RecentTransaction) => String(txn.id || "").startsWith("legacy-");
+
+const toDateOnly = (value?: string | Date) => {
+  if (!value) return "";
+  if (value instanceof Date) return value.toISOString().split("T")[0];
+  return String(value).split("T")[0].split(" ")[0];
+};
+
 export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -130,7 +145,14 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
 
   // BookingModal state
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
+  // immediate default patient id to pass to the booking modal (set synchronously on click)
+  const [bookingDefaultPatientId, setBookingDefaultPatientId] = useState<string | undefined>(undefined);
   const [selectedAppointmentToEdit, setSelectedAppointmentToEdit] = useState<Appointment | null>(null);
+
+  // Clear the synchronous booking default id when modal closes
+  useEffect(() => {
+    if (!bookingModalOpen) setBookingDefaultPatientId(undefined);
+  }, [bookingModalOpen]);
   const [nextAvailableDate, setNextAvailableDate] = useState<Date | undefined>(undefined);
   const [nextAvailableTime, setNextAvailableTime] = useState<string | undefined>(undefined);
   const [nextAvailableDoctor, setNextAvailableDoctor] = useState<string>("");
@@ -538,10 +560,12 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
                           variant="dark" 
                           size="sm"
                           onClick={() => {
-                            const patientId = String(patient.id || '').trim();
                             console.log("Schedule button clicked. Patient:", patient);
-                            console.log("Patient ID value:", patientId, "Type:", typeof patientId);
-                            
+                            // Immediately mark this patient as the selected patient for booking
+                            setSelectedPatient(patient);
+                            // Also set a synchronous default id so the modal receives it immediately
+                            setBookingDefaultPatientId(String(patient.id));
+
                             // Find next available slot
                             const slot = getNextAvailableSlot(doctorFilter ? doctorAppointments : appointments, doctorFilter);
                             setNextAvailableDate(slot.date);
@@ -768,12 +792,14 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
         defaultDate={nextAvailableDate}
         defaultTime={nextAvailableTime}
         doctorName={nextAvailableDoctor}
+        defaultPatientId={bookingDefaultPatientId ?? (selectedPatient?.id ? String(selectedPatient.id) : undefined)}
         appointmentToEdit={selectedAppointmentToEdit}
         onBooked={() => {
           setSelectedAppointmentToEdit(null);
           setNextAvailableDate(undefined);
           setNextAvailableTime(undefined);
           setNextAvailableDoctor("");
+          setBookingDefaultPatientId(undefined);
           refreshPatients();
         }}
         onDeleted={() => {
@@ -781,9 +807,12 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
           setNextAvailableDate(undefined);
           setNextAvailableTime(undefined);
           setNextAvailableDoctor("");
+          setBookingDefaultPatientId(undefined);
           refreshPatients();
         }}
       />
+
+      
     </div>
   );
 }
@@ -845,6 +874,71 @@ const PatientDetails = React.forwardRef<{
   const [allTransactions, setAllTransactions] = useState<RecentTransaction[]>([]);
   const [mockAppointmentHistoryLocal, setMockAppointmentHistoryLocal] = useState<Appointment[]>([]);
   const [expandedTransactions, setExpandedTransactions] = useState<Set<string>>(new Set());
+
+  const getHistoryAppointmentType = React.useCallback((apt: Appointment) => {
+    return getAppointmentTypeName(apt.type as number, apt.customType) || String(apt.type || "Appointment");
+  }, []);
+
+  const createLegacyPaymentRow = React.useCallback((apt: Appointment): RecentTransaction | null => {
+    const totalPaid = Number(apt.totalPaid || 0);
+    if (totalPaid <= 0) return null;
+
+    const appointmentType = getHistoryAppointmentType(apt);
+    const appointmentDate = String(apt.date || "");
+    const paymentDate = toDateOnly(apt.updatedAt) || toDateOnly(appointmentDate) || toDateOnly(apt.createdAt);
+
+    return {
+      id: `legacy-${apt.id}`,
+      appointmentId: apt.id,
+      appointmentType,
+      appointmentDate,
+      doctor: apt.doctor || "",
+      date: paymentDate,
+      description: `Recorded payment total for ${appointmentType}`,
+      amount: totalPaid,
+      type: "payment",
+      method: "Recorded Total",
+      transactionId: `LEGACY-${apt.id}`,
+      notes: "Imported from appointment total paid because no individual payment record exists.",
+      status: apt.paymentStatus === "unpaid" ? "pending" : "completed",
+    };
+  }, [getHistoryAppointmentType]);
+
+  const buildPatientTransactions = React.useCallback((history: Appointment[], payments: PaymentRow[] = []) => {
+    const appointmentById = new Map(history.map((apt) => [apt.id, apt]));
+    const realRows = payments
+      .filter((payment) => !payment.deleted)
+      .map((payment) => {
+        const appointment = payment.appointmentId ? appointmentById.get(payment.appointmentId) : undefined;
+        const appointmentType = payment.appointmentType || (appointment ? getHistoryAppointmentType(appointment) : "Unassigned Payment");
+        const appointmentDate = payment.appointmentDate || (appointment ? String(appointment.date || "") : "");
+
+        return {
+          ...payment,
+          id: payment.id || payment.transactionId || `payment-${payment.appointmentId || "unknown"}-${payment.date}`,
+          date: toDateOnly(payment.date) || toDateOnly(payment.createdAt),
+          description: payment.description || `Payment for ${appointmentType}`,
+          amount: Number(payment.amount || 0),
+          type: payment.type || "payment",
+          method: payment.method || "Unknown",
+          appointmentId: payment.appointmentId,
+          appointmentType,
+          appointmentDate,
+          doctor: payment.doctor || appointment?.doctor || "",
+          status: payment.status || "completed",
+        } as RecentTransaction;
+      });
+
+    const realAppointmentIds = new Set(realRows.map((row) => row.appointmentId).filter(Boolean));
+    const legacyRows = history
+      .filter((apt) => !realAppointmentIds.has(apt.id))
+      .map(createLegacyPaymentRow)
+      .filter(Boolean) as RecentTransaction[];
+
+    return [...realRows, ...legacyRows]
+      .filter((txn) => Number(txn.amount || 0) > 0)
+      .sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+  }, [createLegacyPaymentRow, getHistoryAppointmentType]);
 
   // Track the original loaded data (after server fetch) for accurate change detection
   const [originalLoadedData, setOriginalLoadedData] = useState(formData);
@@ -938,28 +1032,41 @@ const PatientDetails = React.forwardRef<{
   const [paymentProcedureFilter, setPaymentProcedureFilter] = useState('all');
 
   const uniquePaymentDoctors = React.useMemo(() => {
-    const doctors = new Set(allTransactions.map(t => t.doctor).filter(Boolean));
+    const doctors = new Set(allTransactions.map(t => t.doctor).filter(Boolean).map(String));
     return ['all', ...Array.from(doctors)];
   }, [allTransactions]);
 
   const uniquePaymentMethods = React.useMemo(() => {
-    const methods = new Set(allTransactions.map(t => t.method).filter(Boolean));
+    const methods = new Set(allTransactions.map(t => t.method).filter(Boolean).map(String));
     return ['all', ...Array.from(methods)];
   }, [allTransactions]);
 
   const uniquePaymentProcedures = React.useMemo(() => {
-    const procedures = new Set(allTransactions.map(t => t.appointmentType).filter(Boolean));
+    const procedures = new Set(allTransactions.map(t => t.appointmentType).filter(Boolean).map(String));
     return ['all', ...Array.from(procedures)];
   }, [allTransactions]);
 
+  useEffect(() => {
+    if (paymentDoctorFilter !== 'all' && !uniquePaymentDoctors.includes(paymentDoctorFilter)) setPaymentDoctorFilter('all');
+  }, [paymentDoctorFilter, uniquePaymentDoctors]);
+
+  useEffect(() => {
+    if (paymentMethodFilter !== 'all' && !uniquePaymentMethods.includes(paymentMethodFilter)) setPaymentMethodFilter('all');
+  }, [paymentMethodFilter, uniquePaymentMethods]);
+
+  useEffect(() => {
+    if (paymentProcedureFilter !== 'all' && !uniquePaymentProcedures.includes(paymentProcedureFilter)) setPaymentProcedureFilter('all');
+  }, [paymentProcedureFilter, uniquePaymentProcedures]);
+
   const filteredTransactions = React.useMemo(() => {
     return allTransactions.filter(t => {
+      if (doctorFilter && t.doctor !== doctorFilter) return false;
       if (paymentDoctorFilter !== 'all' && t.doctor !== paymentDoctorFilter) return false;
       if (paymentMethodFilter !== 'all' && t.method !== paymentMethodFilter) return false;
       if (paymentProcedureFilter !== 'all' && t.appointmentType !== paymentProcedureFilter) return false;
       return true;
     });
-  }, [allTransactions, paymentDoctorFilter, paymentMethodFilter, paymentProcedureFilter]);
+  }, [allTransactions, doctorFilter, paymentDoctorFilter, paymentMethodFilter, paymentProcedureFilter]);
 
   const toggleExpandTransactions = (id: string) => {
     setExpandedTransactions((prev) => {
@@ -1177,14 +1284,39 @@ const PatientDetails = React.forwardRef<{
       };
       fetchPatientAppointments();
     } else {
-      // Admin view - use shared appointments state
-      const filtered = appointments.filter((apt: Appointment) =>
-        apt.patientId === patient.id ||
-        apt.patientName === `${patient.firstName} ${patient.lastName}` ||
-        apt.patientName === patient.name
-      ).sort((a: Appointment, b: Appointment) => parseBackendDateToLocal(b.date).getTime() - parseBackendDateToLocal(a.date).getTime());
+      const fetchPatientAppointments = async () => {
+        const fallback = appointments.filter((apt: Appointment) =>
+          apt.patientId === patient.id ||
+          apt.patientName === `${patient.firstName} ${patient.lastName}` ||
+          apt.patientName === patient.name
+        ).sort((a: Appointment, b: Appointment) => parseBackendDateToLocal(b.date).getTime() - parseBackendDateToLocal(a.date).getTime());
 
-      setPatientAppointments(filtered);
+        if (!patient.id) {
+          setPatientAppointments(fallback);
+          return;
+        }
+
+        try {
+          const response = await fetch(
+            `http://localhost:3001/api/appointments?patientId=${encodeURIComponent(patient.id)}`,
+            { credentials: 'include' }
+          );
+          const result = await response.json();
+          if (result.success && Array.isArray(result.data)) {
+            const fetched = result.data.sort((a: Appointment, b: Appointment) =>
+              parseBackendDateToLocal(b.date).getTime() - parseBackendDateToLocal(a.date).getTime()
+            );
+            setPatientAppointments(fetched);
+            return;
+          }
+        } catch (error) {
+          console.error("Error fetching patient appointments:", error);
+        }
+
+        setPatientAppointments(fallback);
+      };
+
+      fetchPatientAppointments();
     }
   }, [appointments, patient, doctorFilter]);
 
@@ -1229,7 +1361,54 @@ const PatientDetails = React.forwardRef<{
           } as Appointment;
       });
 
-      setMockAppointmentHistoryLocal(mapped);
+      const applyTransactions = (payments: PaymentRow[] = []) => {
+        const normalized = buildPatientTransactions(mapped, payments);
+        const paymentsByAppointment = new Map<string, RecentTransaction[]>();
+
+        normalized.forEach((txn) => {
+          if (!txn.appointmentId) return;
+          const existing = paymentsByAppointment.get(txn.appointmentId) || [];
+          paymentsByAppointment.set(txn.appointmentId, [...existing, txn]);
+        });
+
+        const mergedHistory = mapped.map((apt) => {
+          const transactions = paymentsByAppointment.get(apt.id) || [];
+          const totalPaid = transactions.length > 0
+            ? transactions.reduce((sum, txn) => sum + Number(txn.amount || 0), 0)
+            : Number(apt.totalPaid || 0);
+
+          const price = Number(apt.price || 0);
+          let paymentStatus: Appointment["paymentStatus"] | "over-paid";
+          const oneWeekAgo = new Date();
+          oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+          const aptDateStr = (apt.date || '').split(' ')[0];
+          const appointmentDate = parseBackendDateToLocal(aptDateStr);
+
+          if (totalPaid > price && price > 0) {
+            paymentStatus = 'over-paid';
+          } else if (totalPaid > 0 && totalPaid < price) {
+            paymentStatus = 'half-paid';
+          } else if (totalPaid >= price && price > 0) {
+            paymentStatus = 'paid';
+          } else if (totalPaid === 0 && price > 0 && appointmentDate < oneWeekAgo) {
+            paymentStatus = 'overdue';
+          } else {
+            paymentStatus = 'unpaid';
+          }
+
+          return {
+            ...apt,
+            totalPaid,
+            transactions,
+            paymentStatus: paymentStatus as Appointment["paymentStatus"],
+          } as Appointment;
+        });
+
+        setMockAppointmentHistoryLocal(mergedHistory);
+        setAllTransactions(normalized);
+      };
+
+      applyTransactions();
 
       // Fetch payments from new payments collection and merge into history
       if (patient?.id) {
@@ -1237,70 +1416,12 @@ const PatientDetails = React.forwardRef<{
           .then(res => res.json())
           .then(json => {
             if (json?.success && Array.isArray(json.data)) {
-              const payments = json.data;
-              // group payments by appointmentId and update appointment history
-              setMockAppointmentHistoryLocal((prev: Appointment[]) => {
-                return prev.map((apt: Appointment) => {
-                  const aptPayments = payments.filter((p: RecentTransaction) => p.appointmentId === apt.id);
-                  if (aptPayments.length > 0) {
-                    const totalPaid = aptPayments.reduce((s: number, p: RecentTransaction) => s + (p.amount || 0), 0);
-                    const price = apt.price || 0;
-                    
-                    let paymentStatus: Appointment["paymentStatus"] | "over-paid";
-                    const oneWeekAgo = new Date();
-                    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-                    const aptDateStr = (apt.date || '').split(' ')[0];
-                    const appointmentDate = parseBackendDateToLocal(aptDateStr);
-
-                    if (totalPaid > price && price > 0) {
-                      paymentStatus = 'over-paid';
-                    } else if (totalPaid > 0 && totalPaid < price) {
-                      paymentStatus = 'half-paid';
-                    } else if (totalPaid >= price && price > 0) {
-                      paymentStatus = 'paid';
-                    } else if (totalPaid === 0 && price > 0 && appointmentDate < oneWeekAgo) {
-                      paymentStatus = 'overdue';
-                    } else {
-                      paymentStatus = 'unpaid';
-                    }
-
-                    return {
-                      ...apt,
-                      totalPaid,
-                      transactions: aptPayments,
-                      paymentStatus: paymentStatus as Appointment["paymentStatus"],
-                    } as Appointment;
-                  }
-                  return apt;
-                });
-              });
+              applyTransactions(json.data as PaymentRow[]);
             }
           })
           .catch(err => console.warn('[Payments] Failed to fetch patient payments:', err));
       }
-    }, [patientAppointments, patient?.id]);
-
-    // Populate the allTransactions list from the appointment history so persisted
-    // transactions show immediately in the Payments tab without needing to add a new payment
-    useEffect(() => {
-      try {
-        const txns = (mockAppointmentHistoryLocal || []).flatMap((a: Appointment) => (a.transactions || []).map((t: RecentTransaction) => ({
-          ...t,
-          appointmentId: a.id,
-          appointmentType: String(a.type),
-          appointmentDate: a.date,
-          doctor: a.doctor,
-        })));
-
-        // dedupe by id
-        const deduped = Array.from(new Map(txns.map((t: RecentTransaction) => [t.id, t])).values());
-        // sort by date desc (newest first)
-        deduped.sort((x: RecentTransaction, y: RecentTransaction) => new Date(y.date).getTime() - new Date(x.date).getTime());
-        setAllTransactions(deduped);
-      } catch (e) {
-        console.warn('[Payments] failed to populate transactions from history', e);
-      }
-    }, [mockAppointmentHistoryLocal]);
+    }, [buildPatientTransactions, patientAppointments, patient?.id]);
 
   const handleUpdatePatient = async () => {
     console.log("=== UPDATE PATIENT BUTTON CLICKED ===");
@@ -1341,10 +1462,15 @@ const PatientDetails = React.forwardRef<{
     onDeletePatient(patient);
   };
 
-  const handleDeletePayment = async (paymentId: string, appointmentId: string) => {
+  const handleDeletePayment = async (paymentId: string, appointmentId?: string) => {
     console.log("=== DELETE PAYMENT STARTED ===");
     console.log("Payment ID:", paymentId);
     console.log("Appointment ID:", appointmentId);
+
+    if (paymentId.startsWith("legacy-")) {
+      toast.error("This payment total comes from legacy appointment data and cannot be deleted here.");
+      return;
+    }
     
     try {
       const deleteUrl = `http://localhost:3001/api/payments/${paymentId}`;
@@ -1363,6 +1489,22 @@ const PatientDetails = React.forwardRef<{
       
       if (result.success) {
         toast.success("Payment deleted successfully");
+        setAllTransactions((prev) => prev.filter((txn) => txn.id !== paymentId));
+        setMockAppointmentHistoryLocal((prev) => prev.map((apt) => {
+          if (appointmentId && apt.id !== appointmentId) return apt;
+          const newTransactions = apt.transactions?.filter((txn: RecentTransaction) => txn.id !== paymentId) || [];
+          if (appointmentId && apt.id === appointmentId) {
+            return {
+              ...apt,
+              transactions: newTransactions,
+              totalPaid: newTransactions.reduce((sum: number, txn: RecentTransaction) => sum + Number(txn.amount || 0), 0),
+            };
+          }
+          return {
+            ...apt,
+            transactions: newTransactions,
+          };
+        }));
         console.log("Delete successful, refreshing patients...");
         // Refresh the appointments to reflect the deletion
         refreshPatients();
@@ -1850,37 +1992,39 @@ const PatientDetails = React.forwardRef<{
                                         <div className="text-xs text-muted-foreground">{txn.date} • {txn.transactionId}</div>
                                       </div>
                                     </div>
-                                    <div className="flex items-center gap-1">
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-8 w-8 p-0"
-                                        onClick={() => {
-                                          if (txn.id && patient.id) openEditPaymentModal(txn.id, txn as any, String(patient.id), mockAppointmentHistoryLocal as any);
-                                        }}
-                                      >
-                                        <Edit className="h-4 w-4" />
-                                        <span className="sr-only">Edit Payment</span>
-                                      </Button>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
-                                        onClick={() => {
-                                          if (txn.id && appointment.id) {
-                                            setPdConfirmTitle("Delete Payment");
-                                            setPdConfirmMessage(`Are you sure you want to delete this payment (${txn.method} - $${txn.amount})?`);
-                                            setPdConfirmAction(() => async () => {
-                                              await handleDeletePayment(String(txn.id), String(appointment.id));
-                                            });
-                                            setPdIsConfirmOpen(true);
-                                          }
-                                        }}
-                                      >
-                                        <Trash className="h-4 w-4" />
-                                        <span className="sr-only">Delete Payment</span>
-                                      </Button>
-                                    </div>
+                                    {!isLegacyPaymentRow(txn) && (
+                                      <div className="flex items-center gap-1">
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-8 w-8 p-0"
+                                          onClick={() => {
+                                            if (txn.id && patient.id) openEditPaymentModal(txn.id, txn as any, String(patient.id), mockAppointmentHistoryLocal as any);
+                                          }}
+                                        >
+                                          <Edit className="h-4 w-4" />
+                                          <span className="sr-only">Edit Payment</span>
+                                        </Button>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                          onClick={() => {
+                                            if (txn.id && appointment.id) {
+                                              setPdConfirmTitle("Delete Payment");
+                                              setPdConfirmMessage(`Are you sure you want to delete this payment (${txn.method} - $${txn.amount})?`);
+                                              setPdConfirmAction(() => async () => {
+                                                await handleDeletePayment(String(txn.id), String(appointment.id));
+                                              });
+                                              setPdIsConfirmOpen(true);
+                                            }
+                                          }}
+                                        >
+                                          <Trash className="h-4 w-4" />
+                                          <span className="sr-only">Delete Payment</span>
+                                        </Button>
+                                      </div>
+                                    )}
                                   </div>
                                 ))}
                               </div>
@@ -2026,56 +2170,45 @@ const PatientDetails = React.forwardRef<{
                               <div className="text-lg font-semibold text-green-600">${txn.amount}</div>
                               <div className="text-xs text-muted-foreground">{txn.date}</div>
                             </div>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8"
-                                >
-                                  <MoreVertical className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem 
-                                  onClick={() => {
-                                    if (patient.id && patient.name) {
-                                      if (txn.id && patient.id) openEditPaymentModal(String(txn.id), txn as any, String(patient.id), mockAppointmentHistoryLocal as Appointment[]);
-                                    }
-                                  }}
-                                >
-                                  <Edit className="h-4 w-4 mr-2" />
-                                  Edit
-                                </DropdownMenuItem>
-                                <DropdownMenuItem 
-                                  onClick={() => {
-                                    setPdConfirmTitle("Delete Payment");
-                                    setPdConfirmMessage("Are you sure you want to delete this payment?");
-                                    setPdConfirmAction(() => async () => {
-                                      const updatedHistory = mockAppointmentHistoryLocal.map(apt => {
-                                        if (apt.id === txn.appointmentId) {
-                                          const newTransactions = apt.transactions?.filter((t: RecentTransaction) => t.id !== txn.id) || [];
-                                          const newTotalPaid = newTransactions.reduce((sum: number, t: RecentTransaction) => sum + (t.amount || 0), 0);
-                                          return {
-                                            ...apt,
-                                            transactions: newTransactions,
-                                            totalPaid: newTotalPaid
-                                          };
-                                        }
-                                        return apt;
+                            {!isLegacyPaymentRow(txn) && (
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                  >
+                                    <MoreVertical className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem 
+                                    onClick={() => {
+                                      if (patient.id && patient.name) {
+                                        if (txn.id && patient.id) openEditPaymentModal(String(txn.id), txn as any, String(patient.id), mockAppointmentHistoryLocal as Appointment[]);
+                                      }
+                                    }}
+                                  >
+                                    <Edit className="h-4 w-4 mr-2" />
+                                    Edit
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem 
+                                    onClick={() => {
+                                      setPdConfirmTitle("Delete Payment");
+                                      setPdConfirmMessage("Are you sure you want to delete this payment?");
+                                      setPdConfirmAction(() => async () => {
+                                        if (txn.id) await handleDeletePayment(String(txn.id), txn.appointmentId);
                                       });
-                                      setMockAppointmentHistoryLocal(updatedHistory);
-                                      toast.success("Payment deleted successfully");
-                                    });
-                                    setPdIsConfirmOpen(true);
-                                  }}
-                                  className="text-red-600"
-                                >
-                                  <Trash className="h-4 w-4 mr-2" />
-                                  Delete
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                                      setPdIsConfirmOpen(true);
+                                    }}
+                                    className="text-red-600"
+                                  >
+                                    <Trash className="h-4 w-4 mr-2" />
+                                    Delete
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            )}
                           </div>
                         </div>
                         <div className="flex items-center justify-between text-sm pt-2 border-t">
@@ -2134,5 +2267,3 @@ const PatientDetails = React.forwardRef<{
   );
 });
 PatientDetails.displayName = "PatientDetails";
-
-

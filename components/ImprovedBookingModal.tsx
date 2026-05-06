@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -16,6 +16,7 @@ import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { formatTimeTo12h, TIME_SLOTS } from "@/lib/time-slots";
 import { APPOINTMENT_PRICES, getAppointmentTypeName } from "@/lib/appointmentTypes";
 import { toast } from 'sonner';
+import useSharedBookingLogic, { getBookingConflictWarnings } from './sharedBookingLogic';
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
@@ -57,12 +58,19 @@ const formatDoctorName = (name?: string): string => {
   return `Dr. ${cleanName}`;
 };
 
+const toPatientOption = (patient: any) => ({
+  id: String(patient.id),
+  name: patient.name || `${patient.firstName || ""} ${patient.lastName || ""}`.trim() || "Patient",
+  ...patient,
+});
+
 interface BookingModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   defaultDate?: Date;
   defaultTime?: string;
   doctorName?: string; // doctor's display name
+  defaultPatientId?: string;
   onBooked?: (apt?: any) => void;
   onDeleted?: (apt?: any) => void;
   appointmentToEdit?: any; // optional appointment object to edit
@@ -80,7 +88,7 @@ const appointmentTypeDurations: Record<string, number> = {
   "Other": 30,
 };
 
-export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, onBooked, onDeleted, appointmentToEdit, title }: BookingModalProps) {
+export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, defaultPatientId, onBooked, onDeleted, appointmentToEdit, title }: BookingModalProps) {
   const { user } = useAuth();
   const { doctors } = useDoctors();
   const { addAppointment, updateAppointment, isPaymentFlow } = useAppointmentModal();
@@ -655,12 +663,28 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     setSelectedTime(defaultTime ?? "");
   }, [defaultTime]);
 
+  // Debug: log incoming default patient id
+  useEffect(() => {
+    if (defaultPatientId) {
+      console.log('[ImprovedBookingModal] 🔔 defaultPatientId prop:', defaultPatientId);
+    } else {
+      console.log('[ImprovedBookingModal] 🔔 no defaultPatientId provided');
+    }
+  }, [defaultPatientId]);
+
   // Sync doctorName prop to selectedDoctor state when it changes
   useEffect(() => {
     if (doctorName) {
       setSelectedDoctor(doctorName);
     }
   }, [doctorName]);
+
+  useEffect(() => {
+    if (!open || appointmentToEdit || doctorName) return;
+    if (user?.role === 'doctor' && user.username) {
+      setSelectedDoctor(user.username);
+    }
+  }, [open, appointmentToEdit, doctorName, user?.role, user?.username]);
 
   // Auto-preselect first doctor for non-doctor portals when modal opens
   // BUT: Skip if doctorName was explicitly passed (e.g., from DoctorAvailabilityView)
@@ -691,7 +715,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   }, [open, user?.role, doctors, selectedDoctor, appointmentToEdit?.doctor, doctorName]);
 
   // Helper function to find next available slot (date + time)
-  const findNextAvailableSlot = useCallback(async (startDate: Date, doctorToCheck: string, durationToCheck: string): Promise<{ date: Date; time: string } | null> => {
+  const findNextAvailableSlot = useCallback(async (startDate: Date, doctorToCheck: string, durationToCheck: string, patientToCheck?: string): Promise<{ date: Date; time: string } | null> => {
     if (!doctorToCheck || !durationToCheck) return null;
     
     const durationMins = parseInt(durationToCheck, 10) || 30;
@@ -707,9 +731,29 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         );
         
         if (!res.ok) return [];
-        
+
         const json = await res.json();
         const appointments = json.data || [];
+        console.log('[BookingModal] findNextAvailableSlot fetched appointments for', dateStr, { doctorToCheck, appointmentsCount: appointments.length });
+
+        // If patientToCheck is provided, also fetch that patient's appointments for the same date
+        let patientAppointmentsForDate: any[] = [];
+        if (patientToCheck) {
+          try {
+            const pres = await fetch(
+              `http://localhost:3001/api/appointments?patientId=${encodeURIComponent(patientToCheck)}&startDate=${dateStr}&endDate=${dateStr}&includeUnpaid=true`,
+              { credentials: 'include' }
+            );
+            if (pres.ok) {
+              const pjson = await pres.json();
+              patientAppointmentsForDate = pjson.data || [];
+            }
+          } catch (err) {
+            console.warn('[BookingModal] Failed to fetch patient appointments for auto-search', err);
+            patientAppointmentsForDate = [];
+          }
+          console.log('[BookingModal] findNextAvailableSlot fetched patient appointments for', dateStr, { patientToCheck, patientCount: patientAppointmentsForDate.length });
+        }
         
         // Calculate available slots
         const now = new Date();
@@ -737,16 +781,33 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           const slotEndMinutes = slotMinutes + durationMins;
           
           let isConflict = false;
+          // Check conflicts against doctor's appointments
           for (const apt of appointments) {
             if (apt.status === 'cancelled') continue;
             if (apt.status === 'pending') continue; // Pending can be overridden
-            
+
             const aptStart = timeToMinutes(apt.time);
             const aptEnd = aptStart + (apt.duration || 30);
-            
+
             if (slotMinutes < aptEnd && slotEndMinutes > aptStart) {
               isConflict = true;
               break;
+            }
+          }
+
+          // Also check conflicts against patient's own appointments for that date
+          if (!isConflict && patientAppointmentsForDate && patientAppointmentsForDate.length > 0) {
+            for (const apt of patientAppointmentsForDate) {
+              if (apt.status === 'cancelled') continue;
+              if (apt.status === 'pending') continue;
+
+              const aptStart = timeToMinutes(apt.time);
+              const aptEnd = aptStart + (apt.duration || 30);
+
+              if (slotMinutes < aptEnd && slotEndMinutes > aptStart) {
+                isConflict = true;
+                break;
+              }
             }
           }
           
@@ -785,22 +846,108 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     return null;
   }, []);
 
+  // Centralized auto-preselect/validation runner — callable on open and after patients load
+  const runAutoPreselect = useCallback(async (patientId?: string) => {
+    if (appointmentToEdit) return; // don't preselect when editing
+
+    // CASE A: DoctorAvailabilityView validation
+    if (defaultDate && defaultTime && doctorName) {
+      const defaultDuration = appointmentTypeDurations[appointmentType || 'Routine Cleaning'] || 30;
+      const patientToSearch = patientId || selectedPatient || defaultPatientId || undefined;
+      try {
+        const nextSlot = await findNextAvailableSlot(defaultDate, doctorName, String(defaultDuration), patientToSearch);
+        if (!nextSlot) return;
+        const defaultDateStr = formatDateToYYYYMMDD(defaultDate);
+        const nextDateStr = formatDateToYYYYMMDD(nextSlot.date);
+        if (!(nextDateStr === defaultDateStr && nextSlot.time === defaultTime)) {
+          console.log('[BookingModal] ⚠️ Provided default slot conflicts; overriding to next available slot (on open):', { date: nextDateStr, time: nextSlot.time });
+          setSelectedDate(nextSlot.date);
+          setSelectedTime(nextSlot.time);
+        } else {
+          console.log('[BookingModal] ✅ Provided default slot is available (on open)');
+        }
+      } catch (err) {
+        console.warn('[BookingModal] Error validating default slot on open:', err);
+      }
+      return;
+    }
+
+    // CASE B: Explicit clicked slot (respect it)
+    if (defaultDate && defaultTime) {
+      if (!appointmentType) setAppointmentType('Routine Cleaning');
+      return;
+    }
+
+    // CASE C: Generic auto-search for next free slot
+    if (!selectedDoctor) {
+      console.log('[BookingModal] ⏳ Waiting for doctor to be selected before auto-preselect...');
+      return;
+    }
+
+    const defaultDur = appointmentTypeDurations[appointmentType || 'Routine Cleaning'] || 30;
+    const patientToSearch = patientId || selectedPatient || defaultPatientId || undefined;
+    const nextSlot = await findNextAvailableSlot(new Date(), selectedDoctor, String(defaultDur), patientToSearch);
+    if (nextSlot) {
+      console.log('[BookingModal] ✅ Found next available slot (on open):', { date: formatDateToYYYYMMDD(nextSlot.date), time: nextSlot.time });
+      setSelectedDate(nextSlot.date);
+      setSelectedTime(nextSlot.time);
+    }
+  }, [appointmentToEdit, defaultDate, defaultTime, doctorName, appointmentType, selectedDoctor, selectedPatient, defaultPatientId, findNextAvailableSlot]);
+
+  const runAutoPreselectRef = useRef(runAutoPreselect);
+
+  useEffect(() => {
+    runAutoPreselectRef.current = runAutoPreselect;
+  }, [runAutoPreselect]);
+
   // Auto-preselect date, time, and appointment type for all portals
   useEffect(() => {
     if (!open || appointmentToEdit) return; // Only for new appointments, not editing
     
     // CASE 1: Coming from DoctorAvailabilityView (has defaultDate, defaultTime, and doctorName)
-    // RULE: Only preselect appointment type, respect the passed date/time/doctor
+    // RULE: Preselect appointment type, but validate the provided date/time/doctor
+    // If the provided slot conflicts for the patient/doctor, override with next available slot.
     if (defaultDate && defaultTime && doctorName) {
       console.log('[BookingModal] 📍 DoctorAvailabilityView context detected');
       console.log('[BookingModal] ℹ️ Pre-filled with: date=' + formatDateToYYYYMMDD(defaultDate) + ', time=' + defaultTime + ', doctor=' + doctorName);
-      
+
       // Only preselect appointment type if not already set
       if (!appointmentType) {
         console.log('[BookingModal] 📋 Preselecting appointment type: Routine Cleaning');
         setAppointmentType("Routine Cleaning");
       }
-      return; // Don't do any auto-searching
+
+      // Validate the provided default slot against doctor+patient conflicts and override if needed
+      (async () => {
+        try {
+          const defaultDuration = appointmentTypeDurations[appointmentType || 'Routine Cleaning'] || 30;
+          const patientToSearch = selectedPatient || defaultPatientId || undefined;
+          console.log('[BookingModal] 🔍 Validating provided default slot for patient:', patientToSearch);
+
+          const nextSlot = await findNextAvailableSlot(defaultDate, doctorName, String(defaultDuration), patientToSearch);
+
+          if (!nextSlot) {
+            console.warn('[BookingModal] ⚠️ No available slots found during validation; keeping provided defaults');
+            return;
+          }
+
+          const defaultDateStr = formatDateToYYYYMMDD(defaultDate);
+          const nextDateStr = formatDateToYYYYMMDD(nextSlot.date);
+
+          if (nextDateStr === defaultDateStr && nextSlot.time === defaultTime) {
+            console.log('[BookingModal] ✅ Provided default slot is available');
+            return;
+          }
+
+          console.log('[BookingModal] ⚠️ Provided default slot conflicts; overriding to next available slot:', { date: nextDateStr, time: nextSlot.time });
+          setSelectedDate(nextSlot.date);
+          setSelectedTime(nextSlot.time);
+        } catch (err) {
+          console.warn('[BookingModal] Error validating default slot:', err);
+        }
+      })();
+
+      return;
     }
     
     // CASE 2: Generic booking modal (explicit defaults passed)
@@ -828,33 +975,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setAppointmentType("Routine Cleaning");
     }
     
-    // Find next available slot for preselection (only if no explicit defaults passed)
-    const preSelectSlot = async () => {
-      if (!selectedDoctor) {
-        console.log('[BookingModal] ⏳ Waiting for doctor to be selected...');
-        return;
-      }
-      
-      console.log('[BookingModal] 🔍 Auto-searching for next available slot for ' + selectedDoctor);
-      const defaultDuration = appointmentTypeDurations["Routine Cleaning"] || 30;
-      const nextSlot = await findNextAvailableSlot(new Date(), selectedDoctor, String(defaultDuration));
-      
-      if (nextSlot) {
-        console.log('[BookingModal] ✅ Found next available slot:', {
-          date: formatDateToYYYYMMDD(nextSlot.date),
-          time: nextSlot.time
-        });
-        setSelectedDate(nextSlot.date);
-        setSelectedTime(nextSlot.time);
-      } else {
-        console.warn('[BookingModal] ⚠️ No available slots found within 30 days');
-      }
-    };
-    
-    preSelectSlot();
-    // Fixed dependency array: only include variables that determine when to re-run
-    // Removed appointmentType, selectedTime, selectedDoctor as they're internal state
-  }, [open, appointmentToEdit, defaultDate, defaultTime, doctorName, findNextAvailableSlot]);
+    // Delegate to centralized runner which also validates defaults
+    runAutoPreselect();
+    // Re-run when selectedDoctor or selectedPatient change so auto-selection accounts for patient-specific conflicts
+  }, [open, appointmentToEdit, defaultDate, defaultTime, doctorName, findNextAvailableSlot, selectedDoctor, selectedPatient, defaultPatientId]);
 
   // Price calculations - handle custom types
   // finalPrice is the base price (before discount) - used in payment calculations
@@ -901,7 +1025,30 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         console.log('BookingModal: fetch response', { success: json?.success, dataCount: json?.data?.length, user: { username: user?.username, role: user?.role } });
         
         if (json?.success && Array.isArray(json.data)) {
-          const list = json.data.map((p: any) => ({ id: String(p.id), name: `${p.firstName} ${p.lastName}`, ...p }));
+          let list = json.data.map(toPatientOption);
+          const editPatientId = appointmentToEdit?.patientId ? String(appointmentToEdit.patientId) : "";
+
+          if (editPatientId && !list.some((p: any) => String(p.id) === editPatientId)) {
+            try {
+              const patientRes = await fetch(`http://localhost:3001/api/patients/${encodeURIComponent(editPatientId)}`, fetchOpts);
+              const patientJson = await patientRes.json();
+              if (patientJson?.success && patientJson.data) {
+                list = [toPatientOption(patientJson.data), ...list];
+              }
+            } catch (patientErr) {
+              console.warn('[ImprovedBookingModal] Failed to fetch appointment patient; using appointment snapshot:', patientErr);
+            }
+
+            if (!list.some((p: any) => String(p.id) === editPatientId)) {
+              list = [
+                toPatientOption({
+                  id: editPatientId,
+                  name: appointmentToEdit.patientName || 'Patient',
+                }),
+                ...list,
+              ];
+            }
+          }
           console.log('BookingModal: patients loaded', { 
             count: list.length, 
             source: user?.role === 'patient' ? 'server-filtered' : 'admin-fetch',
@@ -909,9 +1056,26 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           });
           try { window.dispatchEvent(new CustomEvent('bookingmodal:patients', { detail: { source: user?.role === 'patient' ? 'server-filtered' : 'admin-fetch', count: list.length, patients: list } })); } catch {}
           setPatients(list);
-          // preselect first patient if available
-          if (list.length > 0) {
-            setSelectedPatient(list[0].id);
+          // Edit/view mode must always use the appointment patient, never the default/first patient.
+          let chosenPatientId: string | undefined = undefined;
+          if (editPatientId) {
+            chosenPatientId = editPatientId;
+          } else if (defaultPatientId) {
+            const found = list.find((p: any) => String(p.id) === String(defaultPatientId));
+            if (found) chosenPatientId = String(defaultPatientId);
+            else if (list.length > 0) chosenPatientId = list[0].id;
+          } else if (list.length > 0) {
+            chosenPatientId = list[0].id;
+          }
+
+          if (chosenPatientId) {
+            setSelectedPatient(chosenPatientId);
+            if (!appointmentToEdit) {
+              // Trigger auto-preselect validation now that we have a selected patient.
+              runAutoPreselectRef.current(chosenPatientId).catch((err) => {
+                console.warn('[BookingModal] Failed to validate schedule after patient load:', err);
+              });
+            }
           }
         } else {
           console.warn('BookingModal: empty or failed response', json);
@@ -926,7 +1090,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     };
 
     fetchPatients();
-  }, [open, user]);
+  }, [open, user, defaultPatientId, appointmentToEdit]);
 
   // When an appointment is provided for editing, prefill the form
   useEffect(() => {
@@ -993,7 +1157,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setIsRescheduling(false);
     } else {
       // Reset form when creating new appointment
-      setSelectedPatient(patients.length > 0 ? patients[0].id : '');
+      // If a defaultPatientId was provided (e.g., user clicked Schedule on a patient), prefer it
+      setSelectedPatient(defaultPatientId ? String(defaultPatientId) : '');
       setAppointmentType('');
       setCustomAppointmentTypeName('');
       setDuration('30');
@@ -1011,85 +1176,25 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setPaymentStatusChangedByUser(0);
       setModalStep('patient');
     }
-  }, [open, appointmentToEdit, defaultDate, defaultTime, patients]);
+  }, [open, appointmentToEdit, defaultDate, defaultTime, defaultPatientId]);
 
-  // Helper to progress through the multi-step modal
-// Helper to progress through the multi-step modal
-  const handleNextStep = async () => {
-    try {
-      if (modalStep === 'patient') {
-        if (!selectedPatient) {
-          toast.error("Please select a patient before continuing.");
-          return;
-        }
-        setModalStep('schedule');
-        return;
-      }
-
-      if (modalStep === 'schedule') {
-        if (!selectedDate || !selectedTime) {
-          toast.error("Please select both a date and a time slot.");
-          return;
-        }
-        setModalStep('treatment');
-        return;
-      }
-
-      if (modalStep === 'treatment') {
-        if (!appointmentType) {
-          toast.error("Please choose a service treatment.");
-          return;
-        }
-        if (appointmentType === "Other" && !customAppointmentTypeName.trim()) {
-          toast.error("Please type the name of the custom treatment.");
-          return;
-        }
-        setModalStep('doctor');
-        return;
-      }
-
-      if (modalStep === 'doctor') {
-        if (!selectedDoctor) {
-          toast.error("Please assign a specialist to this appointment.");
-          return;
-        }
-        setModalStep('payment');
-        return;
-      }
-
-      if (modalStep === 'payment') {
-        // Final step -> show confirmation summary
-        setIsConfirmSummaryOpen(true);
-        return;
-      }
-    } catch (err) {
-      console.error('[BookingModal] handleNextStep error', err);
-    }
-  };
-
-  // Helper to go back one step in the flow
-  const handlePrevStep = () => {
-    try {
-      if (modalStep === 'payment') {
-        setModalStep('doctor');
-        return;
-      }
-      if (modalStep === 'doctor') {
-        setModalStep('treatment');
-        return;
-      }
-      if (modalStep === 'treatment') {
-        setModalStep('schedule');
-        return;
-      }
-      if (modalStep === 'schedule') {
-        setModalStep('patient');
-        return;
-      }
-    } catch (err) {
-      console.error('[BookingModal] handlePrevStep error', err);
-    }
-  };
+    // Use shared booking logic for next/prev step handling
+    const { handleNextStep, handlePrevStep } = useSharedBookingLogic({
+      modalStep,
+      flow: 'multi-step',
+      selectedPatient,
+      selectedDate,
+      selectedTime,
+      appointmentType,
+      customAppointmentTypeName,
+      selectedDoctor,
+      setModalStep: (step) => setModalStep(step as "patient" | "schedule" | "treatment" | "doctor" | "payment"),
+      setIsConfirmSummaryOpen,
+      toast,
+      durationConflict,
+      patientConflict,
+      skipDoctorStep: true,
+    });
 
   // Derived display values for schedule block
   const displayDoctor = formatDoctorName(appointmentToEdit?.doctor || doctorName);
@@ -1102,6 +1207,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       : 0;
   const discountedPrice = Math.max(0, finalPrice - Number(discount));
   const remainingBalance = Math.max(0, discountedPrice - previouslyPaidAmount);
+  const bookingConflictWarnings = getBookingConflictWarnings({
+    durationConflict,
+    patientConflict,
+    duration,
+  });
+  const bookingConflictTitle = bookingConflictWarnings.map(w => w.message).join('\n');
 
   // Handler for status changes that sets the flag
   const handleStatusChange = (newStatus: string) => {
@@ -1504,7 +1615,7 @@ return (
               <div className="w-10" />
             </div>
 
-            {/* 5-STEP INDICATOR */}
+            {/* 4-STEP INDICATOR */}
             {!(isCancelled && user?.role === 'patient') && (
               <div className="relative flex items-center justify-between w-full mt-2 mb-4 px-10">
                 <div className="absolute top-1/2 left-0 w-full h-0.5 bg-gray-100 -translate-y-1/2 z-0" />
@@ -1512,9 +1623,8 @@ return (
                   className="absolute top-1/2 left-0 h-0.5 bg-blue-600 -translate-y-1/2 transition-all duration-500 z-0"
                   style={{
                     width: modalStep === 'patient' ? '0%' :
-                           modalStep === 'schedule' ? '25%' :
-                           modalStep === 'treatment' ? '50%' :
-                           modalStep === 'doctor' ? '75%' : '100%'
+                           modalStep === 'schedule' ? '33.333%' :
+                           modalStep === 'treatment' ? '66.666%' : '100%'
                   }}
                 />
 
@@ -1522,21 +1632,18 @@ return (
                   { id: 'patient', label: 'Patient', icon: '1' },
                   { id: 'schedule', label: 'Schedule', icon: '2' },
                   { id: 'treatment', label: 'Treatment', icon: '3' },
-                  { id: 'doctor', label: 'Doctor', icon: '4' },
-                  { id: 'payment', label: 'Payment', icon: '5' }
+                  { id: 'payment', label: 'Payment', icon: '4' }
                 ].map((step, index) => {
                   const isActive = modalStep === step.id;
                   const isCompleted = 
                     (modalStep === 'schedule' && index < 1) ||
                     (modalStep === 'treatment' && index < 2) ||
-                    (modalStep === 'doctor' && index < 3) ||
-                    (modalStep === 'payment' && index < 4);
+                    (modalStep === 'payment' && index < 3);
 
                   const isClickable = !isBooking && (
                     step.id === 'patient' ||
                     (step.id === 'schedule' && !!selectedPatient) ||
                     (step.id === 'treatment' && !!selectedPatient && !!selectedDate && !!selectedTime) ||
-                    (step.id === 'doctor' && !!selectedPatient && !!selectedDate && !!selectedTime && !!appointmentType) ||
                     (step.id === 'payment' && !!selectedPatient && !!selectedDate && !!selectedTime && !!appointmentType && !!selectedDoctor)
                   );
 
@@ -1752,25 +1859,6 @@ return (
                 </div>
               )}
 
-              {/* STEP 4: DOCTOR */}
-              {modalStep === 'doctor' && (
-                <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
-                  <div className="space-y-4">
-                    <Label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Assign Specialist</Label>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {doctors.map(doc => (
-                        <button key={doc.id} onClick={() => setSelectedDoctor(doc.name)} className={`p-6 rounded-[2.5rem] border-2 transition-all flex items-center gap-4 ${selectedDoctor === doc.name ? 'border-blue-600 bg-blue-50/50 shadow-md' : 'border-gray-100 bg-white hover:border-blue-200'}`}>
-                          <div className={`w-14 h-14 rounded-full flex items-center justify-center text-xl font-black ${selectedDoctor === doc.name ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400'}`}>
-                            {doc.name.charAt(0)}
-                          </div>
-                          <span className="font-bold text-gray-900 text-lg">{doc.name}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-
               {/* FINAL STEP: PAYMENT SUMMARY */}
               {modalStep === 'payment' && (
                 <div className="space-y-6 max-w-4xl mx-auto py-4 animate-in fade-in slide-in-from-bottom-4">
@@ -1791,13 +1879,36 @@ return (
                           <div className="grid grid-cols-2 gap-4 text-sm">
                             <div>
                               <p className="text-gray-400 font-bold uppercase text-[10px]">Date & Time</p>
-                              <p className="font-bold text-gray-800">{selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} at {formatTimeTo12h(selectedTime)}</p>
+                              <div className="flex items-center gap-2">
+                                <p className="font-bold text-gray-800">{selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} at {formatTimeTo12h(selectedTime)}</p>
+                                {bookingConflictWarnings.length > 0 && (
+                                  <span title={bookingConflictTitle} className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                                    <AlertCircle className="h-3.5 w-3.5" />
+                                  </span>
+                                )}
+                              </div>
                             </div>
                             <div className="text-right">
                               <p className="text-gray-400 font-bold uppercase text-[10px]">Doctor</p>
                               <p className="font-bold text-gray-800">{selectedDoctor}</p>
                             </div>
                           </div>
+                          <div className="flex items-center justify-between rounded-2xl bg-gray-50 px-4 py-3 text-sm">
+                            <span className="text-gray-500 font-bold">Duration</span>
+                            <span className="inline-flex items-center gap-2 font-bold text-gray-800">
+                              {duration} mins
+                              {durationConflict && (
+                                <span title={bookingConflictWarnings.find(w => w.type === 'duration')?.message || durationConflict} className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                                  <AlertCircle className="h-3.5 w-3.5" />
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                          {bookingConflictWarnings.length > 0 && (
+                            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-800">
+                              This appointment has a scheduling conflict. Hover the warning icon for details.
+                            </div>
+                          )}
                           
                           <div className="pt-4 border-t border-dashed border-gray-200 space-y-2">
                             <div className="flex justify-between text-sm">
@@ -1889,19 +2000,18 @@ return (
             </div>
           </div>
 
-          <DialogFooter className="p-6 bg-white border-t flex items-center justify-end">
+           <DialogFooter className="p-6 bg-white border-t flex items-center justify-end">
              <Button
-                onClick={modalStep === 'payment' ? handleConfirmPayment : handleConfirmBooking}
-                disabled={isBooking || !!durationConflict}
-                className="h-14 px-10 rounded-full bg-blue-600 hover:bg-blue-700 text-white font-black uppercase tracking-widest shadow-xl shadow-blue-200 min-w-[220px]"
+               onClick={modalStep === 'payment' ? handleConfirmPayment : handleConfirmBooking}
+               disabled={isBooking}
+               className="h-14 px-10 rounded-full bg-blue-600 hover:bg-blue-700 text-white font-black uppercase tracking-widest shadow-xl shadow-blue-200 min-w-[220px]"
               >
                 {isBooking ? <Loader2 className="h-5 w-5 animate-spin" /> : (
                   <div className="flex items-center gap-3">
                     <span>
                       {modalStep === 'patient' ? 'Next: Schedule' : 
                        modalStep === 'schedule' ? 'Next: Treatment' : 
-                       modalStep === 'treatment' ? 'Next: Doctor' : 
-                       modalStep === 'doctor' ? 'Next: Summary' : 'Confirm & Save'}
+                       modalStep === 'treatment' ? 'Next: Summary' : 'Confirm & Save'}
                     </span>
                     <ChevronLeft className="w-5 h-5 rotate-180" />
                   </div>
@@ -1954,6 +2064,25 @@ return (
                   <span className="text-gray-600">Doctor:</span>
                   <span className="font-semibold">Dr. {displayDoctor}</span>
                 </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Duration:</span>
+                  <span className="inline-flex items-center gap-2 font-semibold">
+                    {duration} mins
+                    {durationConflict && (
+                      <span title={bookingConflictWarnings.find(w => w.type === 'duration')?.message || durationConflict} className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                        <AlertCircle className="h-3.5 w-3.5" />
+                      </span>
+                    )}
+                  </span>
+                </div>
+                {bookingConflictWarnings.length > 0 && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-800">
+                    <span title={bookingConflictTitle} className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-amber-700 align-middle">
+                      <AlertCircle className="h-3.5 w-3.5" />
+                    </span>
+                    This appointment has a scheduling conflict. Hover the warning icon for details.
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-gray-600">Status:</span>
                   <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-bold ${

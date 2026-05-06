@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { Suspense, useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +20,7 @@ import { useDoctors } from "@/hooks/useDoctors";
 import { useAuth } from "@/hooks/useAuth.tsx";
 import { Patient } from "@/lib/patient-types";
 
-export default function PublicBookingPage() {
+function PublicBookingContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { doctors, isLoadingDoctors } = useDoctors();
@@ -499,5 +499,13 @@ export default function PublicBookingPage() {
 
       <Footer />
     </div>
+  );
+}
+
+export default function PublicBookingPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
+      <PublicBookingContent />
+    </Suspense>
   );
 }

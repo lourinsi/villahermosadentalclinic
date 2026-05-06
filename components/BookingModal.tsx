@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -16,6 +16,7 @@ import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { formatTimeTo12h, TIME_SLOTS } from "@/lib/time-slots";
 import { APPOINTMENT_PRICES, getAppointmentTypeName } from "@/lib/appointmentTypes";
 import { toast } from 'sonner';
+import useSharedBookingLogic, { getBookingConflictWarnings } from './sharedBookingLogic';
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
@@ -54,12 +55,19 @@ const formatDoctorName = (name?: string): string => {
   return `Dr. ${cleanName}`;
 };
 
+const toPatientOption = (patient: any) => ({
+  id: String(patient.id),
+  name: patient.name || `${patient.firstName || ""} ${patient.lastName || ""}`.trim() || "Patient",
+  ...patient,
+});
+
 interface BookingModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   defaultDate?: Date;
   defaultTime?: string;
   doctorName?: string; // doctor's display name
+  defaultPatientId?: string;
   onBooked?: (apt?: any) => void;
   appointmentToEdit?: any; // optional appointment object to edit
   title?: string; // optional override for dialog title
@@ -76,7 +84,7 @@ const appointmentTypeDurations: Record<string, number> = {
   "Other": 30,
 };
 
-export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, onBooked, appointmentToEdit, title }: BookingModalProps) {
+export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, defaultPatientId, onBooked, appointmentToEdit, title }: BookingModalProps) {
   const { user } = useAuth();
   const { doctors } = useDoctors();
   const { addAppointment, updateAppointment, isPaymentFlow } = useAppointmentModal();
@@ -118,6 +126,19 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [dailyAppointments, setDailyAppointments] = useState<any[]>([]);
   const [patientConflict, setPatientConflict] = useState("");
   const [patientAppointments, setPatientAppointments] = useState<any[]>([]);
+
+  // If a default patient id is provided (e.g., from PatientsView schedule button), preselect it
+  useEffect(() => {
+    if (appointmentToEdit) return;
+    if (defaultPatientId) {
+      setSelectedPatient(String(defaultPatientId));
+      return;
+    }
+    // fallback to first patient when patients load
+    if (!selectedPatient && patients && patients.length > 0) {
+      setSelectedPatient(patients[0].id);
+    }
+  }, [appointmentToEdit, defaultPatientId, patients, selectedPatient]);
 
   // Log all available statuses when modal opens
   useEffect(() => {
@@ -642,6 +663,93 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     setDuration(String(defaultDur));
   }, [appointmentType]);
 
+  // When a patient is (pre)selected, ensure the selected date/time is the next available
+  // slot for that patient (avoid patient conflicts). This will auto-advance the
+  // selected schedule to the nearest non-conflicting slot if the current selection
+  // overlaps with an existing appointment for that patient.
+  useEffect(() => {
+    if (!open || !selectedPatient) return;
+
+    const durationMins = parseInt(duration, 10) || 30;
+
+    // Helper: convert an appointment record to start/end Date objects
+    const toRange = (apt: any) => {
+      let aptStart: Date;
+      if (typeof apt.date === 'string' && apt.date.includes('-') && !apt.date.includes(':')) {
+        const [aptHours, aptMinutes] = (apt.time || '00:00').split(':').map(Number);
+        aptStart = new Date(apt.date);
+        aptStart.setHours(aptHours, aptMinutes, 0, 0);
+      } else {
+        aptStart = new Date(apt.date);
+      }
+      const aptEnd = new Date(aptStart.getTime() + (parseInt(String(apt.duration), 10) || 30) * 60000);
+      return { start: aptStart, end: aptEnd, doctor: apt.doctor, patientId: apt.patientId };
+    };
+
+    // Returns true if candidate slot overlaps any appointment in the list
+    const overlapsAny = (candidateStart: Date, candidateEnd: Date, list: any[]) => {
+      for (const a of list) {
+        const r = toRange(a);
+        if (candidateStart < r.end && candidateEnd > r.start) return r;
+      }
+      return null;
+    };
+
+    const trySlot = (date: Date, time: string) => {
+      const [h, m] = time.split(':').map(Number);
+      const slotStart = new Date(date);
+      slotStart.setHours(h, m, 0, 0);
+      const slotEnd = new Date(slotStart.getTime() + durationMins * 60000);
+
+      // check patient conflicts
+      const patientConflict = overlapsAny(slotStart, slotEnd, patientAppointments);
+      if (patientConflict) return { ok: false, reason: 'patient', conflict: patientConflict };
+
+      // check doctor conflicts (use dailyAppointments list)
+      const doctorConflict = selectedDoctor ? overlapsAny(slotStart, slotEnd, dailyAppointments.filter(apt => apt.doctor === selectedDoctor)) : null;
+      if (selectedDoctor && doctorConflict) return { ok: false, reason: 'doctor', conflict: doctorConflict };
+
+      return { ok: true };
+    };
+
+    // If current selection is valid, do nothing
+    if (selectedTime) {
+      const check = trySlot(selectedDate, selectedTime);
+      if (check.ok) return;
+      console.log('[BookingModal] Current slot conflicts:', check.reason, check.conflict);
+    }
+
+    // Otherwise search forward up to 30 days
+    const now = new Date();
+    const startDate = selectedDate && selectedDate > now ? new Date(selectedDate) : new Date();
+    const maxDays = 30;
+
+    for (let d = 0; d < maxDays; d++) {
+      const checkDate = new Date(startDate);
+      checkDate.setDate(startDate.getDate() + d);
+
+      for (const slot of TIME_SLOTS) {
+        // Skip past times for today
+        if (d === 0) {
+          const [h, m] = slot.split(':').map(Number);
+          const slotDateTime = new Date(checkDate);
+          slotDateTime.setHours(h, m, 0, 0);
+          if (slotDateTime < new Date()) continue;
+        }
+
+        const result = trySlot(checkDate, slot);
+        if (result.ok) {
+          console.log('[BookingModal] Auto-selecting next free slot (patient+doctor):', { patientId: selectedPatient, doctor: selectedDoctor, date: checkDate.toISOString().slice(0,10), time: slot });
+          setSelectedDate(checkDate);
+          setSelectedTime(slot);
+          return;
+        }
+      }
+    }
+
+    console.warn('[BookingModal] No free slot found for patient within 30 days');
+  }, [open, selectedPatient, patientAppointments, duration, selectedDoctor, dailyAppointments, selectedDate, selectedTime]);
+
   useEffect(() => {
     setSelectedDate(defaultDate ?? new Date());
   }, [defaultDate]);
@@ -649,6 +757,15 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   useEffect(() => {
     setSelectedTime(defaultTime ?? "");
   }, [defaultTime]);
+
+  // Debug: log incoming default patient id when prop changes
+  useEffect(() => {
+    if (defaultPatientId) {
+      console.log('[BookingModal] 🔔 defaultPatientId prop received:', defaultPatientId);
+    } else {
+      console.log('[BookingModal] 🔔 no defaultPatientId provided');
+    }
+  }, [defaultPatientId]);
 
   // Sync doctorName prop to selectedDoctor state when it changes
   useEffect(() => {
@@ -686,12 +803,16 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   }, [open, user?.role, doctors, selectedDoctor, appointmentToEdit?.doctor, doctorName]);
 
   // Helper function to find next available slot (date + time)
-  const findNextAvailableSlot = useCallback(async (startDate: Date, doctorToCheck: string, durationToCheck: string): Promise<{ date: Date; time: string } | null> => {
+  const findNextAvailableSlot = useCallback(async (startDate: Date, doctorToCheck: string, durationToCheck: string, patientToCheck?: string, preferredTime?: string): Promise<{ date: Date; time: string } | null> => {
     if (!doctorToCheck || !durationToCheck) return null;
-    
+
     const durationMins = parseInt(durationToCheck, 10) || 30;
     const maxDaysToCheck = 30; // Check up to 30 days ahead
-    
+    const timeToMinutes = (time: string): number => {
+      const [h, m] = time.split(':').map(Number);
+      return h * 60 + m;
+    };
+
     // Helper to get available slots for a given date
     const getSlotsForDate = async (date: Date): Promise<string[]> => {
       try {
@@ -700,92 +821,198 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           `http://localhost:3001/api/appointments?doctor=${encodeURIComponent(doctorToCheck)}&startDate=${dateStr}&endDate=${dateStr}&includeUnpaid=true`,
           { credentials: 'include' }
         );
-        
+
         if (!res.ok) return [];
-        
+
         const json = await res.json();
         const appointments = json.data || [];
-        
+
+        // If a patientToCheck was provided, fetch that patient's appointments for the same date
+        let patientAppointmentsForDate: any[] = [];
+        if (patientToCheck) {
+          try {
+            const pres = await fetch(
+              `http://localhost:3001/api/appointments?patientId=${encodeURIComponent(patientToCheck)}&startDate=${dateStr}&endDate=${dateStr}&includeUnpaid=true`,
+              { credentials: 'include' }
+            );
+            if (pres.ok) {
+              const pjson = await pres.json();
+              patientAppointmentsForDate = pjson.data || [];
+            }
+          } catch (err) {
+            console.warn('[BookingModal] Failed to fetch patient appointments for', dateStr, patientToCheck, err);
+          }
+        }
+
         // Calculate available slots
         const now = new Date();
         const todayStr = formatDateToYYYYMMDD(now);
         const isToday = dateStr === todayStr;
-        
+
         const currentHour = now.getHours();
         const currentMinute = now.getMinutes();
-        
-        const timeToMinutes = (time: string): number => {
-          const [h, m] = time.split(':').map(Number);
-          return h * 60 + m;
-        };
-        
+
         const availableSlots: string[] = [];
-        
+
         for (const slot of TIME_SLOTS) {
           const [hour, minute] = slot.split(':').map(Number);
           const isPastTime = isToday && (hour < currentHour || (hour === currentHour && minute <= currentMinute));
-          
+
           if (isPastTime) continue;
-          
-          // Check for booking conflicts
+
+          // Check for booking conflicts for doctor
           const slotMinutes = timeToMinutes(slot);
           const slotEndMinutes = slotMinutes + durationMins;
-          
+
           let isConflict = false;
           for (const apt of appointments) {
             if (apt.status === 'cancelled') continue;
             if (apt.status === 'pending') continue; // Pending can be overridden
-            
+
             const aptStart = timeToMinutes(apt.time);
             const aptEnd = aptStart + (apt.duration || 30);
-            
+
             if (slotMinutes < aptEnd && slotEndMinutes > aptStart) {
               isConflict = true;
               break;
             }
           }
-          
+
+          // Also check for patient conflicts (if provided)
+          if (!isConflict && patientAppointmentsForDate.length > 0) {
+            for (const papt of patientAppointmentsForDate) {
+              if (papt.status === 'cancelled') continue;
+              if (papt.status === 'pending') continue;
+
+              const pStart = timeToMinutes(papt.time);
+              const pEnd = pStart + (papt.duration || 30);
+              if (slotMinutes < pEnd && slotEndMinutes > pStart) {
+                isConflict = true;
+                break;
+              }
+            }
+          }
+
           if (!isConflict) {
             availableSlots.push(slot);
           }
         }
-        
+
         return availableSlots;
       } catch (err) {
         console.warn(`[BookingModal] Failed to fetch appointments for date ${formatDateToYYYYMMDD(date)}:`, err);
         return [];
       }
     };
-    
+
     // Search for next available slot starting from startDate
     for (let daysAhead = 0; daysAhead < maxDaysToCheck; daysAhead++) {
       const checkDate = new Date(startDate);
       checkDate.setDate(startDate.getDate() + daysAhead);
-      
+
       // Skip past dates
       const now = new Date();
       now.setHours(0, 0, 0, 0);
       if (checkDate < now) continue;
-      
+
       const availableSlots = await getSlotsForDate(checkDate);
-      
+
       if (availableSlots.length > 0) {
+        const preferredMinutes = preferredTime ? timeToMinutes(preferredTime) : null;
+        const selectedSlot = preferredTime && daysAhead === 0
+          ? (
+              availableSlots.find(slot => slot === preferredTime) ||
+              availableSlots.find(slot => preferredMinutes !== null && timeToMinutes(slot) >= preferredMinutes)
+            )
+          : availableSlots[0];
+
+        if (!selectedSlot) continue;
+
         return {
           date: checkDate,
-          time: availableSlots[0] // Return first available slot
+          time: selectedSlot
         };
       }
     }
-    
+
     return null;
   }, []);
+
+  // Run auto-preselection logic (validates provided defaults and auto-searches)
+  const runAutoPreselect = useCallback(async (patientId?: string) => {
+    if (appointmentToEdit) return; // don't override when editing
+
+    const patientToSearch = patientId || defaultPatientId || selectedPatient || undefined;
+    const doctorToSearch = doctorName || selectedDoctor;
+    const durationToSearch = String(Number(duration) || appointmentTypeDurations[appointmentType || 'Routine Cleaning'] || 30);
+
+    // Validate any passed default slot once a doctor is known. If it is taken,
+    // advance to the next slot that is free for both doctor and patient.
+    if (defaultDate && defaultTime) {
+      if (!appointmentType) setAppointmentType('Routine Cleaning');
+
+      if (!doctorToSearch) {
+        setSelectedDate(defaultDate);
+        setSelectedTime(defaultTime);
+        return;
+      }
+
+      try {
+        const nextSlot = await findNextAvailableSlot(defaultDate, doctorToSearch, durationToSearch, patientToSearch, defaultTime);
+        if (nextSlot) {
+          const defaultDateStr = formatDateToYYYYMMDD(defaultDate);
+          const nextDateStr = formatDateToYYYYMMDD(nextSlot.date);
+
+          if (nextDateStr === defaultDateStr && nextSlot.time === defaultTime) {
+            setSelectedDate(defaultDate);
+            setSelectedTime(defaultTime);
+          } else {
+            console.log('[BookingModal] Default slot unavailable; overriding to next available slot:', { date: nextDateStr, time: nextSlot.time });
+            setSelectedDate(nextSlot.date);
+            setSelectedTime(nextSlot.time);
+          }
+          return;
+        }
+
+        const fallback = await findNextAvailableSlot(new Date(), doctorToSearch, durationToSearch, patientToSearch);
+        if (fallback) {
+          console.log('[BookingModal] Default slot unavailable; using fallback slot:', { date: formatDateToYYYYMMDD(fallback.date), time: fallback.time });
+          setSelectedDate(fallback.date);
+          setSelectedTime(fallback.time);
+        }
+      } catch (err) {
+        console.warn('[BookingModal] Error validating default slot:', err);
+      }
+      return;
+    }
+
+    if (!doctorToSearch) {
+      console.log('[BookingModal] Waiting for doctor to be selected before auto-preselect...');
+      return;
+    }
+
+    if (!appointmentType) setAppointmentType('Routine Cleaning');
+
+    const nextSlot = await findNextAvailableSlot(new Date(), doctorToSearch, durationToSearch, patientToSearch);
+    if (nextSlot) {
+      setSelectedDate(nextSlot.date);
+      setSelectedTime(nextSlot.time);
+      console.log('[BookingModal] Auto-preselected slot:', { date: formatDateToYYYYMMDD(nextSlot.date), time: nextSlot.time });
+    }
+  }, [appointmentToEdit, defaultDate, defaultTime, doctorName, duration, selectedDoctor, selectedPatient, defaultPatientId, appointmentType, findNextAvailableSlot]);
+
+  const runAutoPreselectRef = useRef(runAutoPreselect);
+
+  useEffect(() => {
+    runAutoPreselectRef.current = runAutoPreselect;
+  }, [runAutoPreselect]);
 
   // Auto-preselect date, time, and appointment type for all portals
   useEffect(() => {
     if (!open || appointmentToEdit) return; // Only for new appointments, not editing
     
     // CASE 1: Coming from DoctorAvailabilityView (has defaultDate, defaultTime, and doctorName)
-    // RULE: Only preselect appointment type, respect the passed date/time/doctor
+    // Preselect appointment type, but validate the passed date/time/doctor before keeping it.
     if (defaultDate && defaultTime && doctorName) {
       console.log('[BookingModal] 📍 DoctorAvailabilityView context detected');
       console.log('[BookingModal] ℹ️ Pre-filled with: date=' + formatDateToYYYYMMDD(defaultDate) + ', time=' + defaultTime + ', doctor=' + doctorName);
@@ -795,13 +1022,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         console.log('[BookingModal] 📋 Preselecting appointment type: Routine Cleaning');
         setAppointmentType("Routine Cleaning");
       }
-      return; // Don't do any auto-searching
+      runAutoPreselect();
+      return;
     }
     
     // CASE 2: Generic booking modal (explicit defaults passed)
-    // Find next available slot automatically
+    // Keep the clicked slot only after it has been validated against the selected doctor/patient.
     if (defaultDate && defaultTime) {
-      // User clicked a specific time slot - respect it
       console.log('[BookingModal] 📍 Using explicitly passed date/time:', {
         date: formatDateToYYYYMMDD(defaultDate),
         time: defaultTime,
@@ -810,46 +1037,20 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       if (!appointmentType) {
         setAppointmentType("Routine Cleaning");
       }
+      runAutoPreselect();
       return;
     }
     
     // CASE 3: New appointment modal (no defaults at all)
-    // Only preselect if not already set
-    if (appointmentType && selectedTime && selectedDate > new Date()) return;
-    
     // Preselect first appointment type
     if (!appointmentType) {
       console.log('[BookingModal] 📋 Preselecting appointment type: Routine Cleaning');
       setAppointmentType("Routine Cleaning");
     }
     
-    // Find next available slot for preselection (only if no explicit defaults passed)
-    const preSelectSlot = async () => {
-      if (!selectedDoctor) {
-        console.log('[BookingModal] ⏳ Waiting for doctor to be selected...');
-        return;
-      }
-      
-      console.log('[BookingModal] 🔍 Auto-searching for next available slot for ' + selectedDoctor);
-      const defaultDuration = appointmentTypeDurations["Routine Cleaning"] || 30;
-      const nextSlot = await findNextAvailableSlot(new Date(), selectedDoctor, String(defaultDuration));
-      
-      if (nextSlot) {
-        console.log('[BookingModal] ✅ Found next available slot:', {
-          date: formatDateToYYYYMMDD(nextSlot.date),
-          time: nextSlot.time
-        });
-        setSelectedDate(nextSlot.date);
-        setSelectedTime(nextSlot.time);
-      } else {
-        console.warn('[BookingModal] ⚠️ No available slots found within 30 days');
-      }
-    };
-    
-    preSelectSlot();
-    // Fixed dependency array: only include variables that determine when to re-run
-    // Removed appointmentType, selectedTime, selectedDoctor as they're internal state
-  }, [open, appointmentToEdit, defaultDate, defaultTime, doctorName, findNextAvailableSlot]);
+    runAutoPreselect();
+    // Re-run when selectedDoctor or selectedPatient change so patient-specific conflicts affect preselection.
+  }, [open, appointmentToEdit, defaultDate, defaultTime, doctorName, findNextAvailableSlot, selectedDoctor, selectedPatient, defaultPatientId, runAutoPreselect, appointmentType]);
 
   // Price calculations - handle custom types
   // finalPrice is the base price (before discount) - used in payment calculations
@@ -896,7 +1097,30 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         console.log('BookingModal: fetch response', { success: json?.success, dataCount: json?.data?.length, user: { username: user?.username, role: user?.role } });
         
         if (json?.success && Array.isArray(json.data)) {
-          const list = json.data.map((p: any) => ({ id: String(p.id), name: `${p.firstName} ${p.lastName}`, ...p }));
+          let list = json.data.map(toPatientOption);
+          const editPatientId = appointmentToEdit?.patientId ? String(appointmentToEdit.patientId) : "";
+
+          if (editPatientId && !list.some((p: any) => String(p.id) === editPatientId)) {
+            try {
+              const patientRes = await fetch(`http://localhost:3001/api/patients/${encodeURIComponent(editPatientId)}`, fetchOpts);
+              const patientJson = await patientRes.json();
+              if (patientJson?.success && patientJson.data) {
+                list = [toPatientOption(patientJson.data), ...list];
+              }
+            } catch (patientErr) {
+              console.warn('[BookingModal] Failed to fetch appointment patient; using appointment snapshot:', patientErr);
+            }
+
+            if (!list.some((p: any) => String(p.id) === editPatientId)) {
+              list = [
+                toPatientOption({
+                  id: editPatientId,
+                  name: appointmentToEdit.patientName || 'Patient',
+                }),
+                ...list,
+              ];
+            }
+          }
           console.log('BookingModal: patients loaded', { 
             count: list.length, 
             source: user?.role === 'patient' ? 'server-filtered' : 'admin-fetch',
@@ -904,9 +1128,26 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           });
           try { window.dispatchEvent(new CustomEvent('bookingmodal:patients', { detail: { source: user?.role === 'patient' ? 'server-filtered' : 'admin-fetch', count: list.length, patients: list } })); } catch {}
           setPatients(list);
-          // preselect first patient if available
-          if (list.length > 0) {
-            setSelectedPatient(list[0].id);
+          // Edit/view mode must always use the appointment patient, never the default/first patient.
+          let chosenPatientId: string | undefined = undefined;
+          if (editPatientId) {
+            chosenPatientId = editPatientId;
+          } else if (defaultPatientId) {
+            const found = list.find((p: any) => String(p.id) === String(defaultPatientId));
+            if (found) chosenPatientId = String(defaultPatientId);
+            else if (list.length > 0) chosenPatientId = list[0].id;
+          } else if (list.length > 0) {
+            chosenPatientId = list[0].id;
+          }
+
+          if (chosenPatientId) {
+            setSelectedPatient(chosenPatientId);
+            if (!appointmentToEdit) {
+              // Revalidate once the patient is known so patient conflicts affect preselection.
+              runAutoPreselectRef.current(chosenPatientId).catch((err) => {
+                console.warn('[BookingModal] Failed to validate schedule after patient load:', err);
+              });
+            }
           }
         } else {
           console.warn('BookingModal: empty or failed response', json);
@@ -921,7 +1162,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     };
 
     fetchPatients();
-  }, [open, user]);
+  }, [open, user, defaultPatientId, appointmentToEdit]);
 
   // When an appointment is provided for editing, prefill the form
   useEffect(() => {
@@ -988,7 +1229,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setIsRescheduling(false);
     } else {
       // Reset form when creating new appointment
-      setSelectedPatient(patients.length > 0 ? patients[0].id : '');
+      // If a defaultPatientId was provided (e.g., user clicked Schedule on a patient), prefer it
+      setSelectedPatient(defaultPatientId ? String(defaultPatientId) : '');
       setAppointmentType('');
       setCustomAppointmentTypeName('');
       setDuration('30');
@@ -1006,7 +1248,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setPaymentStatusChangedByUser(0);
       setModalStep('details');
     }
-  }, [open, appointmentToEdit, defaultDate, defaultTime, patients]);
+  }, [open, appointmentToEdit, defaultDate, defaultTime, defaultPatientId]);
 
   // Derived display values for schedule block
   const displayDoctor = formatDoctorName(appointmentToEdit?.doctor || doctorName);
@@ -1019,6 +1261,29 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       : 0;
   const discountedPrice = Math.max(0, finalPrice - Number(discount));
   const remainingBalance = Math.max(0, discountedPrice - previouslyPaidAmount);
+  const bookingConflictWarnings = getBookingConflictWarnings({
+    durationConflict,
+    patientConflict,
+    duration,
+  });
+  const bookingConflictTitle = bookingConflictWarnings.map(w => w.message).join('\n');
+
+  const { handleNextStep } = useSharedBookingLogic({
+    modalStep,
+    flow: 'details-payment',
+    selectedPatient,
+    selectedDate,
+    selectedTime,
+    appointmentType,
+    customAppointmentTypeName,
+    selectedDoctor,
+    setModalStep: (step) => setModalStep(step as "details" | "payment"),
+    setIsConfirmSummaryOpen,
+    toast,
+    durationConflict,
+    patientConflict,
+    allowConflictSummary: true,
+  });
 
   // Handler for status changes that sets the flag
   const handleStatusChange = (newStatus: string) => {
@@ -1033,11 +1298,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // First step: validate details and move to payment
   const handleConfirmBooking = async () => {
-    if (!selectedPatient || !appointmentType) return;
     setIsBooking(true);
     try {
-      // perform lightweight validation here (conflicts handled elsewhere)
-      setModalStep("payment");
+      handleNextStep();
     } catch (err) {
       console.error('Booking: details error', err);
     } finally {
@@ -1047,8 +1310,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // Second step: show summary confirmation before saving
   const handleConfirmPayment = async () => {
-    if (!selectedPatient || !appointmentType) return;
-    setIsConfirmSummaryOpen(true);
+    handleNextStep();
   };
 
   // Calculate what the final status will be for display in summary
@@ -2003,12 +2265,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 ) : (
                   <Button 
                     onClick={handleConfirmBooking} 
-                    disabled={isBooking || !appointmentType || !selectedPatient || !!durationConflict || !!patientConflict} 
-                    title={durationConflict ? "Please resolve the scheduling conflict before proceeding" : patientConflict ? "Patient has a conflicting appointment" : ""}
+                    disabled={isBooking || !appointmentType || !selectedPatient} 
+                    title={bookingConflictTitle}
                     className={`gap-2 h-11 px-8 rounded-lg shadow-lg ${
-                      durationConflict || patientConflict
-                        ? "bg-gray-300 hover:bg-gray-300 text-gray-500 cursor-not-allowed"
-                        : "bg-blue-600 hover:bg-blue-700 text-white"
+                      "bg-blue-600 hover:bg-blue-700 text-white"
                     }`}
                   >
                     {isBooking ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Next: Payment'}
@@ -2032,6 +2292,25 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                     <span className="text-sm text-gray-500">Time:</span>
                     <span className="font-medium">{selectedTime ? formatTimeTo12h(selectedTime) : '—'}</span>
                   </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-500">Duration:</span>
+                    <span className="inline-flex items-center gap-2 font-medium">
+                      {duration} mins
+                      {durationConflict && (
+                        <span title={bookingConflictWarnings.find(w => w.type === 'duration')?.message || durationConflict} className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                          <AlertCircle className="h-3.5 w-3.5" />
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  {bookingConflictWarnings.length > 0 && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-800">
+                      <span title={bookingConflictTitle} className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-amber-700 align-middle">
+                        <AlertCircle className="h-3.5 w-3.5" />
+                      </span>
+                      This appointment has a scheduling conflict. Hover the warning icon for details.
+                    </div>
+                  )}
                   <div className="flex justify-between items-center pt-3 border-t">
                     <span className="font-bold">Total Price:</span>
                     {Number(discount) > 0 ? (
@@ -2248,6 +2527,25 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   <span className="text-gray-600">Doctor:</span>
                   <span className="font-semibold">Dr. {displayDoctor}</span>
                 </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Duration:</span>
+                  <span className="inline-flex items-center gap-2 font-semibold">
+                    {duration} mins
+                    {durationConflict && (
+                      <span title={bookingConflictWarnings.find(w => w.type === 'duration')?.message || durationConflict} className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                        <AlertCircle className="h-3.5 w-3.5" />
+                      </span>
+                    )}
+                  </span>
+                </div>
+                {bookingConflictWarnings.length > 0 && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-800">
+                    <span title={bookingConflictTitle} className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-amber-700 align-middle">
+                      <AlertCircle className="h-3.5 w-3.5" />
+                    </span>
+                    This appointment has a scheduling conflict. Hover the warning icon for details.
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-gray-600">Status:</span>
                   <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-bold ${
