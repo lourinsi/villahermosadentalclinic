@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import { useBookingModalMode } from "@/hooks/useBookingModalMode";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,7 +10,7 @@ import { Calendar, Clock, DollarSign, FileText, Plus, Eye, Edit2, Trash2 } from 
 import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import { toast } from "sonner";
-import BookingModal from "@/components/BookingModal";
+import BookingModalWrapper from "@/components/BookingModalWrapper";
 
 interface Appointment {
   id: string;
@@ -27,6 +28,7 @@ interface Appointment {
 
 export default function PatientDashboard() {
   const { user } = useAuth();
+  const { mode, toggleMode } = useBookingModalMode();
   const router = useRouter();
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -125,9 +127,20 @@ export default function PatientDashboard() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
       <div className="max-w-7xl mx-auto">
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold text-gray-900">My Appointments</h1>
-          <p className="text-gray-600 mt-2">Manage your dental appointments and payments</p>
+        <div className="mb-8 flex items-center justify-between">
+          <div>
+            <h1 className="text-4xl font-bold text-gray-900">My Appointments</h1>
+            <p className="text-gray-600 mt-2">Manage your dental appointments and payments</p>
+          </div>
+          <Button
+            onClick={toggleMode}
+            variant="outline"
+            size="sm"
+            className="text-xs"
+            title={`Switch to ${mode === 'simple' ? 'Pro' : 'Simple'} mode`}
+          >
+            {mode === 'simple' ? '📱 Simple' : '⭐ Pro'}
+          </Button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
@@ -285,7 +298,7 @@ export default function PatientDashboard() {
         </Card>
       </div>
 
-      <BookingModal
+      <BookingModalWrapper
         open={isBookingModalOpen}
         onOpenChange={setIsBookingModalOpen}
         appointmentToEdit={selectedAppointment as any}

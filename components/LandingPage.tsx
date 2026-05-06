@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useBookingModalMode } from "@/hooks/useBookingModalMode";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -21,10 +22,11 @@ import {
 } from "lucide-react";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
-import { PublicBookingModal } from "@/components/PublicBookingModal";
+import BookingModalWrapper from "@/components/BookingModalWrapper";
 
 export default function LandingPage() {
   const router = useRouter();
+  const { mode, toggleMode } = useBookingModalMode();
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
 
   return (
@@ -34,10 +36,22 @@ export default function LandingPage() {
 
       {/* Hero Section */}
       <section className="bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 py-20 px-4 md:px-8">
-        <div className="max-w-6xl mx-auto text-center">
-          <h1 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6">
-            Welcome to Villahermosa Dental Clinic
-          </h1>
+        <div className="max-w-6xl mx-auto">
+          <div className="text-right mb-4">
+            <Button
+              onClick={toggleMode}
+              variant="outline"
+              size="sm"
+              className="text-xs"
+              title={`Switch to ${mode === 'simple' ? 'Pro' : 'Simple'} mode`}
+            >
+              {mode === 'simple' ? '📱 Simple' : '⭐ Pro'}
+            </Button>
+          </div>
+          <div className="text-center">
+            <h1 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6">
+              Welcome to Villahermosa Dental Clinic
+            </h1>
           <p className="text-xl text-gray-600 mb-12 max-w-2xl mx-auto">
             Your trusted partner in dental health and wellness. We provide
             comprehensive dental care with the latest technology and highly
@@ -75,6 +89,7 @@ export default function LandingPage() {
               Doctor Login <Stethoscope className="ml-2 w-5 h-5" />
             </Button>
           </div>
+        </div>
         </div>
       </section>
 
@@ -187,9 +202,10 @@ export default function LandingPage() {
       </section>
 
       {/* Booking Modal */}
-      <PublicBookingModal 
-        isOpen={isBookingModalOpen} 
-        onClose={() => setIsBookingModalOpen(false)} 
+      <BookingModalWrapper 
+        open={isBookingModalOpen} 
+        onOpenChange={setIsBookingModalOpen}
+        title="Book Your Appointment"
       />
 
       {/* Footer */}

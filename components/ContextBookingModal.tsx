@@ -2,7 +2,7 @@
 
 import React from "react";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
-import BookingModal from "./BookingModal";
+import BookingModalWrapper from "./BookingModalWrapper";
 
 /**
  * ContextBookingModal
@@ -22,7 +22,7 @@ export function ContextBookingModal() {
   } = useAppointmentModal();
 
   return (
-    <BookingModal
+    <BookingModalWrapper
       open={isEditModalOpen}
       onOpenChange={closeEditModal}
       appointmentToEdit={selectedAppointment || undefined}

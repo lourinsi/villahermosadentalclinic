@@ -3,11 +3,12 @@ import React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth.tsx";
+import { useBookingModalMode } from "@/hooks/useBookingModalMode";
 import { Button } from "@/components/ui/button";
 import { LogOut, User, LayoutDashboard, Users, Calendar, CreditCard, Shield, Settings, Bell, ClipboardList, Stethoscope } from "lucide-react";
 import { toast } from "sonner";
 import NotificationsOpened from "./notificationsOpened";
-import BookingModal from "./BookingModal";
+import BookingModalWrapper from "./BookingModalWrapper";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { Appointment } from "@/hooks/useAppointments";
@@ -16,6 +17,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   const pathname = usePathname();
   const router = useRouter();
   const { logout, user } = useAuth();
+  const { mode, toggleMode } = useBookingModalMode();
   const { notifications, markAsRead, markAsUnread, deleteNotification, deleteNotificationWithResult, markAllAsRead, deleteAllNotifications, refreshNotifications } = useNotifications();
   const { 
     updateAppointment, 
@@ -120,7 +122,18 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
         </div>
       </aside>
       <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-end px-6 flex-shrink-0">
+        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <Button
+              onClick={toggleMode}
+              variant="outline"
+              size="sm"
+              className="text-xs"
+              title={`Switch to ${mode === 'simple' ? 'Pro' : 'Simple'} mode`}
+            >
+              {mode === 'simple' ? '📱 Simple' : '⭐ Pro'}
+            </Button>
+          </div>
           <NotificationsOpened 
             notifications={notifications} 
             unreadCount={unreadCount} 
@@ -139,7 +152,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
         <main className="flex-1 p-6 overflow-auto bg-gray-50">{children}</main>
         
         {/* Support editing appointments from notifications */}
-        <BookingModal 
+        <BookingModalWrapper 
           open={isEditModalOpen || isCreateModalOpen} 
           onOpenChange={(open) => {
             if (!open) {

@@ -11,7 +11,7 @@ import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal } from "../lib/utils";
 import { useAuth } from "@/hooks/useAuth";
-import BookingModal from "./BookingModal";
+import BookingModalWrapper from "./BookingModalWrapper";
 import { NextAppointmentCard } from "./NextAppointmentCard";
 
 export function PatientDashboard() {
@@ -377,7 +377,7 @@ export function PatientDashboard() {
       </div>
 
       {/* Booking Modal */}
-      <BookingModal
+      <BookingModalWrapper
         open={bookingModalOpen}
         onOpenChange={setBookingModalOpen}
         appointmentToEdit={selectedAppointment}

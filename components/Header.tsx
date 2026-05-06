@@ -45,7 +45,7 @@ export function Header({ onBookAppointment }: HeaderProps) {
               onClick={onBookAppointment}
               className="bg-primary hover:bg-primary/90"
             >
-              Book Appointment
+              Book Appointments
             </Button>
           </div>
         </div>

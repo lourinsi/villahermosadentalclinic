@@ -37,7 +37,7 @@ import {
   User as UserIcon
 } from "lucide-react";
 import { EditPaymentModal } from "./EditPaymentModal";
-import BookingModal from "./BookingModal";
+import BookingModalWrapper from "./BookingModalWrapper";
 import ConfirmDialog from "./ConfirmDialog";
 import { Appointment } from "../hooks/useAppointments";
 import { RecentTransaction } from "../lib/finance-types";
@@ -762,7 +762,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
         </DialogContent>
       </Dialog>
 
-      <BookingModal
+      <BookingModalWrapper
         open={bookingModalOpen}
         onOpenChange={setBookingModalOpen}
         defaultDate={nextAvailableDate}

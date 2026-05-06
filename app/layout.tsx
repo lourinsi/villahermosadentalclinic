@@ -1,6 +1,7 @@
 import { AppointmentModalProvider } from "@/hooks/useAppointmentModal";
 import { PaymentModalProvider } from "@/hooks/usePaymentModal";
 import { AuthProvider } from "@/hooks/useAuth";
+import { BookingModalModeProvider } from "@/hooks/useBookingModalMode";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
@@ -37,17 +38,19 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <AuthProvider>
-          <AppointmentModalProvider>
-            <PaymentModalProvider>
-              {children}
-              <Toaster />
-              <ScheduleAppointmentModal />
-              <AddPatientModal />
-              <GlobalBookingModalWrapper />
-              <RecordPaymentModal />
-              <PatientPaymentModal />
-            </PaymentModalProvider>
-          </AppointmentModalProvider>
+          <BookingModalModeProvider>
+            <AppointmentModalProvider>
+              <PaymentModalProvider>
+                {children}
+                <Toaster />
+                <ScheduleAppointmentModal />
+                <AddPatientModal />
+                <GlobalBookingModalWrapper />
+                <RecordPaymentModal />
+                <PatientPaymentModal />
+              </PaymentModalProvider>
+            </AppointmentModalProvider>
+          </BookingModalModeProvider>
         </AuthProvider>
       </body>
     </html>

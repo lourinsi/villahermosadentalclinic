@@ -1,6 +1,6 @@
 "use client";
 
-import BookingModal from "./BookingModal";
+import BookingModalWrapper from "./BookingModalWrapper";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 
 /**
@@ -19,7 +19,7 @@ export function GlobalBookingModalWrapper() {
   } = useAppointmentModal();
 
   return (
-    <BookingModal
+    <BookingModalWrapper
       open={isPatientBookingModalOpen}
       onOpenChange={(open) => {
         if (!open) {
