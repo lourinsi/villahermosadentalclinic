@@ -18,6 +18,7 @@ interface TimePickerModalProps {
   onTimeSelect: (time: string) => void;
   onDateChange?: (date: Date) => void;
   excludeAppointmentId?: string;
+  patientId?: string | null;
 }
 
 const getAppointmentFetchOptions = (): RequestInit => {
@@ -40,7 +41,8 @@ export function TimePickerModal({
   duration,
   onTimeSelect,
   onDateChange,
-  excludeAppointmentId
+  excludeAppointmentId,
+  patientId
 }: TimePickerModalProps) {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -56,7 +58,11 @@ export function TimePickerModal({
     try {
       setIsLoading(true);
       const dateStr = formatDateToYYYYMMDD(dateToFetch);
-      const url = `http://localhost:3001/api/appointments?doctor=${encodeURIComponent(doctorName)}&startDate=${dateStr}&endDate=${dateStr}&includeUnpaid=true`;
+      let url = `http://localhost:3001/api/appointments?doctor=${encodeURIComponent(doctorName)}&startDate=${dateStr}&endDate=${dateStr}&includeUnpaid=true`;
+      
+      if (patientId) {
+        url += `&patientId=${encodeURIComponent(patientId)}&matchType=or`;
+      }
       
       const response = await fetch(url, getAppointmentFetchOptions());
       const result = await response.json();
@@ -66,12 +72,12 @@ export function TimePickerModal({
         setAppointments([]);
       }
     } catch (error) {
-      console.error("Failed to fetch doctor appointments", error);
+      console.error("Failed to fetch appointments", error);
       setAppointments([]);
     } finally {
       setIsLoading(false);
     }
-  }, [doctorName]);
+  }, [doctorName, patientId]);
 
   // When modal opens, sync viewDate with selectedDate and fetch appointments
   useEffect(() => {
@@ -136,6 +142,7 @@ export function TimePickerModal({
       let isBooked = false;
       let isTentative = false;
       let isPending = false;
+      let isPatientConflict = false;
       let appointment: Appointment | null = null;
       
       for (const apt of activeAppointments) {
@@ -143,14 +150,30 @@ export function TimePickerModal({
         const aptEnd = aptStart + (apt.duration || 30);
         
         if (slotMinutes < aptEnd && slotEndMinutes > aptStart) {
-          isBooked = true;
-          appointment = apt;
-          if (apt.status === 'tentative' || apt.status === 'reserved') {
-            isTentative = true;
-          } else if (apt.status === 'pending') {
-            isPending = true;
+          // Check if this is a doctor conflict or a patient conflict
+          const isDoctorConflict = apt.doctor === doctorName;
+          const isPatientSpecificConflict = patientId && String(apt.patientId) === String(patientId);
+
+          if (isDoctorConflict) {
+            isBooked = true;
+            appointment = apt;
+            if (apt.status === 'tentative' || apt.status === 'reserved') {
+              isTentative = true;
+            } else if (apt.status === 'pending') {
+              isPending = true;
+            }
           }
-          break;
+
+          if (isPatientSpecificConflict) {
+            isPatientConflict = true;
+            // If it's the patient's own appointment with another doctor, 
+            // we should also block the slot even if this doctor is free
+            isBooked = true;
+            // Only set appointment if not already set by doctor conflict
+            if (!appointment) appointment = apt;
+          }
+          
+          if (isBooked) break;
         }
       }
 
@@ -162,12 +185,13 @@ export function TimePickerModal({
         isBooked,
         isTentative,
         isPending,
+        isPatientConflict,
         isPast,
         isSelected,
         appointment
       };
     });
-  }, [appointments, viewDate, selectedDate, selectedTime, excludeAppointmentId, duration]);
+  }, [appointments, viewDate, selectedDate, selectedTime, excludeAppointmentId, duration, doctorName, patientId]);
 
   const handleTimeSelect = (time: string) => {
     onTimeSelect(time);
@@ -232,6 +256,8 @@ export function TimePickerModal({
                       ? "bg-blue-600 text-white border-blue-700 shadow-md"
                       : slot.isPast && !slot.appointment
                       ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed"
+                      : slot.isPatientConflict && !slot.isPending
+                      ? "bg-purple-50 text-purple-700 border-purple-200 cursor-pointer"
                       : slot.isAvailable && (!slot.isBooked || slot.isPending)
                       ? "bg-white text-gray-900 border-gray-300 hover:border-blue-400 hover:bg-blue-50 cursor-pointer"
                       : slot.isTentative
@@ -240,6 +266,7 @@ export function TimePickerModal({
                   ) }
                   title={
                     slot.isPast && !slot.appointment ? "Past time"
+                    : slot.isPatientConflict ? "Patient is busy (Click to view details)"
                     : slot.isTentative ? "Reserved (Click to view details)"
                     : slot.isBooked && !slot.isPending ? "Booked (Click to view details)"
                     : "Available"
@@ -248,6 +275,7 @@ export function TimePickerModal({
                   <div>{formatTimeTo12h(slot.time)}</div>
                   <div className="text-[8px] opacity-70">
                     {slot.isPast && !slot.appointment ? "Passed"
+                    : slot.isPatientConflict ? "Busy"
                     : slot.isTentative ? "Rsrvd"
                     : slot.isBooked && !slot.isPending ? "Booked"
                     : "Open"}

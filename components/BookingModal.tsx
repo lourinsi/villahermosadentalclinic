@@ -2647,6 +2647,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         onTimeSelect={setSelectedTime}
         onDateChange={setSelectedDate}
         excludeAppointmentId={appointmentToEdit?.id}
+        patientId={selectedPatient}
       />
     </>
    );
