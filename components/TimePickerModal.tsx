@@ -51,18 +51,31 @@ export function TimePickerModal({
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
 
   const fetchAppointments = useCallback(async (dateToFetch: Date) => {
-    if (!doctorName) {
+    if (!doctorName && !patientId) {
       setAppointments([]);
       return;
     }
     try {
       setIsLoading(true);
       const dateStr = formatDateToYYYYMMDD(dateToFetch);
-      let url = `http://localhost:3001/api/appointments?doctor=${encodeURIComponent(doctorName)}&startDate=${dateStr}&endDate=${dateStr}&includeUnpaid=true`;
+      const params = new URLSearchParams({
+        startDate: dateStr,
+        endDate: dateStr,
+        includeUnpaid: "true",
+      });
+
+      if (doctorName) {
+        params.set("doctor", doctorName);
+      }
       
       if (patientId) {
-        url += `&patientId=${encodeURIComponent(patientId)}&matchType=or`;
+        params.set("patientId", patientId);
+        if (doctorName) {
+          params.set("matchType", "or");
+        }
       }
+
+      const url = `http://localhost:3001/api/appointments?${params.toString()}`;
       
       const response = await fetch(url, getAppointmentFetchOptions());
       const result = await response.json();
@@ -228,7 +241,7 @@ export function TimePickerModal({
           </div>
 
           <p className="text-sm text-gray-600 text-center">
-            {doctorName}
+            {doctorName || (patientId ? "Checking patient availability" : "")}
           </p>
           
           {isLoading ? (
@@ -252,12 +265,12 @@ export function TimePickerModal({
                   disabled={slot.isPast && !slot.appointment}
                   className={cn(
                     "px-2 py-2 rounded-lg font-semibold text-xs transition-all border",
-                    slot.isSelected
+                    slot.isPatientConflict && !slot.isPending
+                      ? "bg-purple-50 text-purple-700 border-purple-200 cursor-pointer"
+                    : slot.isSelected && slot.isAvailable
                       ? "bg-blue-600 text-white border-blue-700 shadow-md"
                       : slot.isPast && !slot.appointment
                       ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed"
-                      : slot.isPatientConflict && !slot.isPending
-                      ? "bg-purple-50 text-purple-700 border-purple-200 cursor-pointer"
                       : slot.isAvailable && (!slot.isBooked || slot.isPending)
                       ? "bg-white text-gray-900 border-gray-300 hover:border-blue-400 hover:bg-blue-50 cursor-pointer"
                       : slot.isTentative

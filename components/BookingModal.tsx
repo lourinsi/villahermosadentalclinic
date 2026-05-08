@@ -11,16 +11,18 @@ import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAppointmentStatuses, AppointmentStatusOption } from "@/hooks/useAppointmentStatuses";
 import { usePaymentStatuses, PaymentStatusOption } from "@/hooks/usePaymentStatuses";
-import { Calendar as CalendarIcon, Clock, Award, Loader2, CreditCard, Banknote, Stethoscope, ChevronLeft, AlertCircle } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, Award, Loader2, CreditCard, Banknote, Stethoscope, ChevronLeft, AlertCircle, Plus } from "lucide-react";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { formatTimeTo12h, TIME_SLOTS } from "@/lib/time-slots";
 import { APPOINTMENT_PRICES, getAppointmentTypeName } from "@/lib/appointmentTypes";
 import { toast } from 'sonner';
-import useSharedBookingLogic, { getBookingConflictWarnings } from './sharedBookingLogic';
+import useSharedBookingLogic, { getBookingActor, getBookingConflictWarnings } from './sharedBookingLogic';
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
 import { useDoctors } from "@/hooks/useDoctors";
+import { cachePublicBookingPatient, createPublicBookingAppointment, getCachedPublicBookingPatients } from "@/lib/publicBookingCache";
+import type { BookingMode } from "./sharedBookingLogic";
 
 // Helper function to get appointment type index from name
 const getAppointmentTypeIndex = (typeName: string): number => {
@@ -71,6 +73,7 @@ interface BookingModalProps {
   onBooked?: (apt?: any) => void;
   appointmentToEdit?: any; // optional appointment object to edit
   title?: string; // optional override for dialog title
+  bookingMode?: BookingMode;
 }
 
 // Map appointment types to default durations (in minutes)
@@ -84,10 +87,10 @@ const appointmentTypeDurations: Record<string, number> = {
   "Other": 30,
 };
 
-export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, defaultPatientId, onBooked, appointmentToEdit, title }: BookingModalProps) {
+export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, defaultPatientId, onBooked, appointmentToEdit, title, bookingMode = "standard" }: BookingModalProps) {
   const { user } = useAuth();
-  const { doctors } = useDoctors();
-  const { addAppointment, updateAppointment, isPaymentFlow } = useAppointmentModal();
+  const { doctors } = useDoctors(undefined, { publicBooking: bookingMode === "public" && !user?.role });
+  const { addAppointment, updateAppointment, isPaymentFlow, openAddPatientModal, lastAddedPatient, lastAddedPatientAt } = useAppointmentModal();
   const { statuses: appointmentStatuses } = useAppointmentStatuses();
   const { statuses: paymentStatuses } = usePaymentStatuses();
 
@@ -126,6 +129,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [dailyAppointments, setDailyAppointments] = useState<any[]>([]);
   const [patientConflict, setPatientConflict] = useState("");
   const [patientAppointments, setPatientAppointments] = useState<any[]>([]);
+  const lastHandledAddedPatientAtRef = useRef<number | null>(null);
 
   // If a default patient id is provided (e.g., from PatientsView schedule button), preselect it
   useEffect(() => {
@@ -251,6 +255,33 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const isCancelled = (appointmentStatus || appointmentToEdit?.status || '').toLowerCase() === 'cancelled';
   const isPatientReadonly = Boolean(appointmentToEdit && user?.role === 'patient');
   const isEditMode = Boolean(appointmentToEdit);
+  const {
+    isPublicBookingMode,
+    isPatientLevelBookingMode,
+    canCreatePatients,
+    canManagePricing,
+    canManageStatuses,
+    isDoctorSelectionLocked,
+  } = getBookingActor({
+    userRole: user?.role,
+    bookingMode,
+  });
+
+  useEffect(() => {
+    if (!open || appointmentToEdit || !canCreatePatients || !lastAddedPatient || !lastAddedPatientAt) return;
+    if (lastHandledAddedPatientAtRef.current === lastAddedPatientAt) return;
+
+    const patientOption = toPatientOption(lastAddedPatient);
+    if (isPublicBookingMode) {
+      cachePublicBookingPatient(patientOption);
+    }
+    setPatients(prev => {
+      const filtered = prev.filter((patient: any) => String(patient.id) !== String(patientOption.id));
+      return [patientOption, ...filtered];
+    });
+    setSelectedPatient(patientOption.id);
+    lastHandledAddedPatientAtRef.current = lastAddedPatientAt;
+  }, [open, appointmentToEdit, canCreatePatients, isPublicBookingMode, lastAddedPatient, lastAddedPatientAt]);
 
   // Fetch logs when appointment is being edited
   useEffect(() => {
@@ -1082,6 +1113,21 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     const fetchPatients = async () => {
       setIsLoadingPatients(true);
       try {
+        if (isPublicBookingMode) {
+          const cachedPatients = getCachedPublicBookingPatients().map(toPatientOption);
+          setPatients(cachedPatients);
+
+          if (cachedPatients.length > 0) {
+            const foundDefault = defaultPatientId
+              ? cachedPatients.find((p: any) => String(p.id) === String(defaultPatientId))
+              : null;
+            setSelectedPatient((current) => current || foundDefault?.id || cachedPatients[0].id);
+          }
+
+          setIsLoadingPatients(false);
+          return;
+        }
+
         const fetchOpts: RequestInit = { credentials: 'include' };
         
         // Always fetch from /api/patients - server will filter based on requester role
@@ -1162,7 +1208,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     };
 
     fetchPatients();
-  }, [open, user, defaultPatientId, appointmentToEdit]);
+  }, [open, user, defaultPatientId, appointmentToEdit, isPublicBookingMode]);
 
   // When an appointment is provided for editing, prefill the form
   useEffect(() => {
@@ -1251,7 +1297,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   }, [open, appointmentToEdit, defaultDate, defaultTime, defaultPatientId]);
 
   // Derived display values for schedule block
-  const displayDoctor = formatDoctorName(appointmentToEdit?.doctor || doctorName);
+  const displayDoctor = formatDoctorName(appointmentToEdit?.doctor || selectedDoctor || doctorName);
   
   // Calculate remaining balance for display in payment step
   const previouslyPaidAmount = appointmentToEdit?.totalPaid !== undefined 
@@ -1526,23 +1572,35 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           paymentMethod,
         });
 
-        const newApt = await addAppointment({
-          patientId: selectedPatient,
-          patientName: patients.find(p => p.id === selectedPatient)?.name || selectedPatient,
-          doctor: selectedDoctor || '',
-          date: dateStr,
-          time: selectedTime,
-          type: getAppointmentTypeIndex(appointmentType),
-          customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-          duration: Number(duration) || 30,
-          price: finalPrice,
-          discount: Number(discount) || 0,
-          notes,
-          status: autoStatus as any,
-          paymentStatus: paymentStatus as any,
-          totalPaid: amountPaid,
-          balance: newBalance,
-        });
+        const selectedPatientRecord = patients.find(p => String(p.id) === String(selectedPatient));
+        const newApt = isPublicBookingMode
+          ? await createPublicBookingAppointment({
+              patient: selectedPatientRecord || { id: selectedPatient, name: selectedPatient },
+              date: dateStr,
+              time: selectedTime,
+              duration: Number(duration) || 30,
+              type: getAppointmentTypeIndex(appointmentType),
+              customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
+              doctor: selectedDoctor || '',
+              notes,
+            })
+          : await addAppointment({
+              patientId: selectedPatient,
+              patientName: selectedPatientRecord?.name || selectedPatient,
+              doctor: selectedDoctor || '',
+              date: dateStr,
+              time: selectedTime,
+              type: getAppointmentTypeIndex(appointmentType),
+              customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
+              duration: Number(duration) || 30,
+              price: finalPrice,
+              discount: Number(discount) || 0,
+              notes,
+              status: autoStatus as any,
+              paymentStatus: paymentStatus as any,
+              totalPaid: amountPaid,
+              balance: newBalance,
+            });
 
         // Auto-cancel any overlapping pending appointments for the same doctor
         if (newApt && dailyAppointments.length > 0) {
@@ -1728,7 +1786,21 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-4">
                     <div className="space-y-2">
-                      <Label className="text-sm font-bold text-gray-700">Who is this appointment for?</Label>
+                      <div className="flex items-center justify-between gap-3">
+                        <Label className="text-sm font-bold text-gray-700">Who is this appointment for?</Label>
+                        {canCreatePatients && !isPatientReadonly && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openAddPatientModal({ publicBooking: isPublicBookingMode })}
+                            className="h-8 gap-1.5 rounded-lg text-xs font-semibold"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            New patient
+                          </Button>
+                        )}
+                      </div>
                       <Select value={selectedPatient} onValueChange={setSelectedPatient} disabled={isLoadingPatients || isPatientReadonly}>
                         <SelectTrigger className={`h-11 rounded-lg transition-colors ${
                           patientConflict
@@ -1812,7 +1884,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                       <Label className="text-sm font-bold text-gray-700">Price</Label>
                       <div className="h-11 rounded-lg border border-gray-200 bg-white px-3 py-2.5 flex items-center">
                         <span className="text-gray-400 text-sm font-bold mr-2">₱</span>
-                        {appointmentType === "Other" || (user?.role === "admin" || user?.role === "doctor") ? (
+                        {canManagePricing ? (
                           <Input 
                             type="number" 
                             min="0" 
@@ -1833,6 +1905,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                     </div>
 
                     {/* Discount Input */}
+                    {canManagePricing && (
                     <div className="space-y-2">
                       <Label className="text-sm font-bold text-gray-700">Discount</Label>
                       <div className="h-11 rounded-lg border border-gray-200 bg-white px-3 py-2.5 flex items-center">
@@ -1854,6 +1927,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                         </div>
                       )}
                     </div>
+                    )}
 
                     {/* Final Price Display with Strikethrough if Discounted */}
                     {Number(discount) > 0 && (
@@ -1918,7 +1992,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                         </div>
                         <Select value={selectedDoctor} onValueChange={(newDoctor) => {
                           setSelectedDoctor(newDoctor);
-                        }} disabled={isPatientReadonly}>
+                        }} disabled={isDoctorSelectionLocked}>
                           <SelectTrigger className="h-9 w-auto rounded-lg border-gray-300 text-sm font-semibold px-3 bg-white hover:bg-gray-50 transition-colors">
                             <SelectValue placeholder="Select doctor" />
                           </SelectTrigger>
@@ -1987,7 +2061,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                           <Award className="h-4 w-4 text-blue-600" />
                           <span className="text-xs font-bold text-gray-600 uppercase">Status</span>
                         </div>
-                        {user?.role === "admin" || user?.role === "doctor" ? (
+                        {canManageStatuses ? (
                           <Select value={appointmentStatus} onValueChange={handleStatusChange}>
                             <SelectTrigger className={`h-8 px-3 rounded-full text-xs font-bold border-0 w-auto ${
                               appointmentStatuses.find(s => s.value === appointmentStatus)?.bgColor || 'bg-gray-100'
@@ -2020,10 +2094,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
                 <div className="space-y-2">
                   <Label className="text-sm font-bold text-gray-700">
-                    {user?.role === 'patient' ? 'My Notes' : 'Notes (Optional)'}
+                    {isPatientLevelBookingMode ? 'My Notes' : 'Notes (Optional)'}
                   </Label>
                   <Textarea 
-                    placeholder={user?.role === 'patient' ? "Add any notes for your dentist here..." : "Any details you'd like to add..."}
+                    placeholder={isPatientLevelBookingMode ? "Add any notes for your dentist here..." : "Any details you'd like to add..."}
                     value={notes} 
                     onChange={(e: any) => setNotes(e.target.value)} 
                     className="resize-none rounded-lg border-gray-200 focus:ring-blue-500 focus:border-blue-500" 
@@ -2525,7 +2599,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Doctor:</span>
-                  <span className="font-semibold">Dr. {displayDoctor}</span>
+                  <span className="font-semibold">{displayDoctor}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Duration:</span>

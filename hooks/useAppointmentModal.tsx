@@ -24,14 +24,18 @@ interface AppointmentModalContextType {
   closeScheduleModal: () => void;
   openPatientBookingModal: (date?: Date, time?: string, doctorName?: string, serviceType?: string) => void;
   closePatientBookingModal: () => void;
-  openAddPatientModal: () => void;
+  openAddPatientModal: (options?: { publicBooking?: boolean }) => void;
   closeAddPatientModal: () => void;
+  addPatientModalMode: "standard" | "publicBooking";
   openEditModal: (appointment: Appointment, isPatientReadOnly?: boolean, isPaymentFlow?: boolean) => void;
   openEditModalById: (id: string, isPatientReadOnly?: boolean, isPaymentFlow?: boolean) => Promise<void>;
   closeEditModal: () => void;
   refreshAppointments: (filters?: AppointmentFilters) => void;
   refreshPatients: () => void;
   refreshFinanceData: () => void;
+  lastAddedPatient: any | null;
+  lastAddedPatientAt: number | null;
+  notifyPatientAdded: (patient: any) => void;
   refreshTrigger: number;
   appointments: Appointment[];
   isLoading: boolean;
@@ -47,11 +51,14 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
   const [isScheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [isPatientBookingModalOpen, setPatientBookingModalOpen] = useState(false);
   const [isAddPatientModalOpen, setAddPatientModalOpen] = useState(false);
+  const [addPatientModalMode, setAddPatientModalMode] = useState<"standard" | "publicBooking">("standard");
   const [isEditModalOpen, setEditModalOpen] = useState(false);
   const [isPatientFieldReadOnly, setPatientFieldReadOnly] = useState(false);
   const [isPaymentFlow, setIsPaymentFlow] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [lastAddedPatient, setLastAddedPatient] = useState<any | null>(null);
+  const [lastAddedPatientAt, setLastAddedPatientAt] = useState<number | null>(null);
 
   const [newAppointmentDate, setNewAppointmentDate] = useState<Date>();
   const [newAppointmentTime, setNewAppointmentTime] = useState<string>();
@@ -71,6 +78,11 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
 
   const refreshPatients = useCallback(() => setRefreshTrigger(prev => prev + 1), []);
   const refreshFinanceData = useCallback(() => setRefreshTrigger(prev => prev + 1), []);
+  const notifyPatientAdded = useCallback((patient: any) => {
+    setLastAddedPatient(patient);
+    setLastAddedPatientAt(Date.now());
+    setRefreshTrigger(prev => prev + 1);
+  }, []);
 
   const openCreateModal = useCallback((date?: Date, time?: string, doctorName?: string) => {
     setNewAppointmentDate(date);
@@ -114,7 +126,10 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
 
   const closePatientBookingModal = useCallback(() => setPatientBookingModalOpen(false), []);
 
-  const openAddPatientModal = useCallback(() => setAddPatientModalOpen(true), []);
+  const openAddPatientModal = useCallback((options?: { publicBooking?: boolean }) => {
+    setAddPatientModalMode(options?.publicBooking ? "publicBooking" : "standard");
+    setAddPatientModalOpen(true);
+  }, []);
   const closeAddPatientModal = useCallback(() => setAddPatientModalOpen(false), []);
   
   const openEditModal = useCallback((appointment: Appointment, isPatientReadOnly: boolean = false, isPaymentFlowMode: boolean = false) => {
@@ -193,12 +208,16 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
     closePatientBookingModal,
     openAddPatientModal,
     closeAddPatientModal,
+    addPatientModalMode,
     openEditModal,
     openEditModalById,
     closeEditModal,
     refreshAppointments,
     refreshPatients,
     refreshFinanceData,
+    lastAddedPatient,
+    lastAddedPatientAt,
+    notifyPatientAdded,
     refreshTrigger,
     appointments,
     isLoading,
@@ -228,12 +247,16 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
     closePatientBookingModal,
     openAddPatientModal,
     closeAddPatientModal,
+    addPatientModalMode,
     openEditModal,
     openEditModalById,
     closeEditModal,
     refreshAppointments,
     refreshPatients,
     refreshFinanceData,
+    lastAddedPatient,
+    lastAddedPatientAt,
+    notifyPatientAdded,
     refreshTrigger,
     appointments,
     isLoading,

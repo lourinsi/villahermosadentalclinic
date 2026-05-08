@@ -206,6 +206,7 @@ export default function LandingPage() {
         open={isBookingModalOpen} 
         onOpenChange={setIsBookingModalOpen}
         title="Book Your Appointment"
+        bookingMode="public"
       />
 
       {/* Footer */}

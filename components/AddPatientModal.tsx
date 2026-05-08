@@ -7,12 +7,15 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { toast } from "sonner";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { cachePublicBookingPatient } from "@/lib/publicBookingCache";
 
 export function AddPatientModal() {
   const {
     isAddPatientModalOpen,
     closeAddPatientModal,
     refreshPatients,
+    notifyPatientAdded,
+    addPatientModalMode,
   } = useAppointmentModal();
 
   const [isLoading, setIsLoading] = useState(false);
@@ -73,17 +76,31 @@ export function AddPatientModal() {
         ...formData,
         createdAt: new Date().toISOString(),
       };
+      const isPublicBookingPatient = addPatientModalMode === "publicBooking";
 
-      const response = await fetch("http://localhost:3001/api/patients", {
+      const response = await fetch(
+        isPublicBookingPatient
+          ? "http://localhost:3001/api/patients/public-booking"
+          : "http://localhost:3001/api/patients",
+        {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify(patientData),
-      });
+        }
+      );
       const result = await response.json();
 
       if (result.success) {
         toast.success("Patient added successfully!");
-        refreshPatients();
+        if (result.data) {
+          if (isPublicBookingPatient) {
+            cachePublicBookingPatient(result.data);
+          }
+          notifyPatientAdded(result.data);
+        } else {
+          refreshPatients();
+        }
         closeAddPatientModal();
         setShowSummary(false);
         setFormData({

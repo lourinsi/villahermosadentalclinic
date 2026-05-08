@@ -6,21 +6,26 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth } from "@/hooks/useAuth";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAppointmentStatuses, AppointmentStatusOption } from "@/hooks/useAppointmentStatuses";
 import { usePaymentStatuses, PaymentStatusOption } from "@/hooks/usePaymentStatuses";
-import { Calendar as CalendarIcon, Clock, Award, Loader2, CreditCard, Banknote, Stethoscope, ChevronLeft, AlertCircle } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, Award, Loader2, CreditCard, Banknote, Stethoscope, ChevronLeft, AlertCircle, Plus } from "lucide-react";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { formatTimeTo12h, TIME_SLOTS } from "@/lib/time-slots";
 import { APPOINTMENT_PRICES, getAppointmentTypeName } from "@/lib/appointmentTypes";
 import { toast } from 'sonner';
-import useSharedBookingLogic, { getBookingConflictWarnings } from './sharedBookingLogic';
+import useSharedBookingLogic, { getBookingActor, getBookingConflictWarnings } from './sharedBookingLogic';
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
 import { useDoctors } from "@/hooks/useDoctors";
+import { cachePublicBookingPatient, createPublicBookingAppointment, getCachedPublicBookingPatients } from "@/lib/publicBookingCache";
+import type { BookingMode } from "./sharedBookingLogic";
+
+type ImprovedBookingStep = "patient" | "schedule" | "doctor" | "treatment" | "payment";
 
 // Helper function to get appointment type index from name
 const getAppointmentTypeIndex = (typeName: string): number => {
@@ -58,6 +63,18 @@ const formatDoctorName = (name?: string): string => {
   return `Dr. ${cleanName}`;
 };
 
+const normalizeDoctorName = (name?: string) => (name || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim();
+
+const getDoctorInitials = (name?: string) => {
+  const cleanName = (name || "Doctor").replace(/^Dr\.\s+/i, "").trim();
+  return cleanName
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+};
+
 const toPatientOption = (patient: any) => ({
   id: String(patient.id),
   name: patient.name || `${patient.firstName || ""} ${patient.lastName || ""}`.trim() || "Patient",
@@ -75,6 +92,7 @@ interface BookingModalProps {
   onDeleted?: (apt?: any) => void;
   appointmentToEdit?: any; // optional appointment object to edit
   title?: string; // optional override for dialog title
+  bookingMode?: BookingMode;
 }
 
 // Map appointment types to default durations (in minutes)
@@ -88,10 +106,10 @@ const appointmentTypeDurations: Record<string, number> = {
   "Other": 30,
 };
 
-export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, defaultPatientId, onBooked, onDeleted, appointmentToEdit, title }: BookingModalProps) {
+export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, defaultPatientId, onBooked, onDeleted, appointmentToEdit, title, bookingMode = "standard" }: BookingModalProps) {
   const { user } = useAuth();
-  const { doctors } = useDoctors();
-  const { addAppointment, updateAppointment, isPaymentFlow } = useAppointmentModal();
+  const { doctors } = useDoctors(undefined, { publicBooking: bookingMode === "public" && !user?.role });
+  const { addAppointment, updateAppointment, isPaymentFlow, openAddPatientModal, lastAddedPatient, lastAddedPatientAt } = useAppointmentModal();
   const { statuses: appointmentStatuses } = useAppointmentStatuses();
   const { statuses: paymentStatuses } = usePaymentStatuses();
   
@@ -114,7 +132,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [durationConflict, setDurationConflict] = useState<string>("");
 
   // New states for multi-step flow (patient -> schedule -> treatment -> doctor -> payment)
-  const [modalStep, setModalStep] = useState<"patient" | "schedule" | "treatment" | "doctor" | "payment">("patient");
+  const [modalStep, setModalStep] = useState<ImprovedBookingStep>("patient");
   const [paymentMethod, setPaymentMethod] = useState<string>("");
   const [amountToPay, setAmountToPay] = useState<string>("");
   const [appointmentStatus, setAppointmentStatus] = useState<string>("scheduled");
@@ -131,6 +149,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [dailyAppointments, setDailyAppointments] = useState<any[]>([]);
   const [patientConflict, setPatientConflict] = useState("");
   const [patientAppointments, setPatientAppointments] = useState<any[]>([]);
+  const lastHandledAddedPatientAtRef = useRef<number | null>(null);
 
   // Log all available statuses when modal opens
   useEffect(() => {
@@ -243,6 +262,31 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const isCancelled = (appointmentStatus || appointmentToEdit?.status || '').toLowerCase() === 'cancelled';
   const isPatientReadonly = Boolean(appointmentToEdit && user?.role === 'patient');
   const isEditMode = Boolean(appointmentToEdit);
+  const {
+    isPublicBookingMode,
+    canCreatePatients,
+    canManagePricing,
+    isDoctorSelectionLocked,
+  } = getBookingActor({
+    userRole: user?.role,
+    bookingMode,
+  });
+
+  useEffect(() => {
+    if (!open || appointmentToEdit || !canCreatePatients || !lastAddedPatient || !lastAddedPatientAt) return;
+    if (lastHandledAddedPatientAtRef.current === lastAddedPatientAt) return;
+
+    const patientOption = toPatientOption(lastAddedPatient);
+    if (isPublicBookingMode) {
+      cachePublicBookingPatient(patientOption);
+    }
+    setPatients(prev => {
+      const filtered = prev.filter((patient: any) => String(patient.id) !== String(patientOption.id));
+      return [patientOption, ...filtered];
+    });
+    setSelectedPatient(patientOption.id);
+    lastHandledAddedPatientAtRef.current = lastAddedPatientAt;
+  }, [open, appointmentToEdit, canCreatePatients, isPublicBookingMode, lastAddedPatient, lastAddedPatientAt]);
 
   // Fetch logs when appointment is being edited
   useEffect(() => {
@@ -693,6 +737,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     
     // Only auto-preselect if user is NOT a doctor
     if (user?.role === 'doctor') return;
+
+    // Non-doctor users choose a doctor explicitly in the doctor step.
+    if (!doctorName) return;
     
     // If doctorName prop was explicitly passed, don't auto-select a different doctor
     // The doctorName will be synced via the other useEffect that watches doctorName prop
@@ -1010,6 +1057,21 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     const fetchPatients = async () => {
       setIsLoadingPatients(true);
       try {
+        if (isPublicBookingMode) {
+          const cachedPatients = getCachedPublicBookingPatients().map(toPatientOption);
+          setPatients(cachedPatients);
+
+          if (cachedPatients.length > 0) {
+            const foundDefault = defaultPatientId
+              ? cachedPatients.find((p: any) => String(p.id) === String(defaultPatientId))
+              : null;
+            setSelectedPatient((current) => current || foundDefault?.id || cachedPatients[0].id);
+          }
+
+          setIsLoadingPatients(false);
+          return;
+        }
+
         const fetchOpts: RequestInit = { credentials: 'include' };
         
         // Always fetch from /api/patients - server will filter based on requester role
@@ -1090,7 +1152,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     };
 
     fetchPatients();
-  }, [open, user, defaultPatientId, appointmentToEdit]);
+  }, [open, user, defaultPatientId, appointmentToEdit, isPublicBookingMode]);
 
   // When an appointment is provided for editing, prefill the form
   useEffect(() => {
@@ -1167,6 +1229,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setNotes('');
       setSelectedDate(defaultDate ?? new Date());
       setSelectedTime(defaultTime ?? '');
+      setSelectedDoctor(doctorName || (user?.role === 'doctor' ? user.username : ''));
       setAmountToPay('');
       setAppointmentStatus('scheduled');
       setPaymentStatus('unpaid');
@@ -1176,7 +1239,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setPaymentStatusChangedByUser(0);
       setModalStep('patient');
     }
-  }, [open, appointmentToEdit, defaultDate, defaultTime, defaultPatientId]);
+  }, [open, appointmentToEdit, defaultDate, defaultTime, defaultPatientId, doctorName, user?.role, user?.username]);
 
     // Use shared booking logic for next/prev step handling
     const { handleNextStep, handlePrevStep } = useSharedBookingLogic({
@@ -1188,16 +1251,75 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       appointmentType,
       customAppointmentTypeName,
       selectedDoctor,
-      setModalStep: (step) => setModalStep(step as "patient" | "schedule" | "treatment" | "doctor" | "payment"),
+      setModalStep: (step) => setModalStep(step as ImprovedBookingStep),
       setIsConfirmSummaryOpen,
       toast,
       durationConflict,
       patientConflict,
-      skipDoctorStep: true,
+      skipDoctorStep: isDoctorSelectionLocked,
     });
 
   // Derived display values for schedule block
-  const displayDoctor = formatDoctorName(appointmentToEdit?.doctor || doctorName);
+  const displayDoctor = formatDoctorName(appointmentToEdit?.doctor || selectedDoctor || doctorName);
+  const showDoctorStep = !isDoctorSelectionLocked;
+  const visibleBookingSteps: Array<{ id: ImprovedBookingStep; label: string; icon: string }> = [
+    { id: 'patient', label: 'Patient', icon: '1' },
+    { id: 'schedule', label: 'Schedule', icon: '2' },
+    ...(showDoctorStep ? [{ id: 'doctor' as ImprovedBookingStep, label: 'Doctor', icon: '3' }] : []),
+    { id: 'treatment', label: 'Treatment', icon: showDoctorStep ? '4' : '3' },
+    { id: 'payment', label: 'Payment', icon: showDoctorStep ? '5' : '4' },
+  ];
+  const activeStepIndex = Math.max(0, visibleBookingSteps.findIndex((step) => step.id === modalStep));
+  const progressWidth = visibleBookingSteps.length > 1
+    ? `${(activeStepIndex / (visibleBookingSteps.length - 1)) * 100}%`
+    : '0%';
+  const selectedDoctorRecord = doctors.find((doctor) => normalizeDoctorName(doctor.name) === normalizeDoctorName(selectedDoctor));
+
+  const hasDoctorScheduleConflict = (doctorNameToCheck: string) => {
+    if (!selectedDate || !selectedTime || !doctorNameToCheck) return false;
+
+    const [hours, minutes] = selectedTime.split(':').map(Number);
+    const slotStart = new Date(selectedDate);
+    slotStart.setHours(hours, minutes, 0, 0);
+    const slotEnd = new Date(slotStart.getTime() + (Number(duration) || 30) * 60000);
+    const targetDoctor = normalizeDoctorName(doctorNameToCheck);
+
+    return dailyAppointments.some((apt: any) => {
+      if (normalizeDoctorName(apt.doctor) !== targetDoctor) return false;
+      if ((apt.status || "").toLowerCase() === "pending") return false;
+
+      const aptDate = typeof apt.date === 'string' && apt.date.includes('-') && !apt.date.includes(':')
+        ? new Date(apt.date)
+        : new Date(apt.date);
+      const [aptHours, aptMinutes] = (apt.time || '00:00').split(':').map(Number);
+      aptDate.setHours(aptHours, aptMinutes, 0, 0);
+      const aptEnd = new Date(aptDate.getTime() + (Number(apt.duration) || 30) * 60000);
+
+      return slotStart < aptEnd && slotEnd > aptDate;
+    });
+  };
+
+  const canOpenStep = (stepId: ImprovedBookingStep) => {
+    if (isBooking) return false;
+    if (stepId === 'patient') return true;
+    if (stepId === 'schedule') return !!selectedPatient;
+    if (stepId === 'doctor') return showDoctorStep && !!selectedPatient && !!selectedDate && !!selectedTime;
+    if (stepId === 'treatment') {
+      return !!selectedPatient && !!selectedDate && !!selectedTime && (!showDoctorStep || !!selectedDoctor);
+    }
+    if (stepId === 'payment') {
+      return !!selectedPatient && !!selectedDate && !!selectedTime && !!appointmentType && !!selectedDoctor;
+    }
+    return false;
+  };
+
+  const getNextButtonLabel = () => {
+    if (modalStep === 'patient') return 'Next: Schedule';
+    if (modalStep === 'schedule') return showDoctorStep ? 'Next: Doctor' : 'Next: Treatment';
+    if (modalStep === 'doctor') return 'Next: Treatment';
+    if (modalStep === 'treatment') return 'Next: Payment';
+    return 'Confirm & Save';
+  };
   
   // Calculate remaining balance for display in payment step
   const previouslyPaidAmount = appointmentToEdit?.totalPaid !== undefined 
@@ -1457,23 +1579,35 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           paymentMethod,
         });
 
-        const newApt = await addAppointment({
-          patientId: selectedPatient,
-          patientName: patients.find(p => p.id === selectedPatient)?.name || selectedPatient,
-          doctor: selectedDoctor || '',
-          date: dateStr,
-          time: selectedTime,
-          type: getAppointmentTypeIndex(appointmentType),
-          customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-          duration: Number(duration) || 30,
-          price: finalPrice,
-          discount: Number(discount) || 0,
-          notes,
-          status: autoStatus as any,
-          paymentStatus: paymentStatus as any,
-          totalPaid: amountPaid,
-          balance: newBalance,
-        });
+        const selectedPatientRecord = patients.find(p => String(p.id) === String(selectedPatient));
+        const newApt = isPublicBookingMode
+          ? await createPublicBookingAppointment({
+              patient: selectedPatientRecord || { id: selectedPatient, name: selectedPatient },
+              date: dateStr,
+              time: selectedTime,
+              duration: Number(duration) || 30,
+              type: getAppointmentTypeIndex(appointmentType),
+              customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
+              doctor: selectedDoctor || '',
+              notes,
+            })
+          : await addAppointment({
+              patientId: selectedPatient,
+              patientName: selectedPatientRecord?.name || selectedPatient,
+              doctor: selectedDoctor || '',
+              date: dateStr,
+              time: selectedTime,
+              type: getAppointmentTypeIndex(appointmentType),
+              customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
+              duration: Number(duration) || 30,
+              price: finalPrice,
+              discount: Number(discount) || 0,
+              notes,
+              status: autoStatus as any,
+              paymentStatus: paymentStatus as any,
+              totalPaid: amountPaid,
+              balance: newBalance,
+            });
 
         // Auto-cancel any overlapping pending appointments for the same doctor
         if (newApt && dailyAppointments.length > 0) {
@@ -1615,43 +1749,25 @@ return (
               <div className="w-10" />
             </div>
 
-            {/* 4-STEP INDICATOR */}
+            {/* STEP INDICATOR */}
             {!(isCancelled && user?.role === 'patient') && (
               <div className="relative flex items-center justify-between w-full mt-2 mb-4 px-10">
                 <div className="absolute top-1/2 left-0 w-full h-0.5 bg-gray-100 -translate-y-1/2 z-0" />
                 <div
                   className="absolute top-1/2 left-0 h-0.5 bg-blue-600 -translate-y-1/2 transition-all duration-500 z-0"
-                  style={{
-                    width: modalStep === 'patient' ? '0%' :
-                           modalStep === 'schedule' ? '33.333%' :
-                           modalStep === 'treatment' ? '66.666%' : '100%'
-                  }}
+                  style={{ width: progressWidth }}
                 />
 
-                {[
-                  { id: 'patient', label: 'Patient', icon: '1' },
-                  { id: 'schedule', label: 'Schedule', icon: '2' },
-                  { id: 'treatment', label: 'Treatment', icon: '3' },
-                  { id: 'payment', label: 'Payment', icon: '4' }
-                ].map((step, index) => {
+                {visibleBookingSteps.map((step, index) => {
                   const isActive = modalStep === step.id;
-                  const isCompleted = 
-                    (modalStep === 'schedule' && index < 1) ||
-                    (modalStep === 'treatment' && index < 2) ||
-                    (modalStep === 'payment' && index < 3);
-
-                  const isClickable = !isBooking && (
-                    step.id === 'patient' ||
-                    (step.id === 'schedule' && !!selectedPatient) ||
-                    (step.id === 'treatment' && !!selectedPatient && !!selectedDate && !!selectedTime) ||
-                    (step.id === 'payment' && !!selectedPatient && !!selectedDate && !!selectedTime && !!appointmentType && !!selectedDoctor)
-                  );
+                  const isCompleted = index < activeStepIndex;
+                  const isClickable = canOpenStep(step.id);
 
                   return (
                     <button
                       key={step.id}
                       type="button"
-                      onClick={() => isClickable && setModalStep(step.id as any)}
+                      onClick={() => isClickable && setModalStep(step.id)}
                       disabled={!isClickable}
                       className={`relative z-10 flex flex-col items-center group outline-none transition-all ${isClickable ? 'cursor-pointer hover:opacity-80' : 'cursor-not-allowed opacity-60'}`}
                     >
@@ -1685,12 +1801,29 @@ return (
               {/* STEP 1: PATIENT */}
               {modalStep === 'patient' && (
                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-                   <div className="flex items-center gap-3">
-                    <div className="bg-blue-100 p-2 rounded-lg text-blue-600"><Stethoscope className="h-5 w-5" /></div>
-                    <h3 className="text-lg font-bold">Select Patient</h3>
+                  <div className="flex items-center gap-4 mb-8">
+                    <div className="bg-blue-600 p-3.5 rounded-2xl text-white shadow-lg shadow-blue-100">
+                      <Stethoscope className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-black text-gray-900">Select Patient</h3>
+                      <p className="text-sm font-bold text-gray-500">Who is this appointment for?</p>
+                    </div>
+                    {canCreatePatients && !isPatientReadonly && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openAddPatientModal({ publicBooking: isPublicBookingMode })}
+                        className="ml-auto h-11 px-4 gap-2 rounded-2xl text-xs font-bold border-2 hover:bg-gray-50"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        New patient
+                      </Button>
+                    )}
                   </div>
                   <Select value={selectedPatient} onValueChange={setSelectedPatient}>
-                    <SelectTrigger className="h-14 rounded-2xl border-2 border-gray-100 bg-white">
+                    <SelectTrigger className="h-16 rounded-[2rem] border-2 border-gray-100 bg-white px-6 text-base font-bold">
                       <SelectValue placeholder="Choose a patient" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1705,33 +1838,145 @@ return (
               {/* STEP 2: SCHEDULE */}
               {modalStep === 'schedule' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <button onClick={() => setIsDatePickerOpen(true)} className="flex items-center gap-4 p-6 bg-white rounded-[2rem] border-2 border-gray-100 hover:border-blue-500 transition-all text-left shadow-sm">
-                      <div className="p-4 bg-blue-50 rounded-2xl text-blue-600"><CalendarIcon className="h-7 w-7" /></div>
+                  <div className="flex items-center gap-4 mb-8">
+                    <div className="bg-blue-600 p-3.5 rounded-2xl text-white shadow-lg shadow-blue-100">
+                      <CalendarIcon className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-black text-gray-900">Pick Schedule</h3>
+                      <p className="text-sm font-bold text-gray-500">Select your preferred date and time</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <button 
+                      onClick={() => setIsDatePickerOpen(true)} 
+                      className="flex flex-col gap-6 p-8 bg-white rounded-[2.5rem] border-2 border-gray-100 hover:border-blue-500 transition-all text-left shadow-sm hover:shadow-xl hover:shadow-blue-50 group"
+                    >
+                      <div className="p-4 bg-blue-50 rounded-2xl text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors w-fit">
+                        <CalendarIcon className="h-8 w-8" />
+                      </div>
                       <div>
-                        <p className="text-[10px] font-black text-blue-600 uppercase mb-1">Appointment Date</p>
-                        <p className="text-2xl font-black">{selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
+                        <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-1 group-hover:text-blue-500 transition-colors">Appointment Date</p>
+                        <p className="text-3xl font-black text-gray-900">{selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
+                        <p className="text-sm font-bold text-gray-400 mt-1">{selectedDate.toLocaleDateString('en-US', { weekday: 'long' })}</p>
                       </div>
                     </button>
-                    <button onClick={() => setIsTimePickerOpen(true)} className="flex items-center gap-4 p-6 bg-white rounded-[2rem] border-2 border-gray-100 hover:border-blue-500 transition-all text-left shadow-sm">
-                      <div className="p-4 bg-blue-50 rounded-2xl text-blue-600"><Clock className="h-7 w-7" /></div>
+                    <button 
+                      onClick={() => setIsTimePickerOpen(true)} 
+                      className="flex flex-col gap-6 p-8 bg-white rounded-[2.5rem] border-2 border-gray-100 hover:border-blue-500 transition-all text-left shadow-sm hover:shadow-xl hover:shadow-blue-50 group"
+                    >
+                      <div className="p-4 bg-blue-50 rounded-2xl text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors w-fit">
+                        <Clock className="h-8 w-8" />
+                      </div>
                       <div>
-                        <p className="text-[10px] font-black text-blue-600 uppercase mb-1">Time Slot</p>
-                        <p className="text-2xl font-black">{selectedTime ? formatTimeTo12h(selectedTime) : '--:--'}</p>
+                        <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-1 group-hover:text-blue-500 transition-colors">Time Slot</p>
+                        <p className="text-3xl font-black text-gray-900">{selectedTime ? formatTimeTo12h(selectedTime) : '--:--'}</p>
+                        <p className="text-sm font-bold text-gray-400 mt-1">{selectedTime ? 'Confirmed Slot' : 'Please select'}</p>
                       </div>
                     </button>
                   </div>
                 </div>
               )}
 
-              {/* STEP 3: CHOOSE TREATMENT & FINANCIALS */}
+              {/* STEP 3: DOCTOR */}
+              {modalStep === 'doctor' && (
+                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+                  <div className="flex items-center gap-4 mb-8">
+                    <div className="bg-blue-600 p-3.5 rounded-2xl text-white shadow-lg shadow-blue-100">
+                      <Award className="h-6 w-6" />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="text-xl font-black text-gray-900">Choose Doctor</h3>
+                      <p className="text-sm font-bold text-gray-500">Select your dental specialist</p>
+                    </div>
+                    <div className="hidden sm:block">
+                      <div className="rounded-2xl bg-blue-50 px-4 py-2 text-[10px] font-black uppercase text-blue-700">
+                        {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} @ {selectedTime ? formatTimeTo12h(selectedTime) : '--:--'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {doctors.length === 0 ? (
+                    <div className="rounded-[2.5rem] border-2 border-dashed border-gray-200 bg-white p-12 text-center">
+                      <Stethoscope className="mx-auto mb-4 h-12 w-12 text-gray-300" />
+                      <p className="text-lg font-bold text-gray-900">No doctors available</p>
+                      <p className="mt-2 text-sm text-gray-500">Please try again in a moment.</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+                      {doctors.map((doctor) => {
+                        const selected = normalizeDoctorName(selectedDoctor) === normalizeDoctorName(doctor.name);
+                        const unavailable = hasDoctorScheduleConflict(doctor.name);
+
+                        return (
+                          <button
+                            key={doctor.id}
+                            type="button"
+                            onClick={() => !unavailable && setSelectedDoctor(doctor.name)}
+                            disabled={unavailable}
+                            className={`group flex min-h-[180px] flex-col justify-between rounded-[2.5rem] border-2 bg-white p-6 text-left shadow-sm transition-all ${
+                              selected
+                                ? 'border-blue-600 bg-blue-50/60 shadow-lg shadow-blue-100'
+                                : unavailable
+                                ? 'cursor-not-allowed border-gray-100 opacity-55'
+                                : 'border-gray-100 hover:-translate-y-1 hover:border-blue-300 hover:shadow-xl hover:shadow-blue-50'
+                            }`}
+                          >
+                            <div className="flex items-start gap-4">
+                              <Avatar className={`h-20 w-20 border-4 transition-transform group-hover:scale-105 ${selected ? 'border-blue-200' : 'border-gray-50'} shadow-sm`}>
+                                <AvatarImage src={doctor.profilePicture} alt={doctor.name} className="object-cover" />
+                                <AvatarFallback className="bg-blue-100 text-lg font-black text-blue-700">
+                                  {getDoctorInitials(doctor.name)}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div>
+                                    <h4 className="text-base font-black leading-tight text-gray-900">{formatDoctorName(doctor.name)}</h4>
+                                    <p className="mt-1 text-[10px] font-black uppercase text-blue-600/70">{doctor.role || 'Dentist'}</p>
+                                  </div>
+                                  <span className={`mt-0.5 rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-tighter ${
+                                    unavailable
+                                      ? 'bg-gray-100 text-gray-500'
+                                      : selected
+                                      ? 'bg-blue-600 text-white shadow-md shadow-blue-200'
+                                      : 'bg-emerald-50 text-emerald-700'
+                                  }`}>
+                                    {unavailable ? 'Busy' : selected ? 'Selected' : 'Open'}
+                                  </span>
+                                </div>
+                                {doctor.specialization && (
+                                  <p className="mt-3 inline-flex rounded-full bg-gray-50 px-3 py-1 text-[9px] font-black uppercase tracking-tight text-gray-500">
+                                    {doctor.specialization}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                            <p className="mt-4 line-clamp-2 text-xs font-bold leading-relaxed text-gray-400 group-hover:text-gray-500 transition-colors">
+                              {doctor.bio || 'Gentle, detail-focused care for comfortable dental visits.'}
+                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* STEP 4: CHOOSE TREATMENT & FINANCIALS */}
               {modalStep === 'treatment' && (
-                <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
+                <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4">
                   {/* Treatment Selection */}
                   <div className="space-y-6">
-                    <div className="flex items-center gap-4 mb-2">
-                      <div className="bg-blue-600 p-3 rounded-full text-white shadow-lg"><Award className="h-6 w-6" /></div>
-                      <h3 className="text-xl font-bold">What service do you need?</h3>
+                    <div className="flex items-center gap-4 mb-8">
+                      <div className="bg-blue-600 p-3.5 rounded-2xl text-white shadow-lg shadow-blue-100">
+                        <Plus className="h-6 w-6" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-black text-gray-900">Select Treatment</h3>
+                        <p className="text-sm font-bold text-gray-500">What service do you need today?</p>
+                      </div>
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                       {[
@@ -1745,16 +1990,17 @@ return (
                       ].map((t) => (
                         <button
                           key={t.name}
+                          type="button"
                           onClick={() => setAppointmentType(t.name)}
-                          className={`p-6 rounded-[2.5rem] border-2 transition-all flex flex-col items-center justify-center gap-4 ${appointmentType === t.name ? 'border-blue-600 bg-blue-50/50 shadow-md scale-105' : 'border-white bg-white hover:border-gray-200 shadow-sm'}`}
+                          className={`p-6 rounded-[2.5rem] border-2 transition-all flex flex-col items-center justify-center gap-4 shadow-sm ${appointmentType === t.name ? 'border-blue-600 bg-blue-50/50 shadow-blue-100 scale-105' : 'border-white bg-white hover:border-gray-200 hover:-translate-y-1'}`}
                         >
-                          <div className={`w-14 h-14 rounded-full ${t.color} flex items-center justify-center text-white text-2xl shadow-sm`}>{t.icon}</div>
-                          <span className="text-xs font-black text-gray-800 uppercase tracking-tight">{t.short}</span>
+                          <div className={`w-14 h-14 rounded-full ${t.color} flex items-center justify-center text-white text-2xl shadow-lg shadow-gray-100`}>{t.icon}</div>
+                          <span className="text-xs font-black text-gray-900 uppercase tracking-tighter">{t.short}</span>
                         </button>
                       ))}
                     </div>
                     {appointmentType === "Other" && (
-                      <Input placeholder="Type custom treatment..." value={customAppointmentTypeName} onChange={(e) => setCustomAppointmentTypeName(e.target.value)} className="h-14 rounded-2xl border-gray-200 bg-white font-bold px-6 shadow-inner" />
+                      <Input placeholder="Type custom treatment..." value={customAppointmentTypeName} onChange={(e) => setCustomAppointmentTypeName(e.target.value)} className="h-14 rounded-2xl border-gray-100 bg-white font-bold px-6 shadow-inner" />
                     )}
                   </div>
 
@@ -1762,38 +2008,51 @@ return (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4">
                     <div className="space-y-4">
                       {/* Duration Pill */}
-                      <div className="bg-white p-3 pr-4 rounded-[2.5rem] border border-gray-100 flex items-center justify-between shadow-sm">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-gray-50 rounded-full flex items-center justify-center text-gray-500"><Clock className="h-5 w-5" /></div>
-                          <span className="text-sm font-bold text-gray-800">Duration</span>
+                      <div className="bg-white p-4 pr-6 rounded-[2.5rem] border-2 border-gray-100 flex items-center justify-between shadow-sm">
+                        <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600"><Clock className="h-6 w-6" /></div>
+                          <span className="text-sm font-black text-gray-800 uppercase tracking-widest">Duration</span>
                         </div>
-                        {(user?.role === "admin" || user?.role === "doctor") ? (
+                        {canManagePricing ? (
                           <Select value={duration} onValueChange={setDuration}>
-                            <SelectTrigger className="w-24 rounded-full font-bold bg-gray-50 border-none h-10 focus:ring-0 focus:ring-offset-0">
+                            <SelectTrigger className="w-32 rounded-xl font-bold bg-gray-50 border-none h-10 focus:ring-0 focus:ring-offset-0 px-4">
                               <SelectValue />
                             </SelectTrigger>
-                            <SelectContent className="rounded-xl">{[30, 60, 90, 120].map(d => <SelectItem key={d} value={String(d)}>{d} mins</SelectItem>)}</SelectContent>
+                            <SelectContent className="rounded-xl">{[15, 30, 45, 60, 75, 90, 105, 120].map(d => <SelectItem key={d} value={String(d)}>{d} mins</SelectItem>)}</SelectContent>
                           </Select>
                         ) : (
-                          <div className="flex items-center justify-center w-24 h-10 rounded-full font-bold bg-gray-50 text-gray-900">
+                          <div className="flex items-center justify-center px-6 h-10 rounded-xl font-black bg-gray-50 text-blue-600 text-sm">
                             {duration} mins
                           </div>
                         )}
                       </div>
 
                       {/* Discount Pill */}
-                      {(user?.role === "admin" || user?.role === "doctor") && (
-                        <div className="bg-white p-3 pr-4 rounded-[2.5rem] border border-gray-100 flex items-center justify-between shadow-sm">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-orange-50 rounded-full flex items-center justify-center text-orange-600"><Award className="h-5 w-5" /></div>
-                            <span className="text-sm font-bold text-gray-800">Discount</span>
+                      {canManagePricing && (
+                        <div className="bg-white p-4 pr-6 rounded-[2.5rem] border-2 border-gray-100 flex items-center justify-between shadow-sm">
+                          <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 bg-orange-50 rounded-2xl flex items-center justify-center text-orange-600"><Award className="h-6 w-6" /></div>
+                            <span className="text-sm font-black text-gray-800 uppercase tracking-widest">Discount</span>
                           </div>
-                          <div className="flex items-center gap-1 bg-gray-50 px-4 rounded-full h-10">
-                            <span className="text-xs font-bold text-gray-400">₱</span>
-                            <Input type="number" value={discount} onChange={(e) => setDiscount(e.target.value)} className="w-12 border-none bg-transparent font-bold text-right p-0 focus:ring-0" />
+                          <div className="flex items-center gap-1 bg-gray-50 px-4 rounded-xl h-10">
+                            <span className="text-xs font-black text-orange-400">₱</span>
+                            <Input type="number" value={discount} onChange={(e) => setDiscount(e.target.value)} className="w-16 border-none bg-transparent font-black text-right p-0 focus:ring-0 text-orange-600" />
                           </div>
                         </div>
                       )}
+
+                      <div className="space-y-4 pt-2">
+                         <div className="flex items-center gap-3">
+                           <div className="bg-amber-100 p-2 rounded-lg text-amber-600"><Clock className="h-5 w-5" /></div>
+                           <h4 className="font-bold text-gray-900">Notes</h4>
+                         </div>
+                         <Textarea
+                           placeholder="Any special instructions..."
+                           value={notes}
+                           onChange={(e) => setNotes(e.target.value)}
+                           className="min-h-[120px] rounded-[2rem] border-2 border-gray-100 bg-white p-6 font-medium focus:border-blue-500 transition-all"
+                         />
+                      </div>
                     </div>
 
                     {/* Blue Estimated Cost Card */}
@@ -1801,33 +2060,34 @@ return (
                       onClick={(e) => {
                         if (isPriceEditable && e.target === e.currentTarget) setIsPriceEditable(false);
                       }}
-                      className="bg-blue-600 rounded-[2rem] p-8 text-white shadow-xl shadow-blue-200/50 flex flex-col justify-between relative overflow-hidden cursor-default"
+                      className="bg-blue-600 rounded-[2.5rem] p-10 text-white shadow-2xl shadow-blue-200/50 flex flex-col justify-between relative overflow-hidden cursor-default group"
                     >
-                      <CreditCard className="absolute top-6 right-6 h-10 w-10 text-white/10" />
+                      <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16 transition-transform group-hover:scale-110" />
+                      <CreditCard className="absolute top-8 right-8 h-12 w-12 text-white/10" />
                       
                       <div className="relative z-10">
                         <p className="text-blue-200 text-[10px] font-black uppercase tracking-widest mb-2">Estimated Cost</p>
                         <div className="flex items-center gap-2">
-                          <h4 className="text-xl font-bold">Treatment Fee</h4>
+                          <h4 className="text-2xl font-black">Treatment Fee</h4>
                           {/* ONLY SHOW EDIT PENCIL TO ADMINS/DOCTORS */}
-                          {(user?.role === "admin" || user?.role === "doctor") && (
+                          {canManagePricing && (
                             <button 
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setIsPriceEditable(!isPriceEditable);
                               }} 
-                              className={`p-1.5 rounded-md transition-colors ${isPriceEditable ? 'bg-white/20' : 'hover:bg-white/10'}`}
+                              className={`p-2 rounded-xl transition-colors ${isPriceEditable ? 'bg-white/20' : 'hover:bg-white/10'}`}
                             >
-                              <svg className="w-4 h-4 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                              <svg className="w-5 h-5 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                             </button>
                           )}
                         </div>
                       </div>
 
-                      <div className="relative z-10 mt-6 flex flex-col items-end">
+                      <div className="relative z-10 mt-12 flex flex-col items-end">
                         {/* Upper small text logic */}
                         {isPriceEditable ? (
-                          <p className="text-sm text-blue-200 font-bold opacity-90 mb-1">
+                          <p className="text-sm text-blue-100 font-bold opacity-90 mb-2 bg-white/10 px-3 py-1 rounded-full">
                             Reflected Total: ₱{Math.max(0, (Number(customPrice === "0" ? finalPrice : customPrice) - Number(discount))).toLocaleString()}
                           </p>
                         ) : (
@@ -1835,20 +2095,20 @@ return (
                         )}
                         
                         <div className="flex items-center justify-end w-full">
-                          <span className="text-[2.5rem] leading-none font-black mr-2">₱</span>
+                          <span className="text-5xl font-black mr-2 opacity-40">₱</span>
                           {/* AIRTIGHT LOCK: MUST BE EDITABLE *AND* USER MUST BE ADMIN/DOCTOR */}
-                          {isPriceEditable && (user?.role === "admin" || user?.role === "doctor") ? (
+                          {isPriceEditable && canManagePricing ? (
                             <input 
                               type="number"
                               value={customPrice === "0" ? finalPrice : customPrice}
                               onChange={(e) => setCustomPrice(e.target.value)}
                               onBlur={() => setIsPriceEditable(false)}
-                              className="text-[2.5rem] leading-none font-black bg-transparent border-b-2 border-white/50 p-0 w-[120px] text-right outline-none ring-0 focus:border-white text-white appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none placeholder-blue-300"
+                              className="text-5xl font-black bg-transparent border-b-4 border-white/50 p-0 w-[180px] text-right outline-none ring-0 focus:border-white text-white appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none placeholder-blue-300 transition-all"
                               placeholder={String(finalPrice)}
                               autoFocus
                             />
                           ) : (
-                            <span className="text-[2.5rem] leading-none font-black">
+                            <span className="text-6xl font-black tracking-tighter">
                               {Math.max(0, (Number(customPrice === "0" ? finalPrice : customPrice) - Number(discount))).toLocaleString()}
                             </span>
                           )}
@@ -1862,23 +2122,32 @@ return (
               {/* FINAL STEP: PAYMENT SUMMARY */}
               {modalStep === 'payment' && (
                 <div className="space-y-6 max-w-4xl mx-auto py-4 animate-in fade-in slide-in-from-bottom-4">
+                  <div className="flex items-center gap-4 mb-8">
+                    <div className="bg-emerald-600 p-3.5 rounded-2xl text-white shadow-lg shadow-emerald-100">
+                      <CreditCard className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-black text-gray-900">Booking Summary</h3>
+                      <p className="text-sm font-bold text-gray-500">Review and confirm your appointment</p>
+                    </div>
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     {/* Summary Receipt */}
                     <div className="space-y-6">
                       <div className="flex items-center gap-3">
-                        <div className="bg-green-100 p-2 rounded-lg text-green-600"><CreditCard className="h-5 w-5" /></div>
-                        <h3 className="text-lg font-bold text-gray-900">Summary</h3>
+                        <div className="bg-blue-100 p-2 rounded-lg text-blue-600"><Stethoscope className="h-5 w-5" /></div>
+                        <h3 className="text-lg font-bold text-gray-900">Appointment Info</h3>
                       </div>
 
                       <div className="bg-white rounded-[2.5rem] border-2 border-gray-100 overflow-hidden shadow-sm">
-                        <div className="bg-gray-50 p-6 border-b border-gray-100">
+                        <div className="bg-gray-50 p-8 border-b border-gray-100">
                           <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest">Patient</span>
-                          <h4 className="text-xl font-black text-gray-900">{patients.find(p => p.id === selectedPatient)?.name}</h4>
+                          <h4 className="text-2xl font-black text-gray-900">{patients.find(p => p.id === selectedPatient)?.name}</h4>
                         </div>
-                        <div className="p-6 space-y-4">
-                          <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div className="p-8 space-y-6">
+                          <div className="grid grid-cols-2 gap-6">
                             <div>
-                              <p className="text-gray-400 font-bold uppercase text-[10px]">Date & Time</p>
+                              <p className="text-gray-400 font-black uppercase text-[10px] tracking-widest mb-1">Date & Time</p>
                               <div className="flex items-center gap-2">
                                 <p className="font-bold text-gray-800">{selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} at {formatTimeTo12h(selectedTime)}</p>
                                 {bookingConflictWarnings.length > 0 && (
@@ -1889,13 +2158,13 @@ return (
                               </div>
                             </div>
                             <div className="text-right">
-                              <p className="text-gray-400 font-bold uppercase text-[10px]">Doctor</p>
-                              <p className="font-bold text-gray-800">{selectedDoctor}</p>
+                              <p className="text-gray-400 font-black uppercase text-[10px] tracking-widest mb-1">Doctor</p>
+                              <p className="font-bold text-gray-800">{formatDoctorName(selectedDoctor)}</p>
                             </div>
                           </div>
-                          <div className="flex items-center justify-between rounded-2xl bg-gray-50 px-4 py-3 text-sm">
+                          <div className="flex items-center justify-between rounded-3xl bg-gray-50 px-6 py-4">
                             <span className="text-gray-500 font-bold">Duration</span>
-                            <span className="inline-flex items-center gap-2 font-bold text-gray-800">
+                            <span className="inline-flex items-center gap-2 font-black text-gray-800">
                               {duration} mins
                               {durationConflict && (
                                 <span title={bookingConflictWarnings.find(w => w.type === 'duration')?.message || durationConflict} className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-amber-700">
@@ -1905,20 +2174,20 @@ return (
                             </span>
                           </div>
                           {bookingConflictWarnings.length > 0 && (
-                            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-800">
+                            <div className="rounded-2xl border-2 border-amber-100 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-800">
                               This appointment has a scheduling conflict. Hover the warning icon for details.
                             </div>
                           )}
                           
-                          <div className="pt-4 border-t border-dashed border-gray-200 space-y-2">
+                          <div className="pt-6 border-t-2 border-dashed border-gray-100 space-y-3">
                             <div className="flex justify-between text-sm">
-                              <span className="text-gray-500">Service Price</span>
-                              <span className="font-bold">₱{finalPrice.toLocaleString()}</span>
+                              <span className="text-gray-500 font-bold">Service Price</span>
+                              <span className="font-black text-gray-900">₱{finalPrice.toLocaleString()}</span>
                             </div>
                             {Number(discount) > 0 && (
                               <div className="flex justify-between text-sm text-orange-600">
-                                <span>Discount</span>
-                                <span className="font-bold">-₱{Number(discount).toLocaleString()}</span>
+                                <span className="font-bold">Discount</span>
+                                <span className="font-black">-₱{Number(discount).toLocaleString()}</span>
                               </div>
                             )}
                             
@@ -1926,24 +2195,24 @@ return (
                             {isEditMode ? (
                               <>
                                 <div className="flex justify-between text-sm text-gray-600">
-                                  <span>Total Price</span>
-                                  <span className="font-bold">₱{(finalPrice - Number(discount)).toLocaleString()}</span>
+                                  <span className="font-bold">Total Price</span>
+                                  <span className="font-black">₱{(finalPrice - Number(discount)).toLocaleString()}</span>
                                 </div>
                                 <div className="flex justify-between text-sm text-emerald-600">
-                                  <span>Already Paid</span>
-                                  <span className="font-bold">-₱{previouslyPaidAmount.toLocaleString()}</span>
+                                  <span className="font-bold">Already Paid</span>
+                                  <span className="font-black">-₱{previouslyPaidAmount.toLocaleString()}</span>
                                 </div>
-                                <div className="flex justify-between items-center pt-2 border-t border-gray-100">
+                                <div className="flex justify-between items-center pt-4 border-t-2 border-gray-50">
                                   <span className="text-base font-black text-gray-900">Balance Left</span>
-                                  <span className={`text-2xl font-black ${remainingBalance <= 0 ? 'text-emerald-500' : 'text-blue-600'}`}>
+                                  <span className={`text-3xl font-black ${remainingBalance <= 0 ? 'text-emerald-500' : 'text-blue-600'}`}>
                                     ₱{remainingBalance.toLocaleString()}
                                   </span>
                                 </div>
                               </>
                             ) : (
-                              <div className="flex justify-between items-center pt-2 border-t border-gray-100">
+                              <div className="flex justify-between items-center pt-4 border-t-2 border-gray-50">
                                 <span className="text-base font-black text-gray-900">Total Price</span>
-                                <span className="text-2xl font-black text-blue-600">₱{(finalPrice - Number(discount)).toLocaleString()}</span>
+                                <span className="text-4xl font-black text-blue-600 tracking-tighter">₱{(finalPrice - Number(discount)).toLocaleString()}</span>
                               </div>
                             )}
                           </div>
@@ -1952,43 +2221,44 @@ return (
                     </div>
 
                     {/* Payment Actions */}
-                    <div className="space-y-6">
+                    <div className="space-y-8 pt-10">
                       <div className="space-y-4">
-                        <Label className="text-sm font-bold text-gray-700">Amount to Pay Now</Label>
-                        <div className="relative">
-                          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl font-black text-gray-400">₱</span>
+                        <Label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Amount to Pay Now</Label>
+                        <div className="relative group">
+                          <span className="absolute left-6 top-1/2 -translate-y-1/2 text-2xl font-black text-gray-300 transition-colors group-focus-within:text-blue-600">₱</span>
                           <Input
                             type="number"
                             placeholder="0"
                             value={amountToPay}
                             onChange={(e: any) => setAmountToPay(e.target.value)}
-                            className="h-16 pl-10 text-2xl font-black rounded-3xl border-2 border-gray-100 bg-white"
+                            className="h-20 pl-14 text-3xl font-black rounded-[2rem] border-2 border-gray-100 bg-white shadow-sm focus:border-blue-600 transition-all appearance-none"
                             disabled={paymentMethod === "Pay at Clinic"}
                           />
                         </div>
                       </div>
 
-                      <div className="space-y-3">
-                        <Label className="text-sm font-bold text-gray-700">Payment Method</Label>
-                        <div className="grid grid-cols-1 gap-2">
+                      <div className="space-y-4">
+                        <Label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Payment Method</Label>
+                        <div className="grid grid-cols-1 gap-3">
                           {[
                             { id: "GCash", label: "GCash", sub: "Digital Payment", icon: "GC", color: "bg-blue-600" },
-                            { id: "Card", label: "Credit Card", sub: "Secure Processing", icon: <CreditCard className="w-5 h-5"/>, color: "bg-indigo-600" },
-                            { id: "Pay at Clinic", label: "Pay at Clinic", sub: "Cash on arrival", icon: <Banknote className="w-5 h-5"/>, color: "bg-emerald-600" }
+                            { id: "Card", label: "Credit Card", sub: "Secure Processing", icon: <CreditCard className="w-6 h-6"/>, color: "bg-indigo-600" },
+                            { id: "Pay at Clinic", label: "Pay at Clinic", sub: "Cash on arrival", icon: <Banknote className="w-6 h-6"/>, color: "bg-emerald-600" }
                           ].map((pm) => (
                             <button
                               key={pm.id}
+                              type="button"
                               onClick={() => { setPaymentMethod(pm.id); if (pm.id === "Pay at Clinic") setAmountToPay("0"); }}
-                              className={`flex items-center justify-between p-4 rounded-2xl border-2 transition-all ${paymentMethod === pm.id ? 'border-blue-600 bg-blue-50' : 'border-gray-50 bg-white'}`}
+                              className={`flex items-center justify-between p-5 rounded-[2rem] border-2 transition-all group ${paymentMethod === pm.id ? 'border-blue-600 bg-blue-50/50 shadow-lg shadow-blue-100 scale-[1.02]' : 'border-gray-100 bg-white hover:border-gray-200'}`}
                             >
-                              <div className="flex items-center gap-4 text-left">
-                                <div className={`w-12 h-12 rounded-xl ${pm.color} flex items-center justify-center text-white font-black italic`}>{pm.icon}</div>
+                              <div className="flex items-center gap-5 text-left">
+                                <div className={`w-14 h-14 rounded-2xl ${pm.color} flex items-center justify-center text-white font-black italic shadow-lg shadow-gray-200 transition-transform group-hover:scale-105`}>{pm.icon}</div>
                                 <div>
-                                  <p className="font-bold text-gray-900">{pm.label}</p>
-                                  <p className="text-[10px] text-gray-500">{pm.sub}</p>
+                                  <p className="font-black text-gray-900 uppercase tracking-tight">{pm.label}</p>
+                                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{pm.sub}</p>
                                 </div>
                               </div>
-                              {paymentMethod === pm.id && <div className="w-5 h-5 bg-blue-600 rounded-full flex items-center justify-center text-white"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg></div>}
+                              {paymentMethod === pm.id && <div className="w-6 h-6 bg-blue-600 rounded-full flex items-center justify-center text-white shadow-md shadow-blue-200 animate-in zoom-in-50"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg></div>}
                             </button>
                           ))}
                         </div>
@@ -2009,9 +2279,7 @@ return (
                 {isBooking ? <Loader2 className="h-5 w-5 animate-spin" /> : (
                   <div className="flex items-center gap-3">
                     <span>
-                      {modalStep === 'patient' ? 'Next: Schedule' : 
-                       modalStep === 'schedule' ? 'Next: Treatment' : 
-                       modalStep === 'treatment' ? 'Next: Summary' : 'Confirm & Save'}
+                      {getNextButtonLabel()}
                     </span>
                     <ChevronLeft className="w-5 h-5 rotate-180" />
                   </div>
@@ -2037,55 +2305,57 @@ return (
 
       {/* Summary confirmation dialog */}
       <Dialog open={isConfirmSummaryOpen} onOpenChange={setIsConfirmSummaryOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Confirm Appointment Details</DialogTitle>
+        <DialogContent className="max-w-xl p-0 overflow-hidden border-none shadow-2xl rounded-[2.5rem]">
+          <DialogHeader className="p-8 bg-gray-50 border-b">
+            <div className="flex items-center gap-4">
+              <div className="bg-blue-600 p-3 rounded-2xl text-white shadow-lg shadow-blue-100">
+                <AlertCircle className="h-6 w-6" />
+              </div>
+              <div>
+                <DialogTitle className="text-xl font-black text-gray-900">Confirm Appointment</DialogTitle>
+                <p className="text-sm font-bold text-gray-500">Please review all details before saving</p>
+              </div>
+            </div>
           </DialogHeader>
-          <div className="space-y-4">
-            <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 space-y-3">
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Patient:</span>
-                  <span className="font-semibold">{patients.find(p => p.id === selectedPatient)?.name || selectedPatient}</span>
+          
+          <div className="p-8 space-y-6 bg-white">
+            <div className="grid grid-cols-2 gap-8">
+              <div className="space-y-4">
+                <div>
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Patient</p>
+                  <p className="text-base font-black text-gray-900">{patients.find(p => p.id === selectedPatient)?.name || selectedPatient}</p>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Service:</span>
-                  <span className="font-semibold">{appointmentType === "Other" ? customAppointmentTypeName : appointmentType}</span>
+                <div>
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Service</p>
+                  <p className="text-base font-black text-gray-900">{appointmentType === "Other" ? customAppointmentTypeName : appointmentType}</p>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Date:</span>
-                  <span className="font-semibold">{selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                <div>
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Schedule</p>
+                  <p className="text-base font-black text-gray-900">
+                    {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} at {selectedTime ? formatTimeTo12h(selectedTime) : '—'}
+                  </p>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Time:</span>
-                  <span className="font-semibold">{selectedTime ? formatTimeTo12h(selectedTime) : '—'}</span>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Doctor</p>
+                  <p className="text-base font-black text-gray-900">{displayDoctor}</p>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Doctor:</span>
-                  <span className="font-semibold">Dr. {displayDoctor}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Duration:</span>
-                  <span className="inline-flex items-center gap-2 font-semibold">
-                    {duration} mins
+                <div>
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Duration</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-base font-black text-gray-900">{duration} mins</p>
                     {durationConflict && (
                       <span title={bookingConflictWarnings.find(w => w.type === 'duration')?.message || durationConflict} className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-amber-700">
                         <AlertCircle className="h-3.5 w-3.5" />
                       </span>
                     )}
-                  </span>
-                </div>
-                {bookingConflictWarnings.length > 0 && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-800">
-                    <span title={bookingConflictTitle} className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-amber-700 align-middle">
-                      <AlertCircle className="h-3.5 w-3.5" />
-                    </span>
-                    This appointment has a scheduling conflict. Hover the warning icon for details.
                   </div>
-                )}
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Status:</span>
-                  <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-bold ${
+                </div>
+                <div>
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Status</p>
+                  <span className={`inline-flex items-center px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter shadow-sm ${
                     appointmentStatuses.find(s => s.value === getFinalAppointmentStatus())?.bgColor || 'bg-gray-100'
                   } ${
                     appointmentStatuses.find(s => s.value === getFinalAppointmentStatus())?.textColor || 'text-gray-700'
@@ -2093,58 +2363,50 @@ return (
                     {getStatusLabel(getFinalAppointmentStatus(), appointmentStatuses)}
                   </span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Payment:</span>
-                  <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-bold ${
-                    getProjectedPaymentStatus() === 'paid' ? 'bg-emerald-100 text-emerald-700' :
-                    getProjectedPaymentStatus() === 'unpaid' ? 'bg-red-100 text-red-700' :
-                    getProjectedPaymentStatus() === 'half-paid' ? 'bg-amber-100 text-amber-700' :
-                    'bg-gray-100 text-gray-700'
-                  }`}>
-                    {getPaymentStatusLabel(getProjectedPaymentStatus(), paymentStatuses)}
-                  </span>
+              </div>
+            </div>
+
+            {bookingConflictWarnings.length > 0 && (
+              <div className="rounded-2xl border-2 border-amber-100 bg-amber-50 p-4 text-xs font-bold text-amber-800 flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 shrink-0 text-amber-600" />
+                <p>This appointment has a scheduling conflict. Hover the warning icon for details.</p>
+              </div>
+            )}
+
+            <div className="pt-6 border-t-2 border-dashed border-gray-100">
+              <div className="bg-gray-50 rounded-3xl p-6 space-y-3">
+                <div className="flex justify-between text-sm font-bold text-gray-500">
+                  <span>Total Price</span>
+                  <span>₱{finalPrice.toLocaleString()}</span>
                 </div>
-                <div className="border-t border-blue-100 pt-2 mt-2">
-                  <div className="flex justify-between font-bold">
-                    <span>Total Price:</span>
-                    <span className={`${Number(discount) > 0 ? 'text-gray-400 line-through' : 'text-blue-700'}`}>₱{finalPrice.toLocaleString()}</span>
-                  </div>
-                  {Number(discount) > 0 && (
-                    <>
-                      <div className="flex justify-between text-orange-600 font-semibold">
-                        <span>Discount:</span>
-                        <span>-₱{Number(discount).toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between text-green-600 font-bold text-lg">
-                        <span>Final Price:</span>
-                        <span>₱{(finalPrice - Number(discount)).toLocaleString()}</span>
-                      </div>
-                    </>
-                  )}
-                </div>
-                {previouslyPaidAmount > 0 && (
-                  <div className="flex justify-between text-green-600 font-semibold">
-                    <span>Already Paid:</span>
-                    <span>₱{previouslyPaidAmount.toLocaleString()}</span>
+                {Number(discount) > 0 && (
+                  <div className="flex justify-between text-sm font-bold text-orange-600">
+                    <span>Discount</span>
+                    <span>-₱{Number(discount).toLocaleString()}</span>
                   </div>
                 )}
-                <div className="flex justify-between text-green-700 font-semibold">
-                  <span>Amount to Pay Now:</span>
-                  <span>₱{(parseFloat(amountToPay) || 0).toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between text-blue-700 font-semibold">
-                  <span>Remaining Balance:</span>
-                  <span>₱{Math.max(0, (finalPrice - Number(discount)) - previouslyPaidAmount - (parseFloat(amountToPay) || 0)).toLocaleString()}</span>
+                <div className="flex justify-between items-center pt-3 border-t border-gray-200">
+                  <span className="text-lg font-black text-gray-900">Final Price</span>
+                  <span className="text-2xl font-black text-blue-600">₱{(finalPrice - Number(discount)).toLocaleString()}</span>
                 </div>
               </div>
             </div>
+
+            <div className="flex flex-col gap-2 text-xs font-bold text-gray-400 uppercase tracking-widest text-center">
+              {previouslyPaidAmount > 0 && (
+                <p className="text-emerald-600">Already Paid: ₱{previouslyPaidAmount.toLocaleString()}</p>
+              )}
+              <p className="text-blue-700">Paying Now: ₱{(parseFloat(amountToPay) || 0).toLocaleString()}</p>
+              <p>Remaining: ₱{Math.max(0, (finalPrice - Number(discount)) - previouslyPaidAmount - (parseFloat(amountToPay) || 0)).toLocaleString()}</p>
+            </div>
           </div>
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setIsConfirmSummaryOpen(false)} disabled={isBooking} className="flex-1">
-              Back
+
+          <DialogFooter className="p-8 bg-white border-t flex gap-4">
+            <Button variant="outline" onClick={() => setIsConfirmSummaryOpen(false)} disabled={isBooking} className="h-14 flex-1 rounded-2xl font-bold border-2">
+              Back to Edit
             </Button>
-            <Button className="bg-green-600 hover:bg-green-700 text-white flex-1" onClick={handleConfirmSummary} disabled={isBooking}>
-              {isBooking ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            <Button className="bg-blue-600 hover:bg-blue-700 text-white h-14 flex-1 rounded-2xl font-black uppercase tracking-widest shadow-lg shadow-blue-100" onClick={handleConfirmSummary} disabled={isBooking}>
+              {isBooking ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : null}
               Confirm & Save
             </Button>
           </DialogFooter>

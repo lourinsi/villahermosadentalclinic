@@ -2,12 +2,37 @@ type Toast = { error?: (msg: string) => void } | ((msg: string) => void);
 
 type BookingFlow = 'details-payment' | 'multi-step';
 type BookingStep = 'details' | 'patient' | 'schedule' | 'treatment' | 'doctor' | 'payment';
+type BookingActorRole = 'public' | 'patient' | 'admin' | 'doctor' | '';
+export type BookingMode = 'standard' | 'public';
 
 export type BookingConflictWarning = {
   type: 'duration' | 'patient';
   label: string;
   message: string;
 };
+
+export function getBookingActor({
+  userRole,
+  bookingMode = 'standard',
+}: {
+  userRole?: string | null;
+  bookingMode?: BookingMode;
+}) {
+  const isPublicBookingMode = bookingMode === 'public' && !userRole;
+  const effectiveRole = (isPublicBookingMode ? 'public' : userRole || '') as BookingActorRole;
+  const isStaffBookingMode = effectiveRole === 'admin' || effectiveRole === 'doctor';
+
+  return {
+    effectiveRole,
+    isPublicBookingMode,
+    isStaffBookingMode,
+    isPatientLevelBookingMode: effectiveRole === 'patient' || effectiveRole === 'public',
+    canCreatePatients: isStaffBookingMode || effectiveRole === 'public',
+    canManagePricing: isStaffBookingMode,
+    canManageStatuses: isStaffBookingMode,
+    isDoctorSelectionLocked: userRole === 'doctor',
+  };
+}
 
 type UseSharedBookingLogicArgs = {
   modalStep: BookingStep;
@@ -184,19 +209,24 @@ export default function useSharedBookingLogic({
 
     if (modalStep === 'schedule') {
       if (!validateSchedule()) return false;
-      setModalStep('treatment');
+      if (skipDoctorStep) {
+        if (!validateDoctor()) return false;
+        setModalStep('treatment');
+      } else {
+        setModalStep('doctor');
+      }
       return true;
     }
 
     if (modalStep === 'treatment') {
       if (!validateTreatment()) return false;
-      setModalStep(skipDoctorStep ? 'payment' : 'doctor');
+      setModalStep('payment');
       return true;
     }
 
     if (modalStep === 'doctor') {
       if (!validateDoctor()) return false;
-      setModalStep('payment');
+      setModalStep('treatment');
       return true;
     }
 
@@ -210,9 +240,9 @@ export default function useSharedBookingLogic({
 
   function handlePrevStep() {
     if (isDetailsPaymentFlow && modalStep === 'payment') return setModalStep('details');
-    if (modalStep === 'payment') return setModalStep(skipDoctorStep ? 'treatment' : 'doctor');
-    if (modalStep === 'doctor') return setModalStep('treatment');
-    if (modalStep === 'treatment') return setModalStep('schedule');
+    if (modalStep === 'payment') return setModalStep('treatment');
+    if (modalStep === 'treatment') return setModalStep(skipDoctorStep ? 'schedule' : 'doctor');
+    if (modalStep === 'doctor') return setModalStep('schedule');
     if (modalStep === 'schedule') return setModalStep('patient');
     return setModalStep('patient');
   }

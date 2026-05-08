@@ -13,10 +13,12 @@ export interface DoctorOption {
 }
 
 const STAFF_API = "http://localhost:3001/api/staff?limit=100";
+const PUBLIC_DOCTORS_API = "http://localhost:3001/api/staff/public-doctors";
 
-export function useDoctors(refreshKey?: number) {
+export function useDoctors(refreshKey?: number, options?: { publicBooking?: boolean }) {
   const [doctors, setDoctors] = useState<DoctorOption[]>([]);
   const [isLoadingDoctors, setIsLoadingDoctors] = useState(true);
+  const publicBooking = Boolean(options?.publicBooking);
 
   const loadDoctors = useCallback(async () => {
     try {
@@ -28,9 +30,7 @@ export function useDoctors(refreshKey?: number) {
       if (token) {
         headers["Authorization"] = `Bearer ${token}`;
       }
-      
-      
-      const response = await fetch(STAFF_API, { headers, credentials: "include" });
+      const response = await fetch(publicBooking ? PUBLIC_DOCTORS_API : STAFF_API, { headers, credentials: "include" });
       
       if (!response.ok) {
         // If the user is not authenticated, the API may return 401/403.
@@ -40,6 +40,20 @@ export function useDoctors(refreshKey?: number) {
           // Use debug-level logging so it can be inspected when needed
           // but won't create an error stack in normal unauthenticated usage.
           console.debug('[useDoctors] Unauthenticated - backend returned', response.status, response.statusText);
+          if (!publicBooking) {
+            const publicResponse = await fetch(PUBLIC_DOCTORS_API);
+            if (publicResponse.ok) {
+              const publicResult = await publicResponse.json();
+              if (publicResult?.success && Array.isArray(publicResult.data)) {
+                setDoctors(mapDoctorOptions(publicResult.data));
+              }
+            } else {
+              setDoctors([]);
+            }
+            setIsLoadingDoctors(false);
+            return;
+          }
+
           setDoctors([]);
           setIsLoadingDoctors(false);
           return;
@@ -54,22 +68,7 @@ export function useDoctors(refreshKey?: number) {
       const result = await response.json();
       
       if (result?.success && Array.isArray(result.data)) {
-        const dentistOnly = result.data.filter((staff: Staff) => {
-          const role = String(staff.role || "").toLowerCase();
-          const specialization = String(staff.specialization || "").toLowerCase();
-          return role.includes("dentist") || specialization.includes("dentist");
-        });
-        setDoctors(
-          dentistOnly.map((staff: Staff) => ({
-            id: String(staff.id ?? staff.email ?? staff.name),
-            name: staff.name,
-            role: staff.role,
-            specialization: staff.specialization,
-            email: staff.email,
-            profilePicture: staff.profilePicture,
-            bio: staff.bio,
-          }))
-        );
+        setDoctors(mapDoctorOptions(result.data));
       } else {
         setDoctors([]);
       }
@@ -82,11 +81,31 @@ export function useDoctors(refreshKey?: number) {
     } finally {
       setIsLoadingDoctors(false);
     }
-  }, []);
+  }, [publicBooking]);
 
   useEffect(() => {
     loadDoctors();
   }, [loadDoctors, refreshKey]);
 
   return { doctors, isLoadingDoctors, reloadDoctors: loadDoctors };
+}
+
+function isDoctorStaff(staff: Staff) {
+  const role = String(staff.role || "").toLowerCase();
+  const specialization = String(staff.specialization || "").toLowerCase();
+  return role.includes("doctor") || role.includes("dentist") || specialization.includes("doctor") || specialization.includes("dentist");
+}
+
+function mapDoctorOptions(staffMembers: Staff[]): DoctorOption[] {
+  return staffMembers
+    .filter(isDoctorStaff)
+    .map((staff: Staff) => ({
+      id: String(staff.id ?? staff.email ?? staff.name),
+      name: staff.name,
+      role: staff.role,
+      specialization: staff.specialization,
+      email: staff.email,
+      profilePicture: staff.profilePicture,
+      bio: staff.bio,
+    }));
 }
