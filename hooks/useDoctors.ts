@@ -90,22 +90,26 @@ export function useDoctors(refreshKey?: number, options?: { publicBooking?: bool
   return { doctors, isLoadingDoctors, reloadDoctors: loadDoctors };
 }
 
-function isDoctorStaff(staff: Staff) {
+function isDoctorStaff(staff: Partial<Staff>) {
   const role = String(staff.role || "").toLowerCase();
   const specialization = String(staff.specialization || "").toLowerCase();
   return role.includes("doctor") || role.includes("dentist") || specialization.includes("doctor") || specialization.includes("dentist");
 }
 
-function mapDoctorOptions(staffMembers: Staff[]): DoctorOption[] {
+function getStaffProfilePicture(staff: Partial<Staff>) {
+  return typeof staff.profilePicture === "string" ? staff.profilePicture.trim() || undefined : undefined;
+}
+
+function mapDoctorOptions(staffMembers: Partial<Staff>[]): DoctorOption[] {
   return staffMembers
     .filter(isDoctorStaff)
-    .map((staff: Staff) => ({
+    .map((staff) => ({
       id: String(staff.id ?? staff.email ?? staff.name),
-      name: staff.name,
-      role: staff.role,
+      name: staff.name || "Doctor",
+      role: staff.role || "Dentist",
       specialization: staff.specialization,
       email: staff.email,
-      profilePicture: staff.profilePicture,
+      profilePicture: getStaffProfilePicture(staff),
       bio: staff.bio,
     }));
 }

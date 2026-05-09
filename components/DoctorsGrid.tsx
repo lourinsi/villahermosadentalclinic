@@ -82,11 +82,13 @@ export function DoctorsGrid({ portal }: DoctorsGridProps) {
               <CardHeader className="pb-4 bg-muted/30">
                 <div className="flex items-start justify-between">
                   <Avatar className="h-20 w-20 border-2 border-background shadow-sm">
-                    <AvatarImage
-                      src={doctor.profilePicture}
-                      alt={doctor.name}
-                      className="object-cover"
-                    />
+                    {doctor.profilePicture && (
+                      <AvatarImage
+                        src={doctor.profilePicture}
+                        alt={doctor.name}
+                        className="object-cover"
+                      />
+                    )}
                     <AvatarFallback className="text-xl bg-primary/10 text-primary">
                       {doctor.name
                         ?.split(" ")

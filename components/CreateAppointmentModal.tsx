@@ -21,6 +21,7 @@ import { ChevronsUpDown, Calendar, Clock, User, Check, ChevronRight, ChevronLeft
 import { cn } from "@/lib/utils";
 import { DoctorCalendar } from "@/components/DoctorCalendar";
 import { useRouter } from "next/navigation";
+import { getProjectedBookingStatus } from "./sharedBookingLogic";
 
 interface AppointmentFormData {
   patientName: string;
@@ -81,6 +82,10 @@ export function CreateAppointmentModal() {
   const { user } = useAuth();
   const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors();
   const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
+  const staffAppointmentStatuses = useMemo(
+    () => APPOINTMENT_STATUSES.filter((status) => status.value !== "pending"),
+    [APPOINTMENT_STATUSES]
+  );
 
   const [step, setStep] = useState(1);
   const [dateAppointments, setDateAppointments] = useState<Appointment[]>([]);
@@ -117,11 +122,22 @@ export function CreateAppointmentModal() {
   const [paymentAmount, setPaymentAmount] = useState<number>(0);
   const [paymentTransactionId, setPaymentTransactionId] = useState<string>("");
   const [paymentNotes, setPaymentNotes] = useState<string>("");
+  const [statusChangedByUser, setStatusChangedByUser] = useState(false);
 
   const recalcBalance = (price: number, discount?: number) => {
     const d = discount || 0;
     return Math.max(0, price - d);
   };
+
+  const getFinalAppointmentStatus = () => getProjectedBookingStatus({
+    userRole: user?.role,
+    isEditing: false,
+    statusChangedByUser,
+    selectedStatus: formData.status,
+    amountPaid: paymentAmount,
+    previouslyPaidAmount: 0,
+    totalPrice: formData.balance ?? recalcBalance(formData.price ?? 0, formData.discount),
+  });
 
   // single observer ref
   const observer = useRef<IntersectionObserver | null>(null);
@@ -228,6 +244,7 @@ export function CreateAppointmentModal() {
       setFormData(newFormData);
       setShowNewPatient(false);
       setShowCustomTypeInput(false);
+      setStatusChangedByUser(false);
       setStep(1);
       setPatientPage(1);
       setPatients([]);
@@ -383,7 +400,7 @@ export function CreateAppointmentModal() {
         price: formData.price,
         doctor: formData.doctor,
         notes: formData.notes,
-        status: formData.status as "scheduled" | "pending" | "tentative" | "completed" | "cancelled" | "To Pay",
+        status: getFinalAppointmentStatus() as "pending" | "scheduled" | "reserved" | "tentative" | "completed" | "cancelled" | "To Pay",
         paymentStatus: formData.paymentStatus,
         balance: formData.balance
       });
@@ -836,10 +853,10 @@ export function CreateAppointmentModal() {
 
            <div>
              <Label>Status</Label>
-             <Select value={formData.status} onValueChange={(v) => setFormData(prev => ({ ...prev, status: String(v) }))}>
+             <Select value={formData.status} onValueChange={(v) => { setStatusChangedByUser(true); setFormData(prev => ({ ...prev, status: String(v) })); }}>
                <SelectTrigger className="h-11"><SelectValue /></SelectTrigger>
                <SelectContent>
-                 {APPOINTMENT_STATUSES.map((status) => (
+                 {staffAppointmentStatuses.map((status) => (
                    <SelectItem key={status.value} value={status.value}>
                      {status.label}
                    </SelectItem>
@@ -1021,7 +1038,7 @@ export function CreateAppointmentModal() {
         price: formData.price,
         doctor: formData.doctor,
         notes: formData.notes,
-        status: formData.status as "scheduled" | "pending" | "reserved" | "completed" | "cancelled",
+        status: getFinalAppointmentStatus() as "pending" | "scheduled" | "reserved" | "completed" | "cancelled",
         paymentStatus: formData.paymentStatus,
         balance: formData.balance
       });

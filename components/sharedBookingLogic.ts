@@ -21,15 +21,17 @@ export function getBookingActor({
   const isPublicBookingMode = bookingMode === 'public' && !userRole;
   const effectiveRole = (isPublicBookingMode ? 'public' : userRole || '') as BookingActorRole;
   const isStaffBookingMode = effectiveRole === 'admin' || effectiveRole === 'doctor';
+  const isPatientLevelBookingMode = effectiveRole === 'patient' || effectiveRole === 'public';
+  const canManageStatuses = Boolean(effectiveRole) && !isPatientLevelBookingMode;
 
   return {
     effectiveRole,
     isPublicBookingMode,
     isStaffBookingMode,
-    isPatientLevelBookingMode: effectiveRole === 'patient' || effectiveRole === 'public',
+    isPatientLevelBookingMode,
     canCreatePatients: isStaffBookingMode || effectiveRole === 'public',
     canManagePricing: isStaffBookingMode,
-    canManageStatuses: isStaffBookingMode,
+    canManageStatuses,
     isDoctorSelectionLocked: userRole === 'doctor',
   };
 }
@@ -81,6 +83,68 @@ export function getBookingConflictWarnings({
   }
 
   return warnings;
+}
+
+export function getBookingSummaryNotes(notes?: string | null) {
+  const text = String(notes || '').trim();
+
+  return {
+    hasNotes: text.length > 0,
+    text: text || 'No notes added.',
+  };
+}
+
+export function getProjectedBookingStatus({
+  userRole,
+  bookingMode = 'standard',
+  isEditing,
+  statusChangedByUser,
+  selectedStatus,
+  existingStatus,
+  amountPaid,
+  previouslyPaidAmount,
+  totalPrice,
+}: {
+  userRole?: string | null;
+  bookingMode?: BookingMode;
+  isEditing: boolean;
+  statusChangedByUser: boolean;
+  selectedStatus?: string | null;
+  existingStatus?: string | null;
+  amountPaid: number;
+  previouslyPaidAmount: number;
+  totalPrice: number;
+}) {
+  const { isStaffBookingMode } = getBookingActor({ userRole, bookingMode });
+  const safeSelectedStatus =
+    isStaffBookingMode && selectedStatus === 'pending'
+      ? 'reserved'
+      : selectedStatus || existingStatus || (isStaffBookingMode ? 'reserved' : 'pending');
+
+  if (statusChangedByUser) {
+    return safeSelectedStatus;
+  }
+
+  if (isEditing) {
+    if (amountPaid <= 0) {
+      return safeSelectedStatus;
+    }
+
+    const newTotalPaid = previouslyPaidAmount + amountPaid;
+    const newBalance = Math.max(0, totalPrice - newTotalPaid);
+
+    if (newBalance <= 0) return 'scheduled';
+    if (newTotalPaid > 0) return 'reserved';
+    return safeSelectedStatus;
+  }
+
+  const balance = Math.max(0, totalPrice - amountPaid);
+
+  if (isStaffBookingMode && amountPaid <= 0) return 'reserved';
+  if (balance <= 0) return 'scheduled';
+  if (amountPaid > 0) return 'reserved';
+
+  return isStaffBookingMode ? 'reserved' : 'pending';
 }
 
 function safeToastError(toast: Toast, msg: string) {

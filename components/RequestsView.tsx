@@ -89,8 +89,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   };
   
   useEffect(() => {
-    // Fetch all appointments including unpaid/pending to show in requests view
-    refreshAppointments({ includeUnpaid: true });
+    // Pending appointments are patient cart records and should stay out of staff request/history views.
+    refreshAppointments();
   }, [refreshAppointments]);
 
   // Log available statuses when RequestsView loads
@@ -106,10 +106,15 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     return String(s).toLowerCase().trim();
   };
 
-  // Requests are those with unpaid or half-paid payment status
-  const isRequestPaymentStatus = (paymentStatus?: string) => {
-    const k = canonicalStatus(paymentStatus);
-    return k === "unpaid" || k === "half-paid";
+  const isPatientCartStatus = (status?: string) => {
+    return canonicalStatus(status) === "pending";
+  };
+
+  const staffVisibleStatusOptions = (APPOINTMENT_STATUSES || []).filter((status: any) => !isPatientCartStatus(status.value));
+
+  const isActionableStatus = (status?: string) => {
+    const k = canonicalStatus(status);
+    return k === "reserved" || k === "tentative" || k === "to-pay" || k === "half-paid" || k === "tbd";
   };
 
   // History shows completed appointments (not pending payments)
@@ -122,7 +127,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const isPendingRequestStatus = (status?: string) => {
     const k = canonicalStatus(status);
     // TBD also appears in requests because it needs action (marking completed/cancelled)
-    return k === "pending" || k === "reserved" || k === "tentative" || k === "to-pay" || k === "half-paid" || k === "tbd";
+    return isActionableStatus(k);
   };
 
   // Pending filters state
@@ -165,10 +170,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const requests = useMemo(() => {
     const result = appointments.filter((apt) => {
       const matchesDoctor = !doctorFilter || (apt.doctor || "").toLowerCase() === doctorFilter.toLowerCase();
-      const isPending = isPendingRequestStatus(apt.status);
-      
       // Requests are those with pending statuses (including TBD)
-      if (!isPendingRequestStatus(apt.status) || !matchesDoctor) {
+      if (isPatientCartStatus(apt.status) || !isPendingRequestStatus(apt.status) || !matchesDoctor) {
         return false;
       }
 
@@ -203,7 +206,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       .filter((apt) => {
         const matchesDoctor = !doctorFilter || (apt.doctor || "").toLowerCase() === doctorFilter.toLowerCase();
         // In history, we show only scheduled, completed, or cancelled appointments
-        if (!isHistoryStatus(apt.status) || !matchesDoctor) return false;
+        if (isPatientCartStatus(apt.status) || !isHistoryStatus(apt.status) || !matchesDoctor) return false;
         
         // Search filter
         if (historySearchTerm && !apt.patientName.toLowerCase().includes(historySearchTerm.toLowerCase()) && 
@@ -239,12 +242,12 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     if (!pendingApproveAppointment) return;
     
     try {
-      // Approve pending/reserved requests to scheduled
+      // Approve reserved requests to scheduled
       // Approve TBD requests to completed (since TBD is for past appointments)
       let newStatus = "scheduled";
       if (pendingApproveAppointment.status === "tbd") {
         newStatus = "completed";
-      } else if (pendingApproveAppointment.status === "pending" || pendingApproveAppointment.status === "reserved") {
+      } else if (pendingApproveAppointment.status === "reserved" || pendingApproveAppointment.status === "tentative") {
         newStatus = "scheduled";
       }
       
@@ -290,6 +293,10 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   };
 
   const handleStatusChangeRequest = (appointment: Appointment, statusKey: string) => {
+    if (isPatientCartStatus(statusKey)) {
+      toast.error("Pending is reserved for patient carts.");
+      return;
+    }
     // statusKey comes from the select dropdown and directly maps to backend status values
     setPendingStatusChange({ appointment, newStatus: statusKey as Appointment['status'] });
     setIsConfirmOpen(true);
@@ -311,6 +318,11 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   };
 
   const handleHistoryStatusChange = async (appointmentId: string, newStatus: string) => {
+    if (isPatientCartStatus(newStatus)) {
+      toast.error("Pending is reserved for patient carts.");
+      return;
+    }
+
     try {
       await updateAppointment(appointmentId, { status: newStatus as any });
       toast.success(`Status updated to ${newStatus}`);
@@ -511,14 +523,14 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
           <h1 className="text-3xl font-black text-gray-900 tracking-tight uppercase italic">
             {doctorFilter ? "Patient Requests" : "Appointment Management"}
           </h1>
-          <p className="text-gray-500 font-medium">Review and manage pending patient appointments</p>
+          <p className="text-gray-500 font-medium">Review and manage appointment requests</p>
         </div>
       </div>
 
       <Tabs defaultValue="requests" className="space-y-6">
         <TabsList className="bg-white border p-1 rounded-xl shadow-sm">
           <TabsTrigger value="requests" className="rounded-lg px-6 py-2.5 data-[state=active]:bg-violet-600 data-[state=active]:text-white font-bold transition-all duration-300">
-            Pending Requests
+            Requests
             <Badge className="ml-2 bg-violet-100 text-violet-700 border-none">{requests.length}</Badge>
           </TabsTrigger>
           <TabsTrigger value="history" className="rounded-lg px-6 py-2.5 data-[state=active]:bg-violet-600 data-[state=active]:text-white font-bold transition-all duration-300">
@@ -536,7 +548,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                   </div>
                   <div>
                     <CardTitle className="text-xl font-black text-gray-900 uppercase">Action Required</CardTitle>
-                    <p className="text-sm text-gray-500 font-medium">Please review these pending appointments</p>
+                    <p className="text-sm text-gray-500 font-medium">Please review appointments that need action</p>
                   </div>
                 </div>
                 
@@ -560,7 +572,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Status</SelectItem>
-                      {APPOINTMENT_STATUSES.filter((s: any) => isPendingRequestStatus(s.value)).map((status: any) => (
+                      {staffVisibleStatusOptions.filter((s: any) => isPendingRequestStatus(s.value)).map((status: any) => (
                         <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
                       ))}
                     </SelectContent>
@@ -659,7 +671,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                               <ClipboardList className="h-10 w-10 text-gray-300" />
                             </div>
                             <h3 className="text-lg font-bold text-gray-900 uppercase">All Caught Up!</h3>
-                            <p className="text-gray-500 max-w-xs mx-auto mt-2">There are no pending requests matching your filters.</p>
+                            <p className="text-gray-500 max-w-xs mx-auto mt-2">There are no appointment requests matching your filters.</p>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -707,7 +719,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                                 </div>
                               </SelectTrigger>
                               <SelectContent>
-                                {APPOINTMENT_STATUSES.map((status: any) => (
+                                {staffVisibleStatusOptions.map((status: any) => (
                                   <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
                                 ))}
                               </SelectContent>
@@ -744,7 +756,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           </TableCell>
                           <TableCell className="text-right">
                             <div className="flex justify-end items-center gap-2">
-                              {request.status === "pending" || request.status === "reserved" || request.status === "tbd" ? (
+                              {isActionableStatus(request.status) ? (
                                 <>
                                   <Button 
                                     size="sm" 
@@ -822,7 +834,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Status</SelectItem>
-                      {APPOINTMENT_STATUSES.filter((s: any) => isHistoryStatus(s.value)).map((status: any) => (
+                      {staffVisibleStatusOptions.filter((s: any) => isHistoryStatus(s.value)).map((status: any) => (
                         <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
                       ))}
                     </SelectContent>
@@ -930,7 +942,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                                 </div>
                               </SelectTrigger>
                               <SelectContent>
-                                {APPOINTMENT_STATUSES.map((status: any) => (
+                                {staffVisibleStatusOptions.map((status: any) => (
                                   <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
                                 ))}
                               </SelectContent>

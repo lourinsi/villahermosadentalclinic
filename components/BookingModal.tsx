@@ -1,11 +1,11 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { CompactNotesField } from "@/components/CompactNotesField";
 import { useAuth } from "@/hooks/useAuth";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
@@ -16,7 +16,7 @@ import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { formatTimeTo12h, TIME_SLOTS } from "@/lib/time-slots";
 import { APPOINTMENT_PRICES, getAppointmentTypeName } from "@/lib/appointmentTypes";
 import { toast } from 'sonner';
-import useSharedBookingLogic, { getBookingActor, getBookingConflictWarnings } from './sharedBookingLogic';
+import useSharedBookingLogic, { getBookingActor, getBookingConflictWarnings, getProjectedBookingStatus } from './sharedBookingLogic';
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
@@ -49,6 +49,15 @@ const getPaymentStatusLabel = (statusValue: string, statuses: PaymentStatusOptio
   const status = statuses.find(s => s.value === statusValue);
   return status?.label || statusValue.charAt(0).toUpperCase() + statusValue.slice(1);
 };
+
+const defaultAppointmentStatusOptions: AppointmentStatusOption[] = [
+  { key: 1, value: "scheduled", label: "Scheduled", description: "Confirmed and scheduled", bgColor: "bg-emerald-100", textColor: "text-emerald-700" },
+  { key: 2, value: "pending", label: "Pending", description: "Awaiting confirmation", bgColor: "bg-purple-100", textColor: "text-purple-700" },
+  { key: 3, value: "reserved", label: "Reserved", description: "Tentatively reserved", bgColor: "bg-amber-100", textColor: "text-amber-700" },
+  { key: 4, value: "cancelled", label: "Cancelled", description: "Appointment cancelled", bgColor: "bg-red-100", textColor: "text-red-700" },
+  { key: 5, value: "completed", label: "Completed", description: "Appointment completed", bgColor: "bg-blue-100", textColor: "text-blue-700" },
+  { key: 6, value: "tbd", label: "TBD", description: "Past appointment awaiting completion status", bgColor: "bg-red-100", textColor: "text-red-700" },
+];
 
 // Helper function to format doctor name consistently
 const formatDoctorName = (name?: string): string => {
@@ -266,6 +275,30 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     userRole: user?.role,
     bookingMode,
   });
+  const canEditAppointmentStatus = canManageStatuses && !isPatientReadonly;
+  const currentAppointmentStatusValue = appointmentStatus || appointmentToEdit?.status || "scheduled";
+  const baseAppointmentStatusOptions = appointmentStatuses.length > 0 ? appointmentStatuses : defaultAppointmentStatusOptions;
+  const selectableAppointmentStatusOptions = canManageStatuses
+    ? baseAppointmentStatusOptions.filter((status) => status.value !== "pending")
+    : baseAppointmentStatusOptions;
+  const appointmentStatusOptions: AppointmentStatusOption[] =
+    currentAppointmentStatusValue &&
+    !(canManageStatuses && currentAppointmentStatusValue === "pending") &&
+    !selectableAppointmentStatusOptions.some((status) => status.value === currentAppointmentStatusValue)
+      ? [
+          {
+            key: 0,
+            value: currentAppointmentStatusValue,
+            label: getStatusLabel(currentAppointmentStatusValue, []),
+            description: "Current appointment status",
+            bgColor: "bg-gray-100",
+            textColor: "text-gray-700",
+          },
+          ...selectableAppointmentStatusOptions,
+        ]
+      : selectableAppointmentStatusOptions;
+  const getAppointmentStatusOption = (statusValue: string) =>
+    appointmentStatusOptions.find((status) => status.value === statusValue);
 
   useEffect(() => {
     if (!open || appointmentToEdit || !canCreatePatients || !lastAddedPatient || !lastAddedPatientAt) return;
@@ -736,10 +769,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       const patientConflict = overlapsAny(slotStart, slotEnd, patientAppointments);
       if (patientConflict) return { ok: false, reason: 'patient', conflict: patientConflict };
 
-      // check doctor conflicts (use dailyAppointments list)
-      const doctorConflict = selectedDoctor ? overlapsAny(slotStart, slotEnd, dailyAppointments.filter(apt => apt.doctor === selectedDoctor)) : null;
-      if (selectedDoctor && doctorConflict) return { ok: false, reason: 'doctor', conflict: doctorConflict };
-
       return { ok: true };
     };
 
@@ -770,7 +799,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
         const result = trySlot(checkDate, slot);
         if (result.ok) {
-          console.log('[BookingModal] Auto-selecting next free slot (patient+doctor):', { patientId: selectedPatient, doctor: selectedDoctor, date: checkDate.toISOString().slice(0,10), time: slot });
+          console.log('[BookingModal] Auto-selecting next free slot for patient conflict:', { patientId: selectedPatient, date: checkDate.toISOString().slice(0,10), time: slot });
           setSelectedDate(checkDate);
           setSelectedTime(slot);
           return;
@@ -779,7 +808,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     }
 
     console.warn('[BookingModal] No free slot found for patient within 30 days');
-  }, [open, selectedPatient, patientAppointments, duration, selectedDoctor, dailyAppointments, selectedDate, selectedTime]);
+  }, [open, selectedPatient, patientAppointments, duration, selectedDate, selectedTime]);
 
   useEffect(() => {
     setSelectedDate(defaultDate ?? new Date());
@@ -969,7 +998,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     return null;
   }, []);
 
-  // Run auto-preselection logic (validates provided defaults and auto-searches)
+  // Run auto-preselection logic. Once a date/time exists, schedule is authoritative:
+  // doctor selection may surface conflicts, but it must not jump to another slot.
   const runAutoPreselect = useCallback(async (patientId?: string) => {
     if (appointmentToEdit) return; // don't override when editing
 
@@ -977,42 +1007,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     const doctorToSearch = doctorName || selectedDoctor;
     const durationToSearch = String(Number(duration) || appointmentTypeDurations[appointmentType || 'Routine Cleaning'] || 30);
 
-    // Validate any passed default slot once a doctor is known. If it is taken,
-    // advance to the next slot that is free for both doctor and patient.
-    if (defaultDate && defaultTime) {
+    if ((defaultDate && defaultTime) || selectedTime) {
       if (!appointmentType) setAppointmentType('Routine Cleaning');
-
-      if (!doctorToSearch) {
+      if (defaultDate && defaultTime) {
         setSelectedDate(defaultDate);
         setSelectedTime(defaultTime);
-        return;
-      }
-
-      try {
-        const nextSlot = await findNextAvailableSlot(defaultDate, doctorToSearch, durationToSearch, patientToSearch, defaultTime);
-        if (nextSlot) {
-          const defaultDateStr = formatDateToYYYYMMDD(defaultDate);
-          const nextDateStr = formatDateToYYYYMMDD(nextSlot.date);
-
-          if (nextDateStr === defaultDateStr && nextSlot.time === defaultTime) {
-            setSelectedDate(defaultDate);
-            setSelectedTime(defaultTime);
-          } else {
-            console.log('[BookingModal] Default slot unavailable; overriding to next available slot:', { date: nextDateStr, time: nextSlot.time });
-            setSelectedDate(nextSlot.date);
-            setSelectedTime(nextSlot.time);
-          }
-          return;
-        }
-
-        const fallback = await findNextAvailableSlot(new Date(), doctorToSearch, durationToSearch, patientToSearch);
-        if (fallback) {
-          console.log('[BookingModal] Default slot unavailable; using fallback slot:', { date: formatDateToYYYYMMDD(fallback.date), time: fallback.time });
-          setSelectedDate(fallback.date);
-          setSelectedTime(fallback.time);
-        }
-      } catch (err) {
-        console.warn('[BookingModal] Error validating default slot:', err);
       }
       return;
     }
@@ -1030,7 +1029,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setSelectedTime(nextSlot.time);
       console.log('[BookingModal] Auto-preselected slot:', { date: formatDateToYYYYMMDD(nextSlot.date), time: nextSlot.time });
     }
-  }, [appointmentToEdit, defaultDate, defaultTime, doctorName, duration, selectedDoctor, selectedPatient, defaultPatientId, appointmentType, findNextAvailableSlot]);
+  }, [appointmentToEdit, defaultDate, defaultTime, doctorName, duration, selectedDoctor, selectedPatient, defaultPatientId, appointmentType, selectedTime, findNextAvailableSlot]);
 
   const runAutoPreselectRef = useRef(runAutoPreselect);
 
@@ -1053,7 +1052,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         console.log('[BookingModal] 📋 Preselecting appointment type: Routine Cleaning');
         setAppointmentType("Routine Cleaning");
       }
-      runAutoPreselect();
+      setSelectedDate(defaultDate);
+      setSelectedTime(defaultTime);
       return;
     }
     
@@ -1068,11 +1068,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       if (!appointmentType) {
         setAppointmentType("Routine Cleaning");
       }
-      runAutoPreselect();
+      setSelectedDate(defaultDate);
+      setSelectedTime(defaultTime);
       return;
     }
     
     // CASE 3: New appointment modal (no defaults at all)
+    if (selectedTime) return;
+
     // Preselect first appointment type
     if (!appointmentType) {
       console.log('[BookingModal] 📋 Preselecting appointment type: Routine Cleaning');
@@ -1080,8 +1083,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     }
     
     runAutoPreselect();
-    // Re-run when selectedDoctor or selectedPatient change so patient-specific conflicts affect preselection.
-  }, [open, appointmentToEdit, defaultDate, defaultTime, doctorName, findNextAvailableSlot, selectedDoctor, selectedPatient, defaultPatientId, runAutoPreselect, appointmentType]);
+  }, [open, appointmentToEdit, defaultDate, defaultTime, doctorName, selectedTime, runAutoPreselect, appointmentType]);
 
   // Price calculations - handle custom types
   // finalPrice is the base price (before discount) - used in payment calculations
@@ -1333,6 +1335,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // Handler for status changes that sets the flag
   const handleStatusChange = (newStatus: string) => {
+    if (canManageStatuses && newStatus === "pending") {
+      toast.error("Pending is reserved for patient carts.");
+      return;
+    }
     setAppointmentStatus(newStatus);
     setStatusChangedByUser(1);
   };
@@ -1363,43 +1369,18 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const getProjectedStatus = () => {
     const amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
     const amountPaid = parseFloat(amountPaidRaw) || 0;
-    
-    // If user manually changed status, respect that choice
-    if (statusChangedByUser === 1) {
-      return appointmentStatus;
-    }
 
-    if (appointmentToEdit) {
-      // Editing existing appointment - consider previously paid + new payment
-      const newTotalPaid = amountPaid > 0 ? previouslyPaidAmount + amountPaid : previouslyPaidAmount;
-      const newBalance = Math.max(0, finalPrice - newTotalPaid);
-
-      // Auto-determine status based on payment balance
-      if (newBalance <= 0) {
-        // Fully paid
-        return 'scheduled';
-      } else if (newTotalPaid > 0) {
-        // Partially paid
-        return 'reserved';
-      } else {
-        // No payment yet - keep current status
-        return appointmentStatus || 'pending';
-      }
-    } else {
-      // Creating new appointment
-      const balance = Math.max(0, finalPrice - amountPaid);
-
-      if (balance <= 0) {
-        // Fully paid
-        return 'scheduled';
-      } else if (amountPaid > 0) {
-        // Partially paid
-        return 'reserved';
-      } else {
-        // No payment
-        return 'pending';
-      }
-    }
+    return getProjectedBookingStatus({
+      userRole: user?.role,
+      bookingMode,
+      isEditing: Boolean(appointmentToEdit),
+      statusChangedByUser: statusChangedByUser === 1,
+      selectedStatus: appointmentStatus,
+      existingStatus: appointmentToEdit?.status,
+      amountPaid,
+      previouslyPaidAmount,
+      totalPrice: finalPrice,
+    });
   };
 
   // Calculate what the final payment status will be for display in summary
@@ -2055,23 +2036,19 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                         )}
                       </div>
 
-                      {/* Status - Dropdown for Admin/Doctor, Badge for Patient */}
+                      {/* Status - aligned with duration control */}
                       <div className="flex items-center justify-between gap-3 pt-2">
                         <div className="flex items-center gap-3">
                           <Award className="h-4 w-4 text-blue-600" />
                           <span className="text-xs font-bold text-gray-600 uppercase">Status</span>
                         </div>
-                        {canManageStatuses ? (
-                          <Select value={appointmentStatus} onValueChange={handleStatusChange}>
-                            <SelectTrigger className={`h-8 px-3 rounded-full text-xs font-bold border-0 w-auto ${
-                              appointmentStatuses.find(s => s.value === appointmentStatus)?.bgColor || 'bg-gray-100'
-                            } ${
-                              appointmentStatuses.find(s => s.value === appointmentStatus)?.textColor || 'text-gray-700'
-                            }`}>
+                        {canEditAppointmentStatus ? (
+                          <Select value={getFinalAppointmentStatus()} onValueChange={handleStatusChange} disabled={appointmentStatusOptions.length === 0}>
+                            <SelectTrigger className="h-9 w-auto rounded-lg border-gray-300 bg-white px-3 text-sm font-semibold text-gray-900 transition-colors hover:bg-gray-50">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              {appointmentStatuses.map((status: any) => (
+                              {appointmentStatusOptions.map((status) => (
                                 <SelectItem key={status.value} value={status.value}>
                                   {status.label}
                                 </SelectItem>
@@ -2079,12 +2056,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                             </SelectContent>
                           </Select>
                         ) : (
-                          <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold ${
-                            appointmentStatuses.find(s => s.value === appointmentStatus)?.bgColor || 'bg-gray-100'
-                          } ${
-                            appointmentStatuses.find(s => s.value === appointmentStatus)?.textColor || 'text-gray-700'
-                          }`}>
-                            {getStatusLabel(appointmentStatus, appointmentStatuses)}
+                          <span className="inline-flex h-9 items-center rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900">
+                            {getStatusLabel(getFinalAppointmentStatus(), appointmentStatusOptions)}
                           </span>
                         )}
                       </div>
@@ -2092,19 +2065,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <Label className="text-sm font-bold text-gray-700">
-                    {isPatientLevelBookingMode ? 'My Notes' : 'Notes (Optional)'}
-                  </Label>
-                  <Textarea 
-                    placeholder={isPatientLevelBookingMode ? "Add any notes for your dentist here..." : "Any details you'd like to add..."}
-                    value={notes} 
-                    onChange={(e: any) => setNotes(e.target.value)} 
-                    className="resize-none rounded-lg border-gray-200 focus:ring-blue-500 focus:border-blue-500" 
-                    rows={3} 
-                    disabled={isPatientReadonly && isCancelled}
-                  />
-                </div>
+                <CompactNotesField
+                  id="booking-notes"
+                  label={isPatientLevelBookingMode ? 'My Notes' : 'Notes (Optional)'}
+                  placeholder={isPatientLevelBookingMode ? "Add any notes for your dentist here..." : "Any details you'd like to add..."}
+                  value={notes}
+                  onChange={setNotes}
+                  disabled={isPatientReadonly && isCancelled}
+                />
 
                 {/* Appointment History Logs */}
                 {isEditMode && (appointmentLogs.length > 0 || paymentLogs.length > 0) && (
@@ -2462,16 +2430,15 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   </div>
                 </div>
 
-                {/* Status Field - Only for Admin/Doctor in Edit Mode */}
-                {/* {isEditMode && (user?.role === "admin" || user?.role === "doctor") && (
+                {isEditMode && canEditAppointmentStatus && (
                   <div className="space-y-2">
-                    <Label htmlFor="appointmentStatus">Appointment Status</Label>
-                    <Select value={appointmentStatus} onValueChange={handleStatusChange}>
+                    <Label htmlFor="appointmentStatus" className="text-sm font-semibold">Appointment Status</Label>
+                    <Select value={getFinalAppointmentStatus()} onValueChange={handleStatusChange} disabled={appointmentStatusOptions.length === 0}>
                       <SelectTrigger id="appointmentStatus">
                         <SelectValue placeholder="Select appointment status" />
                       </SelectTrigger>
                       <SelectContent>
-                        {appointmentStatuses.map((status: any) => (
+                        {appointmentStatusOptions.map((status) => (
                           <SelectItem key={status.value} value={status.value}>
                             {status.label}
                           </SelectItem>
@@ -2479,7 +2446,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                       </SelectContent>
                     </Select>
                   </div>
-                )} */}
+                )}
 
                 {/* Payment Status Display - Read-only for Patient, Editable for Admin/Doctor */}
                 {isEditMode && (
@@ -2622,13 +2589,32 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 )}
                 <div className="flex justify-between">
                   <span className="text-gray-600">Status:</span>
-                  <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-bold ${
-                    appointmentStatuses.find(s => s.value === getFinalAppointmentStatus())?.bgColor || 'bg-gray-100'
-                  } ${
-                    appointmentStatuses.find(s => s.value === getFinalAppointmentStatus())?.textColor || 'text-gray-700'
-                  }`}>
-                    {getStatusLabel(getFinalAppointmentStatus(), appointmentStatuses)}
-                  </span>
+                  {canEditAppointmentStatus ? (
+                    <Select value={getFinalAppointmentStatus()} onValueChange={handleStatusChange} disabled={appointmentStatusOptions.length === 0}>
+                      <SelectTrigger className={`h-8 w-auto min-w-[120px] rounded px-2 text-xs font-bold border-0 ${
+                        getAppointmentStatusOption(getFinalAppointmentStatus())?.bgColor || 'bg-gray-100'
+                      } ${
+                        getAppointmentStatusOption(getFinalAppointmentStatus())?.textColor || 'text-gray-700'
+                      }`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {appointmentStatusOptions.map((status) => (
+                          <SelectItem key={status.value} value={status.value}>
+                            {status.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-bold ${
+                      getAppointmentStatusOption(getFinalAppointmentStatus())?.bgColor || 'bg-gray-100'
+                    } ${
+                      getAppointmentStatusOption(getFinalAppointmentStatus())?.textColor || 'text-gray-700'
+                    }`}>
+                      {getStatusLabel(getFinalAppointmentStatus(), appointmentStatusOptions)}
+                    </span>
+                  )}
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Payment:</span>
@@ -2641,6 +2627,17 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                     {getPaymentStatusLabel(getProjectedPaymentStatus(), paymentStatuses)}
                   </span>
                 </div>
+                <CompactNotesField
+                  id="booking-summary-notes"
+                  label="Notes:"
+                  placeholder="No notes added."
+                  value={notes}
+                  onChange={setNotes}
+                  disabled={isPatientReadonly && isCancelled}
+                  className="border-t border-blue-100 pt-2 mt-2"
+                  labelClassName="text-sm font-normal text-gray-600"
+                  textareaClassName="rounded-md bg-white/70 text-sm font-semibold"
+                />
                 <div className="border-t border-blue-100 pt-2 mt-2">
                   <div className="flex justify-between font-bold">
                     <span>Total Price:</span>
