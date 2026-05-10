@@ -16,13 +16,20 @@ import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { formatTimeTo12h, TIME_SLOTS } from "@/lib/time-slots";
 import { APPOINTMENT_PRICES, getAppointmentTypeName } from "@/lib/appointmentTypes";
 import { toast } from 'sonner';
-import useSharedBookingLogic, { getBookingActor, getBookingConflictWarnings, getProjectedBookingStatus } from './sharedBookingLogic';
+import useSharedBookingLogic, {
+  PAST_APPOINTMENT_STATUS_VALUES,
+  getBookingActor,
+  getBookingConflictWarnings,
+  getDefaultPastAppointmentDate,
+  getProjectedBookingStatus,
+  getProjectedPaymentStatus,
+} from './sharedBookingLogic';
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
 import { useDoctors } from "@/hooks/useDoctors";
 import { cachePublicBookingPatient, createPublicBookingAppointment, getCachedPublicBookingPatients } from "@/lib/publicBookingCache";
-import type { BookingMode } from "./sharedBookingLogic";
+import type { BookingCreationMode, BookingMode } from "./sharedBookingLogic";
 
 // Helper function to get appointment type index from name
 const getAppointmentTypeIndex = (typeName: string): number => {
@@ -83,6 +90,7 @@ interface BookingModalProps {
   appointmentToEdit?: any; // optional appointment object to edit
   title?: string; // optional override for dialog title
   bookingMode?: BookingMode;
+  appointmentCreationMode?: BookingCreationMode;
 }
 
 // Map appointment types to default durations (in minutes)
@@ -96,7 +104,7 @@ const appointmentTypeDurations: Record<string, number> = {
   "Other": 30,
 };
 
-export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, defaultPatientId, onBooked, appointmentToEdit, title, bookingMode = "standard" }: BookingModalProps) {
+export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, defaultPatientId, onBooked, appointmentToEdit, title, bookingMode = "standard", appointmentCreationMode = "standard" }: BookingModalProps) {
   const { user } = useAuth();
   const { doctors } = useDoctors(undefined, { publicBooking: bookingMode === "public" && !user?.role });
   const { addAppointment, updateAppointment, isPaymentFlow, openAddPatientModal, lastAddedPatient, lastAddedPatientAt } = useAppointmentModal();
@@ -264,6 +272,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const isCancelled = (appointmentStatus || appointmentToEdit?.status || '').toLowerCase() === 'cancelled';
   const isPatientReadonly = Boolean(appointmentToEdit && user?.role === 'patient');
   const isEditMode = Boolean(appointmentToEdit);
+  const isPastAppointmentMode = appointmentCreationMode === "past" && !appointmentToEdit;
   const {
     isPublicBookingMode,
     isPatientLevelBookingMode,
@@ -276,14 +285,20 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     bookingMode,
   });
   const canEditAppointmentStatus = canManageStatuses && !isPatientReadonly;
-  const currentAppointmentStatusValue = appointmentStatus || appointmentToEdit?.status || "scheduled";
+  const defaultAppointmentStatusValue = isPastAppointmentMode ? "tbd" : "scheduled";
+  const currentAppointmentStatusValue = appointmentStatus || appointmentToEdit?.status || defaultAppointmentStatusValue;
   const baseAppointmentStatusOptions = appointmentStatuses.length > 0 ? appointmentStatuses : defaultAppointmentStatusOptions;
   const selectableAppointmentStatusOptions = canManageStatuses
-    ? baseAppointmentStatusOptions.filter((status) => status.value !== "pending")
+    ? baseAppointmentStatusOptions.filter((status) =>
+        isPastAppointmentMode
+          ? PAST_APPOINTMENT_STATUS_VALUES.includes(status.value as typeof PAST_APPOINTMENT_STATUS_VALUES[number])
+          : status.value !== "pending"
+      )
     : baseAppointmentStatusOptions;
   const appointmentStatusOptions: AppointmentStatusOption[] =
     currentAppointmentStatusValue &&
     !(canManageStatuses && currentAppointmentStatusValue === "pending") &&
+    !(isPastAppointmentMode && !PAST_APPOINTMENT_STATUS_VALUES.includes(currentAppointmentStatusValue as typeof PAST_APPOINTMENT_STATUS_VALUES[number])) &&
     !selectableAppointmentStatusOptions.some((status) => status.value === currentAppointmentStatusValue)
       ? [
           {
@@ -1266,14 +1281,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setAmountToPay('');
       setAppointmentStatus(appointmentToEdit.status || 'scheduled');
       setPaymentStatus(appointmentToEdit.paymentStatus || 'unpaid');
-      setPaymentMethod(appointmentToEdit.paymentMethod || '');
+      setPaymentMethod(appointmentToEdit.paymentMethod || (appointmentToEdit.paymentStatus === 'pay-at-clinic' ? 'Pay at Clinic' : ''));
       // Reset the flag when opening for edit
       setStatusChangedByUser(0);
       setPaymentStatusChangedByUser(0);
-      // Set the modal step based on isPaymentFlow flag
+      // Set the modal step based on isPaymentFlow flag or if we are editing
       // Only skip to payment step if explicitly marked as payment flow (e.g., "Pay Now" click)
-      // Otherwise, always start with details step
-      setModalStep(isPaymentFlow ? 'payment' : 'details');
+      // or if we are viewing/editing an existing appointment
+      setModalStep(isPaymentFlow || appointmentToEdit ? 'payment' : 'details');
       setIsRescheduling(false);
     } else {
       // Reset form when creating new appointment
@@ -1285,10 +1300,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setDiscount('0');
       setCustomPrice('0');
       setNotes('');
-      setSelectedDate(defaultDate ?? new Date());
+      setSelectedDate(defaultDate ?? (isPastAppointmentMode ? getDefaultPastAppointmentDate() : new Date()));
       setSelectedTime(defaultTime ?? '');
       setAmountToPay('');
-      setAppointmentStatus('scheduled');
+      setAppointmentStatus(isPastAppointmentMode ? 'tbd' : 'scheduled');
       setPaymentStatus('unpaid');
       setPaymentMethod('');
       // Reset the flag when opening for new appointment
@@ -1296,7 +1311,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setPaymentStatusChangedByUser(0);
       setModalStep('details');
     }
-  }, [open, appointmentToEdit, defaultDate, defaultTime, defaultPatientId]);
+  }, [open, appointmentToEdit, defaultDate, defaultTime, defaultPatientId, isPastAppointmentMode]);
 
   // Derived display values for schedule block
   const displayDoctor = formatDoctorName(appointmentToEdit?.doctor || selectedDoctor || doctorName);
@@ -1309,6 +1324,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       : 0;
   const discountedPrice = Math.max(0, finalPrice - Number(discount));
   const remainingBalance = Math.max(0, discountedPrice - previouslyPaidAmount);
+  const paymentAmountNow = paymentMethod === "Pay at Clinic" ? 0 : (parseFloat(amountToPay) || 0);
   const bookingConflictWarnings = getBookingConflictWarnings({
     durationConflict,
     patientConflict,
@@ -1331,10 +1347,16 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     durationConflict,
     patientConflict,
     allowConflictSummary: true,
+    scheduleMode: isPastAppointmentMode ? 'past' : 'standard',
   });
 
   // Handler for status changes that sets the flag
   const handleStatusChange = (newStatus: string) => {
+    if (isPastAppointmentMode && !PAST_APPOINTMENT_STATUS_VALUES.includes(newStatus as typeof PAST_APPOINTMENT_STATUS_VALUES[number])) {
+      toast.error("Past appointments can only be Cancelled, Completed, or TBD.");
+      return;
+    }
+
     if (canManageStatuses && newStatus === "pending") {
       toast.error("Pending is reserved for patient carts.");
       return;
@@ -1367,6 +1389,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // Calculate what the final status will be for display in summary
   const getProjectedStatus = () => {
+    if (isPastAppointmentMode) {
+      return PAST_APPOINTMENT_STATUS_VALUES.includes(appointmentStatus as typeof PAST_APPOINTMENT_STATUS_VALUES[number])
+        ? appointmentStatus
+        : 'tbd';
+    }
+
     const amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
     const amountPaid = parseFloat(amountPaidRaw) || 0;
 
@@ -1379,34 +1407,24 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       existingStatus: appointmentToEdit?.status,
       amountPaid,
       previouslyPaidAmount,
-      totalPrice: finalPrice,
+      totalPrice: discountedPrice,
     });
   };
 
   // Calculate what the final payment status will be for display in summary
-  const getProjectedPaymentStatus = () => {
-    // If payment method is "Pay at Clinic", return that status
-    if (paymentMethod === "Pay at Clinic") {
-      return 'pay-at-clinic';
-    }
-
+  const getFinalPaymentStatus = () => {
     const amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
-    const amountPaid = parseFloat(amountPaidRaw) || 0;
-    
-    if (paymentStatusChangedByUser === 1) {
-      return paymentStatus;
-    }
+    const amountPaid = paymentMethod === "Pay at Clinic" ? 0 : (parseFloat(amountPaidRaw) || 0);
 
-    const newTotalPaid = amountPaid > 0 ? previouslyPaidAmount + amountPaid : previouslyPaidAmount;
-    const newBalance = Math.max(0, finalPrice - newTotalPaid);
-
-    if (newBalance <= 0) {
-      return 'paid';
-    } else if (newTotalPaid > 0) {
-      return 'half-paid';
-    } else {
-      return 'unpaid';
-    }
+    return getProjectedPaymentStatus({
+      paymentMethod,
+      statusChangedByUser: paymentStatusChangedByUser === 1,
+      selectedStatus: paymentStatus,
+      existingStatus: appointmentToEdit?.paymentStatus,
+      amountPaid,
+      previouslyPaidAmount,
+      totalPrice: discountedPrice,
+    });
   };
 
   // Calculate the FINAL appointment status
@@ -1466,7 +1484,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         // If editing, ADD the new payment to existing totalPaid (only if amountPaid > 0)
         const previouslyPaid = appointmentToEdit.totalPaid || 0;
         const newTotalPaid = amountPaid > 0 ? previouslyPaid + amountPaid : previouslyPaid;
-        const newBalance = Math.max(0, finalPrice - newTotalPaid);
+        const newBalance = Math.max(0, discountedPrice - newTotalPaid);
 
         console.log('[BookingModal Payment] Updating appointment:', {
           appointmentId: appointmentToEdit.id,
@@ -1477,7 +1495,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         });
 
         // Determine payment status
-        const updatePaymentStatus = getProjectedPaymentStatus();
+        const updatePaymentStatus = getFinalPaymentStatus();
         
         // Determine appointment status using the new function that includes override logic
         const updateAppointmentStatus = getFinalAppointmentStatus();
@@ -1533,14 +1551,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       } else {
         // create new appointment
         // Determine payment status
-        const paymentStatus = getProjectedPaymentStatus();
+        const paymentStatus = getFinalPaymentStatus();
         
         // Determine appointment status using the new function that includes override logic
         const autoStatus = getFinalAppointmentStatus();
 
-        console.log('[BookingModal Payment] Calculated status:', { paymentStatus, autoStatus, amountPaid, finalPrice });
+        console.log('[BookingModal Payment] Calculated status:', { paymentStatus, autoStatus, amountPaid, finalPrice, discountedPrice });
 
-        const newBalance = Math.max(0, finalPrice - amountPaid);
+        const newBalance = Math.max(0, discountedPrice - amountPaid);
 
         console.log('[BookingModal Payment] Creating new appointment:', {
           selectedPatient,
@@ -2456,18 +2474,18 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                       <div className="p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-between">
                         <span className="text-sm font-medium text-gray-700">Status:</span>
                         <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold ${
-                          paymentStatus === 'paid' ? 'bg-emerald-100 text-emerald-700' :
-                          paymentStatus === 'unpaid' ? 'bg-red-100 text-red-700' :
-                          paymentStatus === 'half-paid' ? 'bg-amber-100 text-amber-700' :
-                          paymentStatus === 'overdue' ? 'bg-orange-100 text-orange-700' :
-                          paymentStatus === 'pay-at-clinic' ? 'bg-blue-100 text-blue-700' :
+                          getFinalPaymentStatus() === 'paid' ? 'bg-emerald-100 text-emerald-700' :
+                          getFinalPaymentStatus() === 'unpaid' ? 'bg-red-100 text-red-700' :
+                          getFinalPaymentStatus() === 'half-paid' ? 'bg-amber-100 text-amber-700' :
+                          getFinalPaymentStatus() === 'overdue' ? 'bg-orange-100 text-orange-700' :
+                          getFinalPaymentStatus() === 'pay-at-clinic' ? 'bg-blue-100 text-blue-700' :
                           'bg-gray-100 text-gray-700'
                         }`}>
-                          {getPaymentStatusLabel(paymentStatus, paymentStatuses)}
+                          {getPaymentStatusLabel(getFinalPaymentStatus(), paymentStatuses)}
                         </span>
                       </div>
                     ) : (
-                      <Select value={paymentStatus} onValueChange={handlePaymentStatusChange}>
+                      <Select value={getFinalPaymentStatus()} onValueChange={handlePaymentStatusChange}>
                         <SelectTrigger id="paymentStatus">
                           <SelectValue placeholder="Select payment status" />
                         </SelectTrigger>
@@ -2617,14 +2635,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   )}
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600">Payment:</span>
+                  <span className="text-gray-600">Payment Status:</span>
                   <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-bold ${
-                    getProjectedPaymentStatus() === 'paid' ? 'bg-emerald-100 text-emerald-700' :
-                    getProjectedPaymentStatus() === 'unpaid' ? 'bg-red-100 text-red-700' :
-                    getProjectedPaymentStatus() === 'half-paid' ? 'bg-amber-100 text-amber-700' :
+                    getFinalPaymentStatus() === 'paid' ? 'bg-emerald-100 text-emerald-700' :
+                    getFinalPaymentStatus() === 'unpaid' ? 'bg-red-100 text-red-700' :
+                    getFinalPaymentStatus() === 'half-paid' ? 'bg-amber-100 text-amber-700' :
                     'bg-gray-100 text-gray-700'
                   }`}>
-                    {getPaymentStatusLabel(getProjectedPaymentStatus(), paymentStatuses)}
+                    {getPaymentStatusLabel(getFinalPaymentStatus(), paymentStatuses)}
                   </span>
                 </div>
                 <CompactNotesField
@@ -2651,7 +2669,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                       </div>
                       <div className="flex justify-between text-green-600 font-bold text-lg">
                         <span>Final Price:</span>
-                        <span>₱{(finalPrice - Number(discount)).toLocaleString()}</span>
+                        <span>₱{discountedPrice.toLocaleString()}</span>
                       </div>
                     </>
                   )}
@@ -2664,11 +2682,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 )}
                 <div className="flex justify-between text-green-700 font-semibold">
                   <span>Amount to Pay Now:</span>
-                  <span>₱{(parseFloat(amountToPay) || 0).toLocaleString()}</span>
+                  <span>₱{paymentAmountNow.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between text-blue-700 font-semibold">
                   <span>Remaining Balance:</span>
-                  <span>₱{Math.max(0, (finalPrice - Number(discount)) - previouslyPaidAmount - (parseFloat(amountToPay) || 0)).toLocaleString()}</span>
+                  <span>₱{Math.max(0, discountedPrice - previouslyPaidAmount - paymentAmountNow).toLocaleString()}</span>
                 </div>
               </div>
             </div>
@@ -2705,6 +2723,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         doctorName={selectedDoctor}
         selectedTime={selectedTime}
         duration={duration}
+        dateSelectionMode={isPastAppointmentMode ? "past" : "standard"}
       />
 
       {/* Time Picker Modal */}
@@ -2719,6 +2738,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         onDateChange={setSelectedDate}
         excludeAppointmentId={appointmentToEdit?.id}
         patientId={selectedPatient}
+        dateSelectionMode={isPastAppointmentMode ? "past" : "standard"}
       />
     </>
    );

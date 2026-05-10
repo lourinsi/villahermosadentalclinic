@@ -4,6 +4,20 @@ type BookingFlow = 'details-payment' | 'multi-step';
 type BookingStep = 'details' | 'patient' | 'schedule' | 'treatment' | 'doctor' | 'payment';
 type BookingActorRole = 'public' | 'patient' | 'admin' | 'doctor' | '';
 export type BookingMode = 'standard' | 'public';
+export type BookingCreationMode = 'standard' | 'past';
+
+export const PAST_APPOINTMENT_STATUS_VALUES = ['cancelled', 'completed', 'tbd'] as const;
+
+export function getDefaultPastAppointmentDate(now: Date = new Date()) {
+  const date = new Date(now);
+  date.setDate(date.getDate() - 1);
+  date.setHours(9, 0, 0, 0);
+  return date;
+}
+
+export function getDefaultPastAppointmentTime() {
+  return '09:00';
+}
 
 export type BookingConflictWarning = {
   type: 'duration' | 'patient';
@@ -52,6 +66,7 @@ type UseSharedBookingLogicArgs = {
   patientConflict?: string;
   skipDoctorStep?: boolean;
   allowConflictSummary?: boolean;
+  scheduleMode?: BookingCreationMode;
 };
 
 export function getBookingConflictWarnings({
@@ -147,6 +162,43 @@ export function getProjectedBookingStatus({
   return isStaffBookingMode ? 'reserved' : 'pending';
 }
 
+export function getProjectedPaymentStatus({
+  paymentMethod,
+  statusChangedByUser,
+  selectedStatus,
+  existingStatus,
+  amountPaid,
+  previouslyPaidAmount,
+  totalPrice,
+}: {
+  paymentMethod?: string | null;
+  statusChangedByUser: boolean;
+  selectedStatus?: string | null;
+  existingStatus?: string | null;
+  amountPaid: number;
+  previouslyPaidAmount: number;
+  totalPrice: number;
+}) {
+  if (String(paymentMethod || '').trim().toLowerCase() === 'pay at clinic') {
+    return 'pay-at-clinic';
+  }
+
+  if (statusChangedByUser) {
+    return selectedStatus || existingStatus || 'unpaid';
+  }
+
+  const safeAmountPaid = Number.isFinite(amountPaid) ? Math.max(0, amountPaid) : 0;
+  const safePreviouslyPaidAmount = Number.isFinite(previouslyPaidAmount) ? Math.max(0, previouslyPaidAmount) : 0;
+  const safeTotalPrice = Number.isFinite(totalPrice) ? Math.max(0, totalPrice) : 0;
+  const newTotalPaid = safeAmountPaid > 0 ? safePreviouslyPaidAmount + safeAmountPaid : safePreviouslyPaidAmount;
+  const newBalance = Math.max(0, safeTotalPrice - newTotalPaid);
+
+  if (newBalance <= 0) return 'paid';
+  if (newTotalPaid > 0) return 'half-paid';
+
+  return 'unpaid';
+}
+
 function safeToastError(toast: Toast, msg: string) {
   try {
     if (!toast) return;
@@ -173,8 +225,20 @@ export default function useSharedBookingLogic({
   patientConflict,
   skipDoctorStep = false,
   allowConflictSummary = false,
+  scheduleMode = 'standard',
 }: UseSharedBookingLogicArgs) {
   const isDetailsPaymentFlow = flow === 'details-payment' || modalStep === 'details';
+
+  function getSelectedAppointmentDateTime() {
+    if (!selectedDate || !selectedTime) return null;
+
+    const [hours, minutes] = selectedTime.split(':').map(Number);
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+
+    const appointmentDateTime = new Date(selectedDate);
+    appointmentDateTime.setHours(hours, minutes, 0, 0);
+    return appointmentDateTime;
+  }
 
   function validatePatient() {
     if (!selectedPatient) {
@@ -205,12 +269,28 @@ export default function useSharedBookingLogic({
       return false;
     }
 
+    if (!validateScheduleWindow()) return false;
+
     return validateScheduleAvailability();
   }
 
   function validateScheduleSelection() {
     if (!selectedDate || !selectedTime) {
       safeToastError(toast, 'Please choose a date and time for the appointment.');
+      return false;
+    }
+
+    return validateScheduleWindow();
+  }
+
+  function validateScheduleWindow() {
+    if (scheduleMode !== 'past') return true;
+
+    const appointmentDateTime = getSelectedAppointmentDateTime();
+    if (!appointmentDateTime) return true;
+
+    if (appointmentDateTime.getTime() > Date.now()) {
+      safeToastError(toast, 'Past appointment entries must use a date and time that have already passed.');
       return false;
     }
 

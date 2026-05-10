@@ -23,6 +23,7 @@ import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { toast } from "sonner";
 import { CheckCircle, DollarSign } from "lucide-react";
 import { Appointment } from "@/hooks/useAppointments";
+import { getAuthHeaders } from "@/lib/auth-headers";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 
 export function RecordPaymentModal() {
@@ -87,7 +88,8 @@ export function RecordPaymentModal() {
 
       const res = await fetch(`http://localhost:3001/api/payments`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        credentials: "include",
         body: JSON.stringify(body),
       });
 

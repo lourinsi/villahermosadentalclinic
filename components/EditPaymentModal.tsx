@@ -23,6 +23,7 @@ import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { toast } from "sonner";
 import { DollarSign, Edit } from "lucide-react";
 import { Appointment } from "@/hooks/useAppointments";
+import { getAuthHeaders } from "@/lib/auth-headers";
 
 export function EditPaymentModal() {
   const {
@@ -95,7 +96,10 @@ export function EditPaymentModal() {
         // Fetch appointments if not provided by context
         const fetchAppointments = async () => {
           try {
-            const res = await fetch(`http://localhost:3001/api/appointments?patientId=${targetPatientId}`);
+            const res = await fetch(`http://localhost:3001/api/appointments?patientId=${targetPatientId}`, {
+              headers: getAuthHeaders({ "Content-Type": "application/json" }),
+              credentials: "include",
+            });
             const json = await res.json();
             if (json.success) {
               setAppointments(json.data);
@@ -115,7 +119,10 @@ export function EditPaymentModal() {
       const fetchPaymentMethods = async () => {
         try {
           setIsFetchingPaymentMethods(true);
-          const res = await fetch(`http://localhost:3001/api/payment-methods`);
+          const res = await fetch(`http://localhost:3001/api/payment-methods`, {
+            headers: getAuthHeaders({ "Content-Type": "application/json" }),
+            credentials: "include",
+          });
           const json = await res.json();
           if (json.success) {
             // paymentMethods state removed as it was unused
@@ -161,7 +168,8 @@ export function EditPaymentModal() {
 
       const res = await fetch(`http://localhost:3001/api/payments/${paymentId}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        credentials: "include",
         body: JSON.stringify(body),
       });
 

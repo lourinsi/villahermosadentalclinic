@@ -17,13 +17,20 @@ import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { formatTimeTo12h, TIME_SLOTS } from "@/lib/time-slots";
 import { APPOINTMENT_PRICES, getAppointmentTypeName } from "@/lib/appointmentTypes";
 import { toast } from 'sonner';
-import useSharedBookingLogic, { getBookingActor, getBookingConflictWarnings, getProjectedBookingStatus } from './sharedBookingLogic';
+import useSharedBookingLogic, {
+  PAST_APPOINTMENT_STATUS_VALUES,
+  getBookingActor,
+  getBookingConflictWarnings,
+  getDefaultPastAppointmentDate,
+  getProjectedBookingStatus,
+  getProjectedPaymentStatus,
+} from './sharedBookingLogic';
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
 import { useDoctors } from "@/hooks/useDoctors";
 import { cachePublicBookingPatient, createPublicBookingAppointment, getCachedPublicBookingPatients } from "@/lib/publicBookingCache";
-import type { BookingMode } from "./sharedBookingLogic";
+import type { BookingCreationMode, BookingMode } from "./sharedBookingLogic";
 
 type ImprovedBookingStep = "patient" | "schedule" | "doctor" | "treatment" | "payment";
 
@@ -63,6 +70,14 @@ const defaultAppointmentStatusOptions: AppointmentStatusOption[] = [
   { key: 4, value: "cancelled", label: "Cancelled", description: "Appointment cancelled", bgColor: "bg-red-100", textColor: "text-red-700" },
   { key: 5, value: "completed", label: "Completed", description: "Appointment completed", bgColor: "bg-blue-100", textColor: "text-blue-700" },
   { key: 6, value: "tbd", label: "TBD", description: "Past appointment awaiting completion status", bgColor: "bg-red-100", textColor: "text-red-700" },
+];
+
+const defaultPaymentStatusOptions: PaymentStatusOption[] = [
+  { key: 1, value: "paid", label: "Paid", description: "Payment completed in full", bgColor: "bg-emerald-50", textColor: "text-emerald-700" },
+  { key: 2, value: "unpaid", label: "Unpaid", description: "Payment not yet made", bgColor: "bg-gray-50", textColor: "text-gray-700" },
+  { key: 3, value: "half-paid", label: "Half Paid", description: "Partial payment received", bgColor: "bg-orange-50", textColor: "text-orange-700" },
+  { key: 4, value: "overdue", label: "Overdue", description: "Payment past due date", bgColor: "bg-red-50", textColor: "text-red-700" },
+  { key: 5, value: "pay-at-clinic", label: "Pay at Clinic", description: "Payment to be made at clinic", bgColor: "bg-blue-50", textColor: "text-blue-700" },
 ];
 
 // Helper function to format doctor name consistently
@@ -223,6 +238,7 @@ interface BookingModalProps {
   appointmentToEdit?: any; // optional appointment object to edit
   title?: string; // optional override for dialog title
   bookingMode?: BookingMode;
+  appointmentCreationMode?: BookingCreationMode;
 }
 
 // Map appointment types to default durations (in minutes)
@@ -236,7 +252,7 @@ const appointmentTypeDurations: Record<string, number> = {
   "Other": 30,
 };
 
-export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, defaultPatientId, onBooked, onDeleted, appointmentToEdit, title, bookingMode = "standard" }: BookingModalProps) {
+export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, defaultPatientId, onBooked, onDeleted, appointmentToEdit, title, bookingMode = "standard", appointmentCreationMode = "standard" }: BookingModalProps) {
   const { user } = useAuth();
   const { doctors } = useDoctors(undefined, { publicBooking: bookingMode === "public" && !user?.role });
   const { addAppointment, updateAppointment, isPaymentFlow, openAddPatientModal, lastAddedPatient, lastAddedPatientAt } = useAppointmentModal();
@@ -393,6 +409,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const isCancelled = (appointmentStatus || appointmentToEdit?.status || '').toLowerCase() === 'cancelled';
   const isPatientReadonly = Boolean(appointmentToEdit && user?.role === 'patient');
   const isEditMode = Boolean(appointmentToEdit);
+  const isPastAppointmentMode = appointmentCreationMode === "past" && !appointmentToEdit;
   const {
     isPublicBookingMode,
     canCreatePatients,
@@ -405,14 +422,20 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     bookingMode,
   });
   const canEditAppointmentStatus = canManageStatuses && !isPatientReadonly;
-  const currentAppointmentStatusValue = appointmentStatus || appointmentToEdit?.status || "scheduled";
+  const defaultAppointmentStatusValue = isPastAppointmentMode ? "tbd" : "scheduled";
+  const currentAppointmentStatusValue = appointmentStatus || appointmentToEdit?.status || defaultAppointmentStatusValue;
   const baseAppointmentStatusOptions = appointmentStatuses.length > 0 ? appointmentStatuses : defaultAppointmentStatusOptions;
   const selectableAppointmentStatusOptions = canManageStatuses
-    ? baseAppointmentStatusOptions.filter((status) => status.value !== "pending")
+    ? baseAppointmentStatusOptions.filter((status) =>
+        isPastAppointmentMode
+          ? PAST_APPOINTMENT_STATUS_VALUES.includes(status.value as typeof PAST_APPOINTMENT_STATUS_VALUES[number])
+          : status.value !== "pending"
+      )
     : baseAppointmentStatusOptions;
   const appointmentStatusOptions: AppointmentStatusOption[] =
     currentAppointmentStatusValue &&
     !(canManageStatuses && currentAppointmentStatusValue === "pending") &&
+    !(isPastAppointmentMode && !PAST_APPOINTMENT_STATUS_VALUES.includes(currentAppointmentStatusValue as typeof PAST_APPOINTMENT_STATUS_VALUES[number])) &&
     !selectableAppointmentStatusOptions.some((status) => status.value === currentAppointmentStatusValue)
       ? [
           {
@@ -428,6 +451,31 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       : selectableAppointmentStatusOptions;
   const getAppointmentStatusOption = (statusValue: string) =>
     appointmentStatusOptions.find((status) => status.value === statusValue);
+  const currentPaymentStatusValue = paymentStatus || appointmentToEdit?.paymentStatus || "unpaid";
+  const fetchedPaymentStatusOptions = paymentStatuses.length > 0 ? paymentStatuses : defaultPaymentStatusOptions;
+  const basePaymentStatusOptions = [
+    ...fetchedPaymentStatusOptions,
+    ...defaultPaymentStatusOptions.filter(
+      (fallbackStatus) => !fetchedPaymentStatusOptions.some((status) => status.value === fallbackStatus.value)
+    ),
+  ];
+  const paymentStatusOptions: PaymentStatusOption[] =
+    currentPaymentStatusValue &&
+    !basePaymentStatusOptions.some((status) => status.value === currentPaymentStatusValue)
+      ? [
+          {
+            key: 0,
+            value: currentPaymentStatusValue,
+            label: getPaymentStatusLabel(currentPaymentStatusValue, basePaymentStatusOptions),
+            description: "Current payment status",
+            bgColor: "bg-gray-100",
+            textColor: "text-gray-700",
+          },
+          ...basePaymentStatusOptions,
+        ]
+      : basePaymentStatusOptions;
+  const getPaymentStatusOption = (statusValue: string) =>
+    paymentStatusOptions.find((status) => status.value === statusValue);
 
   useEffect(() => {
     if (!open || appointmentToEdit || !canCreatePatients || !lastAddedPatient || !lastAddedPatientAt) return;
@@ -1319,14 +1367,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setAmountToPay('');
       setAppointmentStatus(appointmentToEdit.status || 'scheduled');
       setPaymentStatus(appointmentToEdit.paymentStatus || 'unpaid');
-      setPaymentMethod(appointmentToEdit.paymentMethod || '');
+      setPaymentMethod(appointmentToEdit.paymentMethod || (appointmentToEdit.paymentStatus === 'pay-at-clinic' ? 'Pay at Clinic' : ''));
       // Reset the flag when opening for edit
       setStatusChangedByUser(0);
       setPaymentStatusChangedByUser(0);
-      // Set the modal step based on isPaymentFlow flag
+      // Set the modal step based on isPaymentFlow flag or if we are editing
       // Only skip to payment step if explicitly marked as payment flow (e.g., "Pay Now" click)
-      // Otherwise, start at the first step: patient selection
-      setModalStep(isPaymentFlow ? 'payment' : 'patient');
+      // or if we are viewing/editing an existing appointment
+      setModalStep(isPaymentFlow || appointmentToEdit ? 'payment' : 'patient');
       setIsRescheduling(false);
     } else {
       // Reset form when creating new appointment
@@ -1338,11 +1386,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setDiscount('0');
       setCustomPrice('0');
       setNotes('');
-      setSelectedDate(defaultDate ?? new Date());
+      setSelectedDate(defaultDate ?? (isPastAppointmentMode ? getDefaultPastAppointmentDate() : new Date()));
       setSelectedTime(defaultTime ?? '');
       setSelectedDoctor(doctorName || (user?.role === 'doctor' ? user.username : ''));
       setAmountToPay('');
-      setAppointmentStatus('scheduled');
+      setAppointmentStatus(isPastAppointmentMode ? 'tbd' : 'scheduled');
       setPaymentStatus('unpaid');
       setPaymentMethod('');
       // Reset the flag when opening for new appointment
@@ -1350,7 +1398,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setPaymentStatusChangedByUser(0);
       setModalStep('patient');
     }
-  }, [open, appointmentToEdit, defaultDate, defaultTime, defaultPatientId, doctorName, user?.role, user?.username]);
+  }, [open, appointmentToEdit, defaultDate, defaultTime, defaultPatientId, doctorName, user?.role, user?.username, isPastAppointmentMode]);
 
     // Use shared booking logic for next/prev step handling
     const { handleNextStep, handlePrevStep } = useSharedBookingLogic({
@@ -1368,6 +1416,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       durationConflict,
       patientConflict,
       skipDoctorStep: isDoctorSelectionLocked,
+      scheduleMode: isPastAppointmentMode ? 'past' : 'standard',
     });
 
   // Derived display values for schedule block
@@ -1441,6 +1490,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       : 0;
   const discountedPrice = Math.max(0, finalPrice - Number(discount));
   const remainingBalance = Math.max(0, discountedPrice - previouslyPaidAmount);
+  const paymentAmountNow = paymentMethod === "Pay at Clinic" ? 0 : (parseFloat(amountToPay) || 0);
+  const projectedRemainingBalance = Math.max(0, remainingBalance - paymentAmountNow);
+  const selectedTreatmentName = appointmentType === "Other"
+    ? customAppointmentTypeName || "Custom Treatment"
+    : appointmentType || "Selected Treatment";
   const bookingConflictWarnings = getBookingConflictWarnings({
     durationConflict,
     patientConflict,
@@ -1451,6 +1505,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // Handler for status changes that sets the flag
   const handleStatusChange = (newStatus: string) => {
+    if (isPastAppointmentMode && !PAST_APPOINTMENT_STATUS_VALUES.includes(newStatus as typeof PAST_APPOINTMENT_STATUS_VALUES[number])) {
+      toast.error("Past appointments can only be Cancelled, Completed, or TBD.");
+      return;
+    }
+
     if (canManageStatuses && newStatus === "pending") {
       toast.error("Pending is reserved for patient carts.");
       return;
@@ -1485,6 +1544,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // Calculate what the final status will be for display in summary
   const getProjectedStatus = () => {
+    if (isPastAppointmentMode) {
+      return PAST_APPOINTMENT_STATUS_VALUES.includes(appointmentStatus as typeof PAST_APPOINTMENT_STATUS_VALUES[number])
+        ? appointmentStatus
+        : 'tbd';
+    }
+
     const amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
     const amountPaid = parseFloat(amountPaidRaw) || 0;
 
@@ -1497,34 +1562,24 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       existingStatus: appointmentToEdit?.status,
       amountPaid,
       previouslyPaidAmount,
-      totalPrice: finalPrice,
+      totalPrice: discountedPrice,
     });
   };
 
   // Calculate what the final payment status will be for display in summary
-  const getProjectedPaymentStatus = () => {
-    // If payment method is "Pay at Clinic", return that status
-    if (paymentMethod === "Pay at Clinic") {
-      return 'pay-at-clinic';
-    }
-
+  const getFinalPaymentStatus = () => {
     const amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
-    const amountPaid = parseFloat(amountPaidRaw) || 0;
-    
-    if (paymentStatusChangedByUser === 1) {
-      return paymentStatus;
-    }
+    const amountPaid = paymentMethod === "Pay at Clinic" ? 0 : (parseFloat(amountPaidRaw) || 0);
 
-    const newTotalPaid = amountPaid > 0 ? previouslyPaidAmount + amountPaid : previouslyPaidAmount;
-    const newBalance = Math.max(0, finalPrice - newTotalPaid);
-
-    if (newBalance <= 0) {
-      return 'paid';
-    } else if (newTotalPaid > 0) {
-      return 'half-paid';
-    } else {
-      return 'unpaid';
-    }
+    return getProjectedPaymentStatus({
+      paymentMethod,
+      statusChangedByUser: paymentStatusChangedByUser === 1,
+      selectedStatus: paymentStatus,
+      existingStatus: appointmentToEdit?.paymentStatus,
+      amountPaid,
+      previouslyPaidAmount,
+      totalPrice: discountedPrice,
+    });
   };
 
   // Calculate the FINAL appointment status
@@ -1584,7 +1639,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         // If editing, ADD the new payment to existing totalPaid (only if amountPaid > 0)
         const previouslyPaid = appointmentToEdit.totalPaid || 0;
         const newTotalPaid = amountPaid > 0 ? previouslyPaid + amountPaid : previouslyPaid;
-        const newBalance = Math.max(0, finalPrice - newTotalPaid);
+        const newBalance = Math.max(0, discountedPrice - newTotalPaid);
 
         console.log('[BookingModal Payment] Updating appointment:', {
           appointmentId: appointmentToEdit.id,
@@ -1595,7 +1650,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         });
 
         // Determine payment status
-        const updatePaymentStatus = getProjectedPaymentStatus();
+        const updatePaymentStatus = getFinalPaymentStatus();
         
         // Determine appointment status using the new function that includes override logic
         const updateAppointmentStatus = getFinalAppointmentStatus();
@@ -1651,14 +1706,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       } else {
         // create new appointment
         // Determine payment status
-        const paymentStatus = getProjectedPaymentStatus();
+        const paymentStatus = getFinalPaymentStatus();
         
         // Determine appointment status using the new function that includes override logic
         const autoStatus = getFinalAppointmentStatus();
 
-        console.log('[BookingModal Payment] Calculated status:', { paymentStatus, autoStatus, amountPaid, finalPrice });
+        console.log('[BookingModal Payment] Calculated status:', { paymentStatus, autoStatus, amountPaid, finalPrice, discountedPrice });
 
-        const newBalance = Math.max(0, finalPrice - amountPaid);
+        const newBalance = Math.max(0, discountedPrice - amountPaid);
 
         console.log('[BookingModal Payment] Creating new appointment:', {
           selectedPatient,
@@ -2243,162 +2298,108 @@ return (
                 </div>
               )}
 
-              {/* FINAL STEP: PAYMENT SUMMARY */}
+              {/* FINAL STEP: PAYMENT & STATUS */}
               {modalStep === 'payment' && (
-                <div className="space-y-6 max-w-4xl mx-auto py-4 animate-in fade-in slide-in-from-bottom-4">
-                  <div className="flex items-center gap-4 mb-8">
-                    <div className="bg-emerald-600 p-3.5 rounded-2xl text-white shadow-lg shadow-emerald-100">
+                <div className="mx-auto max-w-3xl space-y-5 py-3 animate-in fade-in slide-in-from-bottom-4">
+                  <div className="flex items-center gap-4">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500 text-white shadow-lg shadow-emerald-100">
                       <CreditCard className="h-6 w-6" />
                     </div>
                     <div>
-                      <h3 className="text-xl font-black text-gray-900">Booking Summary</h3>
-                      <p className="text-sm font-bold text-gray-500">Review and confirm your appointment</p>
+                      <h3 className="text-xl font-black text-gray-900">Payment & Status</h3>
+                      <p className="text-sm font-bold text-gray-500">Review the balance and record the payment.</p>
                     </div>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    {/* Summary Receipt */}
-                    <div className="space-y-6">
-                      <div className="flex items-center gap-3">
-                        <div className="bg-blue-100 p-2 rounded-lg text-blue-600"><Stethoscope className="h-5 w-5" /></div>
-                        <h3 className="text-lg font-bold text-gray-900">Appointment Info</h3>
-                      </div>
 
-                      <div className="bg-white rounded-[2.5rem] border-2 border-gray-100 overflow-hidden shadow-sm">
-                        <div className="bg-gray-50 p-8 border-b border-gray-100">
-                          <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest">Patient</span>
-                          <h4 className="text-2xl font-black text-gray-900">{patients.find(p => p.id === selectedPatient)?.name}</h4>
-                        </div>
-                        <div className="p-8 space-y-6">
-                          <div className="grid grid-cols-2 gap-6">
-                            <div>
-                              <p className="text-gray-400 font-black uppercase text-[10px] tracking-widest mb-1">Date & Time</p>
-                              <div className="flex items-center gap-2">
-                                <p className="font-bold text-gray-800">{selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} at {formatTimeTo12h(selectedTime)}</p>
-                                {bookingConflictWarnings.length > 0 && (
-                                  <span title={bookingConflictTitle} className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-amber-700">
-                                    <AlertCircle className="h-3.5 w-3.5" />
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            <div className="text-right">
-                              <p className="text-gray-400 font-black uppercase text-[10px] tracking-widest mb-1">Doctor</p>
-                              <p className="font-bold text-gray-800">{formatDoctorName(selectedDoctor)}</p>
-                            </div>
-                          </div>
-                          <div className="flex items-center justify-between rounded-3xl bg-gray-50 px-6 py-4">
-                            <span className="text-gray-500 font-bold">Duration</span>
-                            <span className="inline-flex items-center gap-2 font-black text-gray-800">
-                              {duration} mins
-                              {durationConflict && (
-                                <span title={bookingConflictWarnings.find(w => w.type === 'duration')?.message || durationConflict} className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-amber-700">
-                                  <AlertCircle className="h-3.5 w-3.5" />
-                                </span>
-                              )}
-                            </span>
-                          </div>
-                          {bookingConflictWarnings.length > 0 && (
-                            <div className="rounded-2xl border-2 border-amber-100 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-800">
-                              This appointment has a scheduling conflict. Hover the warning icon for details.
-                            </div>
-                          )}
-                          
-                          <div className="pt-6 border-t-2 border-dashed border-gray-100 space-y-3">
-                            <div className="flex justify-between text-sm">
-                              <span className="text-gray-500 font-bold">Service Price</span>
-                              <span className="font-black text-gray-900">₱{finalPrice.toLocaleString()}</span>
-                            </div>
-                            {Number(discount) > 0 && (
-                              <div className="flex justify-between text-sm text-orange-600">
-                                <span className="font-bold">Discount</span>
-                                <span className="font-black">-₱{Number(discount).toLocaleString()}</span>
-                              </div>
-                            )}
-                            
-                            {/* SMART SUMMARY: Toggles depending on Edit Mode */}
-                            {isEditMode ? (
-                              <>
-                                <div className="flex justify-between text-sm text-gray-600">
-                                  <span className="font-bold">Total Price</span>
-                                  <span className="font-black">₱{(finalPrice - Number(discount)).toLocaleString()}</span>
-                                </div>
-                                <div className="flex justify-between text-sm text-emerald-600">
-                                  <span className="font-bold">Already Paid</span>
-                                  <span className="font-black">-₱{previouslyPaidAmount.toLocaleString()}</span>
-                                </div>
-                                <div className="flex justify-between items-center pt-4 border-t-2 border-gray-50">
-                                  <span className="text-base font-black text-gray-900">Balance Left</span>
-                                  <span className={`text-3xl font-black ${remainingBalance <= 0 ? 'text-emerald-500' : 'text-blue-600'}`}>
-                                    ₱{remainingBalance.toLocaleString()}
-                                  </span>
-                                </div>
-                              </>
-                            ) : (
-                              <div className="flex justify-between items-center pt-4 border-t-2 border-gray-50">
-                                <span className="text-base font-black text-gray-900">Total Price</span>
-                                <span className="text-4xl font-black text-blue-600 tracking-tighter">₱{(finalPrice - Number(discount)).toLocaleString()}</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
+                  <div className="overflow-hidden rounded-[1.75rem] border border-gray-100 bg-white shadow-sm">
+                    <div className="grid grid-cols-3 divide-x divide-gray-100 bg-gray-50/70">
+                      <div className="px-5 py-4">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Total</p>
+                        <p className="mt-1 text-lg font-black text-gray-900">&#8369;{discountedPrice.toLocaleString()}</p>
+                      </div>
+                      <div className="px-5 py-4">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Paid</p>
+                        <p className="mt-1 text-lg font-black text-emerald-600">&#8369;{previouslyPaidAmount.toLocaleString()}</p>
+                      </div>
+                      <div className="px-5 py-4">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Balance</p>
+                        <p className="mt-1 text-lg font-black text-blue-600">&#8369;{remainingBalance.toLocaleString()}</p>
                       </div>
                     </div>
 
-                    {/* Payment Actions */}
-                    <div className="space-y-8 pt-10">
-                      <div className="space-y-4">
-                        <Label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Amount to Pay Now</Label>
-                        <div className="relative group">
-                          <span className="absolute left-6 top-1/2 -translate-y-1/2 text-2xl font-black text-gray-300 transition-colors group-focus-within:text-blue-600">₱</span>
+                    <div className="grid gap-5 p-5 md:grid-cols-[minmax(0,1fr)_250px]">
+                      <div className="min-w-0">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-base font-black text-gray-900">{selectedTreatmentName}</p>
+                            <p className="text-xs font-bold text-gray-400">
+                              Remaining after payment: &#8369;{projectedRemainingBalance.toLocaleString()}
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setAmountToPay(String(remainingBalance))}
+                            disabled={paymentMethod === "Pay at Clinic" || remainingBalance <= 0}
+                            className="h-9 shrink-0 rounded-full border-gray-200 px-3 text-[10px] font-black uppercase tracking-widest"
+                          >
+                            Full
+                          </Button>
+                        </div>
+
+                        <div className="relative mt-4 group">
+                          <span className="absolute left-5 top-1/2 -translate-y-1/2 text-xl font-black text-gray-300 transition-colors group-focus-within:text-blue-600">&#8369;</span>
                           <Input
                             type="number"
-                            placeholder="0"
+                            min="0"
+                            placeholder={remainingBalance > 0 ? remainingBalance.toLocaleString() : "0"}
                             value={amountToPay}
                             onChange={(e: any) => setAmountToPay(e.target.value)}
-                            className="h-20 pl-14 text-3xl font-black rounded-[2rem] border-2 border-gray-100 bg-white shadow-sm focus:border-blue-600 transition-all appearance-none"
+                            className="h-16 rounded-2xl border-2 border-gray-100 bg-white pl-12 pr-4 text-2xl font-black shadow-none transition-all appearance-none focus:border-blue-600"
                             disabled={paymentMethod === "Pay at Clinic"}
                           />
                         </div>
                       </div>
 
-                      <div className="space-y-4">
-                        <Label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Payment Method</Label>
-                        <div className="grid grid-cols-1 gap-3">
-                          {[
-                            { id: "GCash", label: "GCash", sub: "Digital Payment", icon: "GC", color: "bg-blue-600" },
-                            { id: "Card", label: "Credit Card", sub: "Secure Processing", icon: <CreditCard className="w-6 h-6"/>, color: "bg-indigo-600" },
-                            { id: "Pay at Clinic", label: "Pay at Clinic", sub: "Cash on arrival", icon: <Banknote className="w-6 h-6"/>, color: "bg-emerald-600" }
-                          ].map((pm) => (
-                            <button
-                              key={pm.id}
-                              type="button"
-                              onClick={() => { setPaymentMethod(pm.id); if (pm.id === "Pay at Clinic") setAmountToPay("0"); }}
-                              className={`flex items-center justify-between p-5 rounded-[2rem] border-2 transition-all group ${paymentMethod === pm.id ? 'border-blue-600 bg-blue-50/50 shadow-lg shadow-blue-100 scale-[1.02]' : 'border-gray-100 bg-white hover:border-gray-200'}`}
-                            >
-                              <div className="flex items-center gap-5 text-left">
-                                <div className={`w-14 h-14 rounded-2xl ${pm.color} flex items-center justify-center text-white font-black italic shadow-lg shadow-gray-200 transition-transform group-hover:scale-105`}>{pm.icon}</div>
-                                <div>
-                                  <p className="font-black text-gray-900 uppercase tracking-tight">{pm.label}</p>
-                                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{pm.sub}</p>
-                                </div>
-                              </div>
-                              {paymentMethod === pm.id && <div className="w-6 h-6 bg-blue-600 rounded-full flex items-center justify-center text-white shadow-md shadow-blue-200 animate-in zoom-in-50"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" /></svg></div>}
-                            </button>
-                          ))}
-                        </div>
+                      <div className="grid grid-cols-3 gap-2 md:grid-cols-1">
+                        {[
+                          { id: "GCash", label: "GCash", icon: "GC", color: "bg-blue-600" },
+                          { id: "Card", label: "Card", icon: <CreditCard className="h-4 w-4"/>, color: "bg-indigo-600" },
+                          { id: "Pay at Clinic", label: "Clinic", icon: <Banknote className="h-4 w-4"/>, color: "bg-emerald-600" }
+                        ].map((pm) => (
+                          <button
+                            key={pm.id}
+                            type="button"
+                            aria-pressed={paymentMethod === pm.id}
+                            onClick={() => { setPaymentMethod(pm.id); if (pm.id === "Pay at Clinic") setAmountToPay("0"); }}
+                            className={`flex h-16 items-center justify-center gap-2 rounded-2xl border-2 px-3 text-center transition-all md:justify-start ${
+                              paymentMethod === pm.id
+                                ? 'border-blue-600 bg-blue-50 text-blue-700 shadow-sm shadow-blue-100'
+                                : 'border-gray-100 bg-white text-gray-700 hover:border-gray-200 hover:bg-gray-50'
+                            }`}
+                          >
+                            <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${pm.color} text-[10px] font-black italic text-white`}>
+                              {pm.icon}
+                            </span>
+                            <span className="min-w-0 truncate text-[11px] font-black uppercase tracking-tight">{pm.label}</span>
+                          </button>
+                        ))}
                       </div>
+                    </div>
+                  </div>
 
-                      <div className="rounded-[2rem] border-2 border-gray-100 bg-white p-5 shadow-sm">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div className="rounded-[1.5rem] border border-gray-100 bg-white p-4 shadow-sm">
                         <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
-                            <Award className="h-5 w-5" />
+                          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                            <Stethoscope className="h-4 w-4" />
                           </div>
-                          <Label className="text-[11px] font-black uppercase tracking-widest text-gray-500">Status</Label>
+                          <Label className="text-[11px] font-black uppercase tracking-widest text-gray-500">Appointment Status</Label>
                         </div>
-                        <div className="mt-4">
+                        <div className="mt-3">
                           {canEditAppointmentStatus ? (
                             <Select value={getFinalAppointmentStatus()} onValueChange={handleStatusChange} disabled={appointmentStatusOptions.length === 0}>
-                              <SelectTrigger className={`h-12 w-full rounded-2xl border-0 bg-gray-50 px-4 text-base font-black focus:ring-0 focus:ring-offset-0 ${
+                              <SelectTrigger className={`h-11 w-full rounded-xl border-0 bg-gray-50 px-4 text-sm font-black focus:ring-0 focus:ring-offset-0 ${
                                 getAppointmentStatusOption(getFinalAppointmentStatus())?.textColor || 'text-gray-900'
                               }`}>
                                 <SelectValue />
@@ -2412,28 +2413,60 @@ return (
                               </SelectContent>
                             </Select>
                           ) : (
-                            <div className={`flex h-12 items-center rounded-2xl bg-gray-50 px-4 text-base font-black ${
+                            <div className={`flex h-11 items-center rounded-xl bg-gray-50 px-4 text-sm font-black ${
                               getAppointmentStatusOption(getFinalAppointmentStatus())?.textColor || 'text-gray-900'
                             }`}>
                               {getStatusLabel(getFinalAppointmentStatus(), appointmentStatusOptions)}
                             </div>
                           )}
                         </div>
-                      </div>
+                    </div>
 
-                      <CompactNotesField
-                        id="improved-booking-notes"
-                        label={isPatientLevelBookingMode ? "My Notes" : "Notes"}
-                        placeholder={isPatientLevelBookingMode ? "Add any notes for your dentist..." : "Any special instructions..."}
-                        value={notes}
-                        onChange={setNotes}
-                        disabled={isPatientReadonly && isCancelled}
-                        className="rounded-[2rem] border-2 border-gray-100 bg-white p-5 shadow-sm"
-                        labelClassName="text-xs font-black uppercase tracking-widest text-gray-400"
-                        textareaClassName="rounded-[1.5rem] border-2 border-gray-100 p-5 font-medium focus:border-blue-500"
-                      />
+                    <div className="rounded-[1.5rem] border border-gray-100 bg-white p-4 shadow-sm">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
+                            <CreditCard className="h-4 w-4" />
+                          </div>
+                          <Label className="text-[11px] font-black uppercase tracking-widest text-gray-500">Payment Status</Label>
+                        </div>
+                        <div className="mt-3">
+                          {canManagePricing ? (
+                            <Select value={getFinalPaymentStatus()} onValueChange={handlePaymentStatusChange}>
+                              <SelectTrigger className={`h-11 w-full rounded-xl border-0 bg-gray-50 px-4 text-sm font-black focus:ring-0 focus:ring-offset-0 ${
+                                getPaymentStatusOption(getFinalPaymentStatus())?.textColor || 'text-gray-900'
+                              }`}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent className="rounded-xl">
+                                {paymentStatusOptions.map((status) => (
+                                  <SelectItem key={status.value} value={status.value}>
+                                    {status.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <div className={`flex h-11 items-center rounded-xl bg-gray-50 px-4 text-sm font-black ${
+                              getPaymentStatusOption(getFinalPaymentStatus())?.textColor || 'text-gray-900'
+                            }`}>
+                              {getPaymentStatusLabel(getFinalPaymentStatus(), paymentStatusOptions)}
+                            </div>
+                          )}
+                        </div>
                     </div>
                   </div>
+
+                  <CompactNotesField
+                    id="improved-booking-notes"
+                    label={isPatientLevelBookingMode ? "My Notes" : "Notes"}
+                    placeholder={isPatientLevelBookingMode ? "Add any notes for your dentist..." : "Any special instructions..."}
+                    value={notes}
+                    onChange={setNotes}
+                    disabled={isPatientReadonly && isCancelled}
+                    className="rounded-[1.5rem] border border-gray-100 bg-white p-4 shadow-sm"
+                    labelClassName="text-[11px] font-black uppercase tracking-widest text-gray-400"
+                    textareaClassName="min-h-[72px] rounded-xl border-2 border-gray-100 p-4 text-sm font-medium focus:border-blue-500"
+                  />
                 </div>
               )}
             </div>
@@ -2622,6 +2655,35 @@ return (
                     </span>
                   )}
                 </div>
+                <div>
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Payment Status</p>
+                  {canManagePricing ? (
+                    <Select value={getFinalPaymentStatus()} onValueChange={handlePaymentStatusChange}>
+                      <SelectTrigger className={`h-8 w-auto min-w-[120px] rounded-full border-0 px-3 text-[10px] font-black uppercase tracking-tighter shadow-sm ${
+                        getPaymentStatusOption(getFinalPaymentStatus())?.bgColor || 'bg-gray-100'
+                      } ${
+                        getPaymentStatusOption(getFinalPaymentStatus())?.textColor || 'text-gray-700'
+                      }`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {paymentStatusOptions.map((status) => (
+                          <SelectItem key={status.value} value={status.value}>
+                            {status.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter shadow-sm ${
+                      getPaymentStatusOption(getFinalPaymentStatus())?.bgColor || 'bg-gray-100'
+                    } ${
+                      getPaymentStatusOption(getFinalPaymentStatus())?.textColor || 'text-gray-700'
+                    }`}>
+                      {getPaymentStatusLabel(getFinalPaymentStatus(), paymentStatusOptions)}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -2658,7 +2720,7 @@ return (
                 )}
                 <div className="flex justify-between items-center pt-3 border-t border-gray-200">
                   <span className="text-lg font-black text-gray-900">Final Price</span>
-                  <span className="text-2xl font-black text-blue-600">₱{(finalPrice - Number(discount)).toLocaleString()}</span>
+                  <span className="text-2xl font-black text-blue-600">₱{discountedPrice.toLocaleString()}</span>
                 </div>
               </div>
             </div>
@@ -2667,8 +2729,8 @@ return (
               {previouslyPaidAmount > 0 && (
                 <p className="text-emerald-600">Already Paid: ₱{previouslyPaidAmount.toLocaleString()}</p>
               )}
-              <p className="text-blue-700">Paying Now: ₱{(parseFloat(amountToPay) || 0).toLocaleString()}</p>
-              <p>Remaining: ₱{Math.max(0, (finalPrice - Number(discount)) - previouslyPaidAmount - (parseFloat(amountToPay) || 0)).toLocaleString()}</p>
+              <p className="text-blue-700">Paying Now: ₱{paymentAmountNow.toLocaleString()}</p>
+              <p>Remaining: ₱{Math.max(0, discountedPrice - previouslyPaidAmount - paymentAmountNow).toLocaleString()}</p>
             </div>
           </div>
 
@@ -2694,8 +2756,8 @@ return (
         logDate={snapshotToView?.changedAt || new Date().toISOString()}
       />
 
-      <DatePickerModal open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen} selectedDate={selectedDate} onDateSelect={setSelectedDate} doctorName={selectedDoctor} selectedTime={selectedTime} duration={duration} />
-      <TimePickerModal open={isTimePickerOpen} onOpenChange={setIsTimePickerOpen} selectedDate={selectedDate} selectedTime={selectedTime} doctorName={selectedDoctor} duration={duration} onTimeSelect={setSelectedTime} onDateChange={setSelectedDate} excludeAppointmentId={appointmentToEdit?.id} patientId={selectedPatient} />
+      <DatePickerModal open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen} selectedDate={selectedDate} onDateSelect={setSelectedDate} doctorName={selectedDoctor} selectedTime={selectedTime} duration={duration} dateSelectionMode={isPastAppointmentMode ? "past" : "standard"} />
+      <TimePickerModal open={isTimePickerOpen} onOpenChange={setIsTimePickerOpen} selectedDate={selectedDate} selectedTime={selectedTime} doctorName={selectedDoctor} duration={duration} onTimeSelect={setSelectedTime} onDateChange={setSelectedDate} excludeAppointmentId={appointmentToEdit?.id} patientId={selectedPatient} dateSelectionMode={isPastAppointmentMode ? "past" : "standard"} />
     </>
   );
  }

@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { APPOINTMENT_TYPES, getAppointmentPrice } from "@/lib/appointment-types";
 import { TIME_SLOTS, formatTimeTo12h } from "@/lib/time-slots";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
+import { getAuthHeaders } from "@/lib/auth-headers";
 import { Appointment } from "@/hooks/useAppointments";
 import { APPOINTMENT_PRICES, getAppointmentTypeName } from "@/lib/appointmentTypes";
 import { ChevronsUpDown, Calendar, Clock, User, Check, ChevronRight, ChevronLeft, Loader2, Stethoscope, FileText } from "lucide-react";
@@ -1048,7 +1049,7 @@ export function CreateAppointmentModal() {
         try {
           await fetch("http://localhost:3001/api/payments", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: getAuthHeaders({ "Content-Type": "application/json" }),
             credentials: "include",
             body: JSON.stringify({
               appointmentId: newApt?.id || (newApt && newApt.id),

@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useAppointments } from "@/hooks/useAppointments";
 import { CalendarView } from "./CalendarView";
 import { Suspense } from "react";
+import PastAppointmentButton from "./PastAppointmentButton";
 
 interface CalendarPageLayoutProps {
   portal: "admin" | "doctor" | "patient";
@@ -122,13 +123,21 @@ export function CalendarPageLayout({ portal, doctorName, defaultStatusFilter }: 
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">{title}</h1>
-        <Button 
-          onClick={onClick}
-          className={`text-white gap-2 ${buttonColor}`}
-        >
-          <Plus className="h-4 w-4" />
-          {buttonText}
-        </Button>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {(portal === "admin" || portal === "doctor") && (
+            <PastAppointmentButton
+              doctorName={portal === "doctor" ? user?.username : doctorName}
+              className="rounded-xl"
+            />
+          )}
+          <Button 
+            onClick={onClick}
+            className={`text-white gap-2 rounded-xl ${buttonColor}`}
+          >
+            <Plus className="h-4 w-4" />
+            {buttonText}
+          </Button>
+        </div>
       </div>
       
       {/* Calendar */}

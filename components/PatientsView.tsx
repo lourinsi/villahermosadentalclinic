@@ -44,9 +44,12 @@ import { RecentTransaction } from "../lib/finance-types";
 import { DentalChart } from "./DentalChart";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
+import { getAuthHeaders } from "@/lib/auth-headers";
 import { useDoctors } from "../hooks/useDoctors";
 import { useAuth } from "@/hooks/useAuth";
 import { getNextAvailableSlot } from "../lib/appointment-utils";
+import { PastAppointmentButton } from "./PastAppointmentButton";
+import AppointmentHistoryView from "./AppointmentHistoryView";
 
 // dummy data removed per request
 
@@ -110,6 +113,36 @@ const toDateOnly = (value?: string | Date) => {
   return String(value).split("T")[0].split(" ")[0];
 };
 
+const getPaymentTransactionKey = (txn: RecentTransaction) =>
+  String(txn.id || txn.transactionId || `${txn.appointmentId || "none"}-${txn.date || "no-date"}-${txn.method || "method"}-${txn.amount || 0}`);
+
+const parsePaymentTimestamp = (value?: string | Date) => {
+  if (!value) return 0;
+  if (value instanceof Date) return value.getTime();
+
+  const raw = String(value);
+  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? `${raw}T00:00:00` : raw;
+  const parsed = new Date(normalized).getTime();
+
+  return Number.isNaN(parsed) ? 0 : parsed;
+};
+
+const comparePaymentTransactionsDesc = (a: RecentTransaction, b: RecentTransaction) => {
+  const aRow = a as PaymentRow;
+  const bRow = b as PaymentRow;
+  const paymentDateDiff = parsePaymentTimestamp(b.date) - parsePaymentTimestamp(a.date);
+
+  if (paymentDateDiff !== 0) return paymentDateDiff;
+
+  const createdDiff = parsePaymentTimestamp(bRow.createdAt) - parsePaymentTimestamp(aRow.createdAt);
+  if (createdDiff !== 0) return createdDiff;
+
+  const updatedDiff = parsePaymentTimestamp(bRow.updatedAt) - parsePaymentTimestamp(aRow.updatedAt);
+  if (updatedDiff !== 0) return updatedDiff;
+
+  return getPaymentTransactionKey(b).localeCompare(getPaymentTransactionKey(a));
+};
+
 export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -128,7 +161,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
   const [messagePatient, setMessagePatient] = useState<Patient | null>(null);
   const [messageContent, setMessageContent] = useState("");
-  
+
   const [isConfirmUnsavedChangesOpen, setIsConfirmUnsavedChangesOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const patientDetailsRef = useRef<{ save: () => Promise<boolean>; changedFields: Record<string, { old: any; new: any }> } | null>(null);
@@ -836,7 +869,7 @@ const PatientDetails = React.forwardRef<{
   onOpenBookingModal
 }, ref) => {
   const { openEditModal, refreshPatients, appointments } = useAppointmentModal();
-  const { openPaymentModal, openEditPaymentModal, openPaymentFor } = usePaymentModal();
+  const { openPaymentModal, openEditPaymentModal } = usePaymentModal();
   const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
   const { statuses: PAYMENT_STATUSES } = usePaymentStatuses();
   const [formData, setFormData] = useState({
@@ -937,7 +970,7 @@ const PatientDetails = React.forwardRef<{
 
     return [...realRows, ...legacyRows]
       .filter((txn) => Number(txn.amount || 0) > 0)
-      .sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+      .sort(comparePaymentTransactionsDesc);
   }, [createLegacyPaymentRow, getHistoryAppointmentType]);
 
   // Track the original loaded data (after server fetch) for accurate change detection
@@ -996,6 +1029,86 @@ const PatientDetails = React.forwardRef<{
   const [historyStatusFilter, setHistoryStatusFilter] = useState('all');
   const [historyDoctorFilter, setHistoryDoctorFilter] = useState('all');
   const [historyProcedureFilter, setHistoryProcedureFilter] = useState('all');
+
+  // Snapshot states
+  const [isSnapshotOpen, setIsSnapshotOpen] = useState(false);
+  const [selectedSnapshot, setSelectedSnapshot] = useState<any>(null);
+  const [snapshotLogDate, setSnapshotLogDate] = useState("");
+
+  const isPaymentLogTransaction = React.useCallback((transaction: RecentTransaction) => {
+    if (isLegacyPaymentRow(transaction) || !transaction.appointmentId) return false;
+
+    const matchingTransactions = allTransactions.filter((txn) =>
+      !isLegacyPaymentRow(txn) &&
+      String(txn.appointmentId || "") === String(transaction.appointmentId || "")
+    );
+
+    if (matchingTransactions.length <= 1) return false;
+
+    const latestTransaction = [...matchingTransactions].sort(comparePaymentTransactionsDesc)[0];
+
+    return getPaymentTransactionKey(latestTransaction) !== getPaymentTransactionKey(transaction);
+  }, [allTransactions]);
+
+  const handleOpenSnapshot = (appointment: Appointment | HistoryAppointment, transaction?: RecentTransaction) => {
+    const originalAppointment = patientAppointments.find((apt: Appointment) => String(apt.id) === String(appointment.id));
+    const displayDate = toDateOnly(originalAppointment?.date || appointment.date);
+    const displayTime = originalAppointment?.time || appointment.time || String(appointment.date || "").split(" ")[1] || "";
+    const price = Number(appointment.price ?? originalAppointment?.price ?? 0);
+    const totalPaid = Number(appointment.totalPaid ?? originalAppointment?.totalPaid ?? 0);
+    const balance = Math.max(0, price - totalPaid);
+    const logDate = transaction?.date || appointment.updatedAt || originalAppointment?.updatedAt || appointment.createdAt || originalAppointment?.createdAt || new Date().toISOString();
+
+    setSelectedSnapshot({
+      ...(originalAppointment || {}),
+      ...appointment,
+      date: displayDate,
+      time: displayTime,
+      price,
+      totalPaid,
+      balance,
+    });
+    setSnapshotLogDate(logDate);
+    setIsSnapshotOpen(true);
+  };
+
+  const handleOpenTransactionSnapshot = (transaction: RecentTransaction) => {
+    const appointment = mockAppointmentHistoryLocal.find((apt: Appointment) => String(apt.id) === String(transaction.appointmentId))
+      || patientAppointments.find((apt: Appointment) => String(apt.id) === String(transaction.appointmentId));
+
+    if (!appointment) {
+      toast.error("Could not find appointment for this payment");
+      return;
+    }
+
+    handleOpenSnapshot(appointment, transaction);
+  };
+
+  const getTransactionPaymentDisplay = (transaction: RecentTransaction) => {
+    if (isPaymentLogTransaction(transaction)) {
+      return { label: "Log", className: "bg-gray-100 text-gray-700 border-gray-200", isLog: true };
+    }
+
+    const appointment = mockAppointmentHistoryLocal.find((apt: Appointment) => String(apt.id) === String(transaction.appointmentId))
+      || patientAppointments.find((apt: Appointment) => String(apt.id) === String(transaction.appointmentId));
+    const price = Number(appointment?.price || 0);
+    const totalPaid = Number(appointment?.totalPaid || 0);
+    const paymentStatus = String(appointment?.paymentStatus || transaction.status || "").toLowerCase();
+
+    if (paymentStatus === "paid" || paymentStatus === "over-paid" || (price > 0 && totalPaid >= price)) {
+      return { label: "fullypaid", className: "bg-green-50 text-green-700 border-green-200", isLog: false };
+    }
+
+    if (paymentStatus === "half-paid" || (price > 0 && totalPaid > 0 && totalPaid < price)) {
+      return { label: "halfpaid", className: "bg-amber-50 text-amber-700 border-amber-200", isLog: false };
+    }
+
+    return {
+      label: paymentStatus || "unpaid",
+      className: paymentStatus === "overdue" ? "bg-red-50 text-red-700 border-red-200" : "",
+      isLog: false,
+    };
+  };
 
   const uniqueDoctors = React.useMemo(() => {
     const doctors = new Set(mockAppointmentHistoryLocal.map(apt => apt.doctor).filter(Boolean));
@@ -1412,7 +1525,10 @@ const PatientDetails = React.forwardRef<{
 
       // Fetch payments from new payments collection and merge into history
       if (patient?.id) {
-        fetch(`http://localhost:3001/api/payments/patient/${patient.id}`, { credentials: 'include' })
+        fetch(`http://localhost:3001/api/payments/patient/${patient.id}`, {
+          headers: getAuthHeaders({ "Content-Type": "application/json" }),
+          credentials: 'include',
+        })
           .then(res => res.json())
           .then(json => {
             if (json?.success && Array.isArray(json.data)) {
@@ -1478,7 +1594,8 @@ const PatientDetails = React.forwardRef<{
       
       const response = await fetch(deleteUrl, {
         method: "DELETE",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        credentials: "include",
       });
 
       console.log("Response Status:", response.status);
@@ -1895,6 +2012,15 @@ const PatientDetails = React.forwardRef<{
                                 ))}
                             </SelectContent>
                         </Select>
+                        <PastAppointmentButton
+                          size="sm"
+                          doctorName={doctorFilter}
+                          patientId={patient?.id}
+                          onCreated={() => {
+                            // Optionally refresh patients or history if needed
+                            // refreshPatients is already called in PastAppointmentButton's onBooked
+                          }}
+                        />
                     </div>
                 </div>
             </CardHeader>
@@ -1908,8 +2034,8 @@ const PatientDetails = React.forwardRef<{
                   <div className="space-y-4">
                     {filteredHistory.map((appointment: HistoryAppointment, index: number) => {
                       const sortedTransactions = Array.from(new Map((appointment.transactions || []).map((t: RecentTransaction) => [t.id, t])).values())
-                        .sort((a: RecentTransaction, b: RecentTransaction) => new Date(b.date).getTime() - new Date(a.date).getTime());
-                      
+                        .sort(comparePaymentTransactionsDesc);
+
                       const isExpanded = expandedTransactions.has(appointment.id);
                       const visibleTransactions = isExpanded ? sortedTransactions : sortedTransactions.slice(0, 1);
 
@@ -1945,33 +2071,22 @@ const PatientDetails = React.forwardRef<{
                             </div>
                           </div>
                           <div className="flex items-center justify-between pt-4 mt-4 border-t">
-                              <Button 
-                                                        variant="outline" 
-                                                        size="sm"
-                                                        onClick={() => {
-                                                          const original = patientAppointments.find((x: Appointment) => x.id === appointment.id);
-                                                          if (original && onOpenBookingModal) {
-                                                            onOpenBookingModal(original);
-                                                          }
-                                                        }}
-                                                      >
-                          <Eye className="h-4 w-4 mr-2" />
-                          View Appointment
-                        </Button>
-                              <Button 
-                                size="sm" 
-                                variant="outline"
-                                onClick={() => {
-                                  if (patient.id && patient.name) {
-                                    const original = patientAppointments.find((x: Appointment) => x.id === appointment.id);
-                                    if (original) openPaymentFor(original, patient.id, patient.name);
-                                  }
-                                }}
-                              >
-                                <DollarSign className="h-3 w-3 mr-1" />
-                                Record Payment
-                              </Button>
-                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                const original = patientAppointments.find((x: Appointment) => x.id === appointment.id);
+
+                                if (original && onOpenBookingModal) {
+                                  onOpenBookingModal(original);
+                                }
+                              }}
+                            >
+                              <DollarSign className="h-3 w-3 mr-1" />
+                              Record Payment
+                            </Button>
+                          </div>
                           {sortedTransactions.length > 0 && (
                             <div className="border-t pt-3 mt-3">
                               <div className="flex items-center justify-between mb-2">
@@ -1983,50 +2098,72 @@ const PatientDetails = React.forwardRef<{
                                 }
                               </div>
                               <div className="space-y-2">
-                                {visibleTransactions.map((txn: RecentTransaction) => (
+                                {visibleTransactions.map((txn: RecentTransaction) => {
+                                  const isLog = isPaymentLogTransaction(txn);
+
+                                  return (
                                   <div key={txn.id} className="flex items-center justify-between text-sm bg-gray-50 p-2 rounded">
                                     <div className="flex items-center space-x-2">
                                       {getPaymentMethodIcon(txn.method)}
                                       <div>
-                                        <div className="font-medium">{txn.method} - ${txn.amount}</div>
+                                        <div className="flex items-center gap-2 font-medium">
+                                          <span>{txn.method} - ${txn.amount}</span>
+                                          {isLog && (
+                                            <Badge variant="outline" className="bg-gray-100 text-gray-700 border-gray-200">
+                                              Log
+                                            </Badge>
+                                          )}
+                                        </div>
                                         <div className="text-xs text-muted-foreground">{txn.date} • {txn.transactionId}</div>
                                       </div>
                                     </div>
-                                    {!isLegacyPaymentRow(txn) && (
-                                      <div className="flex items-center gap-1">
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          className="h-8 w-8 p-0"
-                                          onClick={() => {
-                                            if (txn.id && patient.id) openEditPaymentModal(txn.id, txn as any, String(patient.id), mockAppointmentHistoryLocal as any);
-                                          }}
-                                        >
-                                          <Edit className="h-4 w-4" />
-                                          <span className="sr-only">Edit Payment</span>
-                                        </Button>
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
-                                          onClick={() => {
-                                            if (txn.id && appointment.id) {
-                                              setPdConfirmTitle("Delete Payment");
-                                              setPdConfirmMessage(`Are you sure you want to delete this payment (${txn.method} - $${txn.amount})?`);
-                                              setPdConfirmAction(() => async () => {
-                                                await handleDeletePayment(String(txn.id), String(appointment.id));
-                                              });
-                                              setPdIsConfirmOpen(true);
-                                            }
-                                          }}
-                                        >
-                                          <Trash className="h-4 w-4" />
-                                          <span className="sr-only">Delete Payment</span>
-                                        </Button>
-                                      </div>
-                                    )}
+                                    <div className="flex items-center gap-1">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-8 w-8 p-0"
+                                        onClick={() => handleOpenSnapshot(appointment, txn)}
+                                      >
+                                        <Eye className="h-4 w-4" />
+                                        <span className="sr-only">View Appointment Snapshot</span>
+                                      </Button>
+                                      {!isLegacyPaymentRow(txn) && (
+                                        <>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-8 w-8 p-0"
+                                            onClick={() => {
+                                              if (txn.id && patient.id) openEditPaymentModal(txn.id, txn as any, String(patient.id), mockAppointmentHistoryLocal as any);
+                                            }}
+                                          >
+                                            <Edit className="h-4 w-4" />
+                                            <span className="sr-only">Edit Payment</span>
+                                          </Button>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                            onClick={() => {
+                                              if (txn.id && appointment.id) {
+                                                setPdConfirmTitle("Delete Payment");
+                                                setPdConfirmMessage(`Are you sure you want to delete this payment (${txn.method} - $${txn.amount})?`);
+                                                setPdConfirmAction(() => async () => {
+                                                  await handleDeletePayment(String(txn.id), String(appointment.id));
+                                                });
+                                                setPdIsConfirmOpen(true);
+                                              }
+                                            }}
+                                          >
+                                            <Trash className="h-4 w-4" />
+                                            <span className="sr-only">Delete Payment</span>
+                                          </Button>
+                                        </>
+                                      )}
+                                    </div>
                                   </div>
-                                ))}
+                                  );
+                                })}
                               </div>
                             </div>
                           )}
@@ -2148,8 +2285,14 @@ const PatientDetails = React.forwardRef<{
                 <div className="space-y-3">
                   <h3 className="font-medium">All Transactions</h3>
                   {filteredTransactions.length > 0 ? (
-                    filteredTransactions.map((txn) => (
-                      <div key={txn.id} className="border rounded-lg p-4">
+                    filteredTransactions.map((txn) => {
+                      const paymentDisplay = getTransactionPaymentDisplay(txn);
+
+                      return (
+                      <div
+                        key={txn.id}
+                        className={`border rounded-lg p-4 ${paymentDisplay.isLog ? "bg-gray-50/60 border-gray-200 opacity-80" : ""}`}
+                      >
                         <div className="flex items-start justify-between mb-2">
                           <div className="flex items-center space-x-3">
                             <div className="p-2 bg-gray-100 rounded">
@@ -2170,6 +2313,15 @@ const PatientDetails = React.forwardRef<{
                               <div className="text-lg font-semibold text-green-600">${txn.amount}</div>
                               <div className="text-xs text-muted-foreground">{txn.date}</div>
                             </div>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => handleOpenTransactionSnapshot(txn)}
+                            >
+                              <Eye className="h-4 w-4" />
+                              <span className="sr-only">View Appointment Snapshot</span>
+                            </Button>
                             {!isLegacyPaymentRow(txn) && (
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
@@ -2215,10 +2367,8 @@ const PatientDetails = React.forwardRef<{
                           <div className="text-muted-foreground">
                             ID: {txn.transactionId}
                           </div>
-                          <Badge variant="outline" className={
-                            txn.status === "completed" ? "bg-green-50 text-green-700" : ""
-                          }>
-                            {txn.status}
+                          <Badge variant="outline" className={paymentDisplay.className}>
+                            {paymentDisplay.label}
                           </Badge>
                         </div>
                         {txn.notes && (
@@ -2227,7 +2377,8 @@ const PatientDetails = React.forwardRef<{
                           </div>
                         )}
                       </div>
-                    ))
+                      );
+                    })
                   ) : (
                     <div className="text-center py-8 text-muted-foreground">
                       No payment transactions found for the selected filters.
@@ -2262,6 +2413,14 @@ const PatientDetails = React.forwardRef<{
         }}
         confirmLabel="Yes"
         cancelLabel="No"
+      />
+
+      {/* Appointment Snapshot Dialog */}
+      <AppointmentHistoryView
+        open={isSnapshotOpen}
+        onOpenChange={setIsSnapshotOpen}
+        appointmentSnapshot={selectedSnapshot}
+        logDate={snapshotLogDate}
       />
     </div>
   );

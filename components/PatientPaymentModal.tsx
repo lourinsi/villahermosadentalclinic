@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import ConfirmDialog from "./ConfirmDialog";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { Appointment } from "@/hooks/useAppointments";
+import { getAuthHeaders } from "@/lib/auth-headers";
 import { Label } from "./ui/label";
 import { Input } from "./ui/input";
 
@@ -77,7 +78,8 @@ export function PatientPaymentModal() {
 
       const res = await fetch(`http://localhost:3001/api/payments`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        credentials: "include",
         body: JSON.stringify(body),
       });
 
@@ -108,7 +110,9 @@ export function PatientPaymentModal() {
         window.dispatchEvent(ev);
       } catch (e) {
         // Fallback for older browsers
-        (window as any).dispatchEvent && (window as any).dispatchEvent(new Event('appointments:updated'));
+        if ((window as any).dispatchEvent) {
+          (window as any).dispatchEvent(new Event('appointments:updated'));
+        }
       }
       closePaymentModal();
     } catch (err) {
@@ -131,7 +135,7 @@ export function PatientPaymentModal() {
         amount: amountToPay,
         method: paymentMethod,
         date: new Date().toISOString().split("T")[0],
-        transactionId: paymentMethod === "Pay at Clinic" 
+        transactionId: paymentMethod === "Pay at Clinic"
           ? `PAC-${Math.random().toString(36).slice(2, 9).toUpperCase()}`
           : `T-${Math.random().toString(36).slice(2, 9).toUpperCase()}`,
         notes: paymentMethod === "Pay at Clinic" ? "Cash upon appointment" : "Online payment via Patient Portal",
@@ -139,7 +143,8 @@ export function PatientPaymentModal() {
 
       const res = await fetch(`http://localhost:3001/api/payments`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        credentials: "include",
         body: JSON.stringify(body),
       });
 
@@ -170,7 +175,9 @@ export function PatientPaymentModal() {
         const ev = new CustomEvent('appointments:updated', { detail: { appointmentId, newStatus, newPaymentStatus } });
         window.dispatchEvent(ev);
       } catch (e) {
-        (window as any).dispatchEvent && (window as any).dispatchEvent(new Event('appointments:updated'));
+        if ((window as any).dispatchEvent) {
+          (window as any).dispatchEvent(new Event('appointments:updated'));
+        }
       }
       closePaymentModal();
     } catch (err) {

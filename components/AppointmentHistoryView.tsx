@@ -13,18 +13,40 @@ interface AppointmentHistoryViewProps {
   logDate: string;
 }
 
+const resolveAppointmentTypeName = (type: unknown, customType?: string) => {
+  const numericType = typeof type === "number" ? type : typeof type === "string" && type.trim() ? Number(type) : NaN;
+
+  if (Number.isFinite(numericType)) {
+    return getAppointmentTypeName(numericType, customType);
+  }
+
+  if (typeof type === "string" && type.trim()) {
+    return type;
+  }
+
+  return customType || "Appointment";
+};
+
 export default function AppointmentHistoryView({ open, onOpenChange, appointmentSnapshot, logDate }: AppointmentHistoryViewProps) {
   if (!appointmentSnapshot) return null;
 
-  const formattedDate = new Date(appointmentSnapshot.date).toLocaleDateString('en-US', {
+  const appointmentDate = new Date(appointmentSnapshot.date);
+  const formattedDate = Number.isNaN(appointmentDate.getTime()) ? String(appointmentSnapshot.date || "No date") : appointmentDate.toLocaleDateString('en-US', {
     weekday: 'long',
     year: 'numeric',
     month: 'long',
     day: 'numeric'
   });
 
-  const snapshotDate = new Date(logDate).toLocaleString();
-  const typeName = getAppointmentTypeName(appointmentSnapshot.type, appointmentSnapshot.customType);
+  const resolvedLogDate = logDate || appointmentSnapshot.changedAt || appointmentSnapshot.updatedAt || appointmentSnapshot.createdAt || new Date().toISOString();
+  const isDateOnlyLog = typeof resolvedLogDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(resolvedLogDate);
+  const parsedLogDate = new Date(isDateOnlyLog ? `${resolvedLogDate}T00:00:00` : resolvedLogDate);
+  const snapshotDate = Number.isNaN(parsedLogDate.getTime())
+    ? String(resolvedLogDate)
+    : isDateOnlyLog
+      ? parsedLogDate.toLocaleDateString()
+      : parsedLogDate.toLocaleString();
+  const typeName = resolveAppointmentTypeName(appointmentSnapshot.type, appointmentSnapshot.customType);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

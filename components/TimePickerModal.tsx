@@ -7,6 +7,7 @@ import { formatDateToYYYYMMDD, cn } from "@/lib/utils";
 import { Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { Appointment } from "@/hooks/useAppointments";
 import AppointmentHistoryView from "./AppointmentHistoryView";
+import type { BookingCreationMode } from "./sharedBookingLogic";
 
 interface TimePickerModalProps {
   open: boolean;
@@ -19,6 +20,7 @@ interface TimePickerModalProps {
   onDateChange?: (date: Date) => void;
   excludeAppointmentId?: string;
   patientId?: string | null;
+  dateSelectionMode?: BookingCreationMode;
 }
 
 const getAppointmentFetchOptions = (): RequestInit => {
@@ -42,7 +44,8 @@ export function TimePickerModal({
   onTimeSelect,
   onDateChange,
   excludeAppointmentId,
-  patientId
+  patientId,
+  dateSelectionMode = "standard",
 }: TimePickerModalProps) {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -115,9 +118,20 @@ export function TimePickerModal({
     }
   }, [selectedDate, open, viewDate, fetchAppointments]);
 
+  const isPastMode = dateSelectionMode === "past";
+
+  const startOfDay = (date: Date) => {
+    const copy = new Date(date);
+    copy.setHours(0, 0, 0, 0);
+    return copy;
+  };
+
+  const isAfterToday = (date: Date) => startOfDay(date) > startOfDay(new Date());
+
   const navigateDate = (direction: 'prev' | 'next') => {
     const newDate = new Date(viewDate);
     newDate.setDate(viewDate.getDate() + (direction === 'next' ? 1 : -1));
+    if (isPastMode && isAfterToday(newDate)) return;
     setViewDate(newDate);
     if (onDateChange) {
       onDateChange(newDate);
@@ -130,7 +144,10 @@ export function TimePickerModal({
     const now = new Date();
     const todayStr = formatDateToYYYYMMDD(now);
     const isToday = dateStr === todayStr;
-    const isPastDate = !isToday && viewDate < new Date(now.setHours(0, 0, 0, 0));
+    const todayStart = startOfDay(now);
+    const viewDateStart = startOfDay(viewDate);
+    const isPastDate = !isToday && viewDateStart < todayStart;
+    const isFutureDate = !isToday && viewDateStart > todayStart;
     
     const currentHour = now.getHours();
     const currentMinute = now.getMinutes();
@@ -147,7 +164,10 @@ export function TimePickerModal({
     return TIME_SLOTS.map(slot => {
       const [hour, minute] = slot.split(':').map(Number);
       const isPastTime = isToday && (hour < currentHour || (hour === currentHour && minute <= currentMinute));
+      const isFutureTime = isToday && (hour > currentHour || (hour === currentHour && minute > currentMinute));
       const isPast = isPastTime || isPastDate;
+      const isFuture = isFutureTime || isFutureDate;
+      const isBlockedByDateMode = isPastMode ? isFuture : isPast;
       
       const slotMinutes = timeToMinutes(slot);
       const slotEndMinutes = slotMinutes + (Number(duration) || 30);
@@ -194,17 +214,19 @@ export function TimePickerModal({
       
       return {
         time: slot,
-        isAvailable: (!isBooked || isPending) && !isPast,
+        isAvailable: (!isBooked || isPending) && !isBlockedByDateMode,
         isBooked,
         isTentative,
         isPending,
         isPatientConflict,
         isPast,
+        isFuture,
+        isBlockedByDateMode,
         isSelected,
         appointment
       };
     });
-  }, [appointments, viewDate, selectedDate, selectedTime, excludeAppointmentId, duration, doctorName, patientId]);
+  }, [appointments, viewDate, selectedDate, selectedTime, excludeAppointmentId, duration, doctorName, patientId, isPastMode]);
 
   const handleTimeSelect = (time: string) => {
     onTimeSelect(time);
@@ -215,7 +237,7 @@ export function TimePickerModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Select Time</DialogTitle>
+          <DialogTitle>{isPastMode ? "Select Past Time" : "Select Time"}</DialogTitle>
         </DialogHeader>
         
         <div className="space-y-3">
@@ -234,7 +256,8 @@ export function TimePickerModal({
             
             <button
               onClick={() => navigateDate('next')}
-              className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors border border-gray-100"
+              disabled={isPastMode && isAfterToday(new Date(new Date(viewDate).setDate(viewDate.getDate() + 1)))}
+              className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors border border-gray-100 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <ChevronRight className="h-4 w-4 text-gray-600" />
             </button>
@@ -262,14 +285,16 @@ export function TimePickerModal({
                       setSnapshotOpen(true);
                     }
                   }}
-                  disabled={slot.isPast && !slot.appointment}
+                  disabled={slot.isBlockedByDateMode && !slot.appointment}
                   className={cn(
                     "px-2 py-2 rounded-lg font-semibold text-xs transition-all border",
                     slot.isPatientConflict && !slot.isPending
                       ? "bg-purple-50 text-purple-700 border-purple-200 cursor-pointer"
                     : slot.isSelected && slot.isAvailable
                       ? "bg-blue-600 text-white border-blue-700 shadow-md"
-                      : slot.isPast && !slot.appointment
+                      : slot.isBlockedByDateMode && slot.isPast && !slot.appointment
+                      ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed"
+                      : slot.isBlockedByDateMode && slot.isFuture && !slot.appointment
                       ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed"
                       : slot.isAvailable && (!slot.isBooked || slot.isPending)
                       ? "bg-white text-gray-900 border-gray-300 hover:border-blue-400 hover:bg-blue-50 cursor-pointer"
@@ -278,7 +303,8 @@ export function TimePickerModal({
                       : "bg-red-50 text-red-700 border-red-200 cursor-pointer"
                   ) }
                   title={
-                    slot.isPast && !slot.appointment ? "Past time"
+                    slot.isBlockedByDateMode && slot.isFuture && !slot.appointment ? "Upcoming time"
+                    : slot.isBlockedByDateMode && slot.isPast && !slot.appointment ? "Past time"
                     : slot.isPatientConflict ? "Patient is busy (Click to view details)"
                     : slot.isTentative ? "Reserved (Click to view details)"
                     : slot.isBooked && !slot.isPending ? "Booked (Click to view details)"
@@ -287,7 +313,8 @@ export function TimePickerModal({
                 >
                   <div>{formatTimeTo12h(slot.time)}</div>
                   <div className="text-[8px] opacity-70">
-                    {slot.isPast && !slot.appointment ? "Passed"
+                    {slot.isBlockedByDateMode && slot.isFuture && !slot.appointment ? "Future"
+                    : slot.isBlockedByDateMode && slot.isPast && !slot.appointment ? "Passed"
                     : slot.isPatientConflict ? "Busy"
                     : slot.isTentative ? "Rsrvd"
                     : slot.isBooked && !slot.isPending ? "Booked"

@@ -7,6 +7,7 @@ import { ChevronLeft, ChevronRight, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { Appointment } from "@/hooks/useAppointments";
+import type { BookingCreationMode } from "./sharedBookingLogic";
 
 interface DatePickerModalProps {
   open: boolean;
@@ -16,6 +17,7 @@ interface DatePickerModalProps {
   doctorName?: string;
   selectedTime?: string;
   duration?: string;
+  dateSelectionMode?: BookingCreationMode;
 }
 
 const getAppointmentFetchOptions = (): RequestInit => {
@@ -36,7 +38,8 @@ export function DatePickerModal({
   onDateSelect, 
   doctorName, 
   selectedTime,
-  duration 
+  duration,
+  dateSelectionMode = "standard",
 }: DatePickerModalProps) {
   const [viewDate, setViewDate] = useState<Date>(new Date(selectedDate));
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -165,10 +168,20 @@ export function DatePickerModal({
       date.getFullYear() === selectedDate.getFullYear();
   };
 
+  const isPastMode = dateSelectionMode === "past";
+
   const isPastDate = (date: Date) => {
     const now = new Date();
     now.setHours(0, 0, 0, 0);
     return date < now;
+  };
+
+  const isFutureDate = (date: Date) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const candidate = new Date(date);
+    candidate.setHours(0, 0, 0, 0);
+    return candidate > today;
   };
 
   // Check if a day has any available slots
@@ -196,7 +209,7 @@ export function DatePickerModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Select Date</DialogTitle>
+          <DialogTitle>{isPastMode ? "Select Past Date" : "Select Date"}</DialogTitle>
         </DialogHeader>
         
         <div className="flex justify-center py-4">
@@ -240,7 +253,7 @@ export function DatePickerModal({
             <div className="grid grid-cols-3 gap-2 mb-4 text-xs">
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded-full bg-gray-200" />
-                <span className="text-gray-600">Past</span>
+                <span className="text-gray-600">{isPastMode ? "Upcoming" : "Past"}</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded-full bg-emerald-100" />
@@ -270,7 +283,7 @@ export function DatePickerModal({
               {daysInMonth.map((date, i) => {
                 if (!date) return <div key={`empty-${i}`} className="aspect-square" />;
 
-                const isDisabled = isPastDate(date);
+                const isDisabled = isPastMode ? isFutureDate(date) : isPastDate(date);
                 const active = isSelected(date);
                 const today = isToday(date);
                 const dayStatus = getDayStatus(date);
@@ -296,7 +309,7 @@ export function DatePickerModal({
                         : "bg-white text-gray-700 border-gray-300 hover:border-blue-400 hover:bg-blue-50 cursor-pointer"
                     )}
                     title={
-                      isDisabled ? "Past date"
+                      isDisabled ? (isPastMode ? "Upcoming date" : "Past date")
                       : isFullyBooked ? "Fully booked"
                       : dayStatus === 'has-bookings' ? "Has Bookings"
                       : "Available"

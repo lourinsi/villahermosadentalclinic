@@ -56,6 +56,7 @@ import {
   AlertDialogTitle,
   AlertDialogFooter as Footer,
 } from "./ui/alert-dialog";
+import PastAppointmentButton from "./PastAppointmentButton";
 
 interface RequestsViewProps {
   doctorFilter?: string;
@@ -525,6 +526,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
           </h1>
           <p className="text-gray-500 font-medium">Review and manage appointment requests</p>
         </div>
+        <PastAppointmentButton doctorName={doctorFilter} className="rounded-xl" />
       </div>
 
       <Tabs defaultValue="requests" className="space-y-6">
