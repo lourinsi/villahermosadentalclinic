@@ -1,3 +1,5 @@
+import { apiUrl } from "@/lib/api";
+import { normalizeAppointmentStatus } from "@/lib/appointment-status";
 import { useState, useEffect } from "react";
 import { RecentTransaction } from "../lib/finance-types";
 
@@ -30,7 +32,7 @@ export interface Appointment {
   updatedAt?: string;
 }
 
-const API_URL = "http://localhost:3001/api/appointments";
+const API_URL = apiUrl("/api/appointments");
 
 export interface AppointmentFilters {
   startDate?: string;
@@ -68,7 +70,6 @@ export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFi
 
         const url = queryParams.toString() ? `${API_URL}?${queryParams.toString()}` : API_URL;
         try {
-          // eslint-disable-next-line no-console
           console.debug("useAppointments: fetching appointments URL:", url);
         } catch (e) {}
         
@@ -84,7 +85,12 @@ export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFi
         const response = await fetch(url, { headers, credentials: "include" });
         const result = await response.json();
         if (result.success && result.data) {
-          setAppointments(result.data);
+          setAppointments(
+            result.data.map((appointment: Appointment) => ({
+              ...appointment,
+              status: normalizeAppointmentStatus(appointment.status),
+            }))
+          );
         }
       } catch (error) {
         console.error("Error loading appointments from backend:", error);
@@ -116,7 +122,10 @@ export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFi
       });
       const result = await response.json();
       if (result.success && result.data) {
-        const newAppointment = result.data;
+        const newAppointment = {
+          ...result.data,
+          status: normalizeAppointmentStatus(result.data.status),
+        };
         setAppointments([...appointments, newAppointment]);
         return newAppointment;
       }
@@ -145,11 +154,15 @@ export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFi
       });
       const result = await response.json();
       if (result.success && result.data) {
+        const normalizedResult = {
+          ...result.data,
+          status: normalizeAppointmentStatus(result.data.status),
+        };
         const updated = appointments.map((apt) =>
-          apt.id === id ? { ...apt, ...result.data } : apt
+          apt.id === id ? { ...apt, ...normalizedResult } : apt
         );
         setAppointments(updated);
-        return result.data;
+        return normalizedResult;
       }
       throw new Error(result.message || "Failed to update appointment");
     } catch (error) {

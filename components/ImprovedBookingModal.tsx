@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import { apiUrl } from "@/lib/api";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -18,92 +19,43 @@ import { formatTimeTo12h, TIME_SLOTS } from "@/lib/time-slots";
 import { APPOINTMENT_PRICES, getAppointmentTypeName } from "@/lib/appointmentTypes";
 import { toast } from 'sonner';
 import useSharedBookingLogic, {
+  DEFAULT_APPOINTMENT_TYPE_DURATIONS as appointmentTypeDurations,
   PAST_APPOINTMENT_STATUS_VALUES,
+  findNextAvailableBookingSlot,
+  formatBookingDoctorName as formatDoctorName,
+  getBookingAppointmentTypeIndex as getAppointmentTypeIndex,
+  getBookingAppointmentStatusConfig,
+  getBookingAutoPreselectConfig,
   getBookingActor,
+  getBookingCancellationConfig,
   getBookingConflictWarnings,
-  getDefaultPastAppointmentDate,
+  getBookingCreateDate,
+  getBookingCreateTime,
+  getBookingDefaultDate,
+  getBookingDefaultScheduleAction,
+  getBookingDefaultTime,
+  getBookingEditDate,
+  getBookingEditTime,
+  getBookingPaymentStatusConfig,
+  getBookingStatusLabel,
+  CART_APPOINTMENT_STATUS,
+  getBookingDoctorInitials as getDoctorInitials,
   getProjectedBookingStatus,
   getProjectedPaymentStatus,
+  isCartAppointmentStatus,
+  isPastAppointmentDate,
+  normalizeBookingDoctorName as normalizeDoctorName,
+  normalizePastAppointmentStatus,
+  toBookingPatientOption as toPatientOption,
 } from './sharedBookingLogic';
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { DatePickerModal } from "./DatePickerModal";
 import { TimePickerModal } from "./TimePickerModal";
 import { useDoctors } from "@/hooks/useDoctors";
-import { cachePublicBookingPatient, createPublicBookingAppointment, getCachedPublicBookingPatients } from "@/lib/publicBookingCache";
+import { cachePublicBookingAppointment, cachePublicBookingPatient, createPublicBookingAppointment, getCachedPublicBlockingAppointments, getCachedPublicBookingPatients } from "@/lib/publicBookingCache";
 import type { BookingCreationMode, BookingMode } from "./sharedBookingLogic";
 
 type ImprovedBookingStep = "patient" | "schedule" | "doctor" | "treatment" | "payment";
-
-// Helper function to get appointment type index from name
-const getAppointmentTypeIndex = (typeName: string): number => {
-  const typeMap: Record<string, number> = {
-    "Routine Cleaning": 0,
-    "Checkup": 1,
-    "Filling": 2,
-    "Root Canal": 3,
-    "Extraction": 4,
-    "Whitening": 5,
-    "Other": 6,
-  };
-  return typeMap[typeName] ?? 6;
-};
-
-
-
-
-// Helper function to get status label from status array
-const getStatusLabel = (statusValue: string, statuses: AppointmentStatusOption[]): string => {
-  const status = statuses.find(s => s.value === statusValue);
-  return status?.label || statusValue.charAt(0).toUpperCase() + statusValue.slice(1);
-};
-
-// Helper function to get payment status label from payment status array
-const getPaymentStatusLabel = (statusValue: string, statuses: PaymentStatusOption[]): string => {
-  const status = statuses.find(s => s.value === statusValue);
-  return status?.label || statusValue.charAt(0).toUpperCase() + statusValue.slice(1);
-};
-
-const defaultAppointmentStatusOptions: AppointmentStatusOption[] = [
-  { key: 1, value: "scheduled", label: "Scheduled", description: "Confirmed and scheduled", bgColor: "bg-emerald-100", textColor: "text-emerald-700" },
-  { key: 2, value: "pending", label: "Pending", description: "Awaiting confirmation", bgColor: "bg-purple-100", textColor: "text-purple-700" },
-  { key: 3, value: "reserved", label: "Reserved", description: "Tentatively reserved", bgColor: "bg-amber-100", textColor: "text-amber-700" },
-  { key: 4, value: "cancelled", label: "Cancelled", description: "Appointment cancelled", bgColor: "bg-red-100", textColor: "text-red-700" },
-  { key: 5, value: "completed", label: "Completed", description: "Appointment completed", bgColor: "bg-blue-100", textColor: "text-blue-700" },
-  { key: 6, value: "tbd", label: "TBD", description: "Past appointment awaiting completion status", bgColor: "bg-red-100", textColor: "text-red-700" },
-];
-
-const defaultPaymentStatusOptions: PaymentStatusOption[] = [
-  { key: 1, value: "paid", label: "Paid", description: "Payment completed in full", bgColor: "bg-emerald-50", textColor: "text-emerald-700" },
-  { key: 2, value: "unpaid", label: "Unpaid", description: "Payment not yet made", bgColor: "bg-gray-50", textColor: "text-gray-700" },
-  { key: 3, value: "half-paid", label: "Half Paid", description: "Partial payment received", bgColor: "bg-orange-50", textColor: "text-orange-700" },
-  { key: 4, value: "overdue", label: "Overdue", description: "Payment past due date", bgColor: "bg-red-50", textColor: "text-red-700" },
-  { key: 5, value: "pay-at-clinic", label: "Pay at Clinic", description: "Payment to be made at clinic", bgColor: "bg-blue-50", textColor: "text-blue-700" },
-];
-
-// Helper function to format doctor name consistently
-const formatDoctorName = (name?: string): string => {
-  if (!name || name === '—') return "—";
-  const cleanName = name.replace(/^Dr\.\s+/i, "");
-  return `Dr. ${cleanName}`;
-};
-
-const normalizeDoctorName = (name?: string) => (name || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim();
-
-const getDoctorInitials = (name?: string) => {
-  const cleanName = (name || "Doctor").replace(/^Dr\.\s+/i, "").trim();
-  return cleanName
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase();
-};
-
-const toPatientOption = (patient: any) => ({
-  id: String(patient.id),
-  name: patient.name || `${patient.firstName || ""} ${patient.lastName || ""}`.trim() || "Patient",
-  ...patient,
-});
 
 type BookingHistoryLog = any & {
   logType: "appointment" | "payment";
@@ -241,17 +193,6 @@ interface BookingModalProps {
   appointmentCreationMode?: BookingCreationMode;
 }
 
-// Map appointment types to default durations (in minutes)
-const appointmentTypeDurations: Record<string, number> = {
-  "Routine Cleaning": 30,
-  "Checkup": 30,
-  "Filling": 60,
-  "Root Canal": 90,
-  "Extraction": 60,
-  "Whitening": 60,
-  "Other": 30,
-};
-
 export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, defaultPatientId, onBooked, onDeleted, appointmentToEdit, title, bookingMode = "standard", appointmentCreationMode = "standard" }: BookingModalProps) {
   const { user } = useAuth();
   const { doctors } = useDoctors(undefined, { publicBooking: bookingMode === "public" && !user?.role });
@@ -297,6 +238,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [patientConflict, setPatientConflict] = useState("");
   const [patientAppointments, setPatientAppointments] = useState<any[]>([]);
   const lastHandledAddedPatientAtRef = useRef<number | null>(null);
+  const appliedDefaultScheduleKeyRef = useRef<string | null>(null);
 
   // Log all available statuses when modal opens
   useEffect(() => {
@@ -305,6 +247,36 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     }
   }, [open, appointmentStatuses]);
 
+  useEffect(() => {
+    if (!open) {
+      appliedDefaultScheduleKeyRef.current = null;
+    }
+  }, [open]);
+
+  const {
+    isPublicBookingMode,
+    canCreatePatients,
+    canManagePricing,
+    canManageStatuses,
+    isPatientLevelBookingMode,
+    isDoctorSelectionLocked,
+  } = getBookingActor({
+    userRole: user?.role,
+    bookingMode,
+  });
+  const publicBlockingAppointments = useMemo(
+    () => (isPublicBookingMode ? getCachedPublicBlockingAppointments() : []),
+    [
+      isPublicBookingMode,
+      open,
+      selectedDate,
+      selectedTime,
+      selectedPatient,
+      selectedDoctor,
+      appointmentToEdit?.id,
+    ]
+  );
+
   // Fetch all appointments for the day to check conflicts across all doctors and patients
   useEffect(() => {
     if (!open || !selectedDate) return;
@@ -312,8 +284,22 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     const fetchDailyAppointments = async () => {
       try {
         const dateStr = formatDateToYYYYMMDD(selectedDate);
+        if (isPublicBookingMode) {
+          const filtered = publicBlockingAppointments.filter(
+            (apt: any) =>
+              apt.date === dateStr && String(apt.id) !== String(appointmentToEdit?.id || "")
+          );
+          setDailyAppointments(filtered);
+          setPatientAppointments(
+            selectedPatient
+              ? filtered.filter((apt: any) => String(apt.patientId) === String(selectedPatient))
+              : []
+          );
+          return;
+        }
+
         const res = await fetch(
-          `http://localhost:3001/api/appointments?startDate=${dateStr}&endDate=${dateStr}`,
+          apiUrl(`/api/appointments?startDate=${dateStr}&endDate=${dateStr}`),
           { credentials: 'include' }
         );
         if (res.ok) {
@@ -348,7 +334,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               summary: {
                 scheduled: byStatus['scheduled']?.length || 0,
                 reserved: byStatus['reserved']?.length || 0,
-                pending: byStatus['pending']?.length || 0,
+                cart: byStatus[CART_APPOINTMENT_STATUS]?.length || byStatus['pending']?.length || 0,
                 completed: byStatus['completed']?.length || 0,
               },
               
@@ -403,77 +389,71 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     };
     
     fetchDailyAppointments();
-  }, [open, selectedDate, selectedPatient, appointmentToEdit?.id]);
+  }, [open, selectedDate, selectedPatient, appointmentToEdit?.id, isPublicBookingMode, publicBlockingAppointments]);
 
   // Read-only for patient viewing their own booked/reserved appointment: only notes editable
-  const isCancelled = (appointmentStatus || appointmentToEdit?.status || '').toLowerCase() === 'cancelled';
+  const { isCancelled, canCancelAppointment } = getBookingCancellationConfig({
+    appointmentToEdit,
+    appointmentStatus,
+  });
   const isPatientReadonly = Boolean(appointmentToEdit && user?.role === 'patient');
   const isEditMode = Boolean(appointmentToEdit);
   const isPastAppointmentMode = appointmentCreationMode === "past" && !appointmentToEdit;
-  const {
-    isPublicBookingMode,
-    canCreatePatients,
-    canManagePricing,
-    canManageStatuses,
-    isPatientLevelBookingMode,
-    isDoctorSelectionLocked,
-  } = getBookingActor({
-    userRole: user?.role,
-    bookingMode,
-  });
+  const isPastStatusRestricted = isPastAppointmentMode || isPastAppointmentDate(selectedDate ?? appointmentToEdit?.date);
+  const isPublicCachedAppointment = isPublicBookingMode && Boolean(appointmentToEdit?.isPublicCache);
+  const getLocalPublicAppointmentLogs = useCallback(() => {
+    if (!isPublicCachedAppointment || !appointmentToEdit?.id) return [];
+
+    return [
+      {
+        id: `local_public_log_${appointmentToEdit.id}`,
+        appointmentId: appointmentToEdit.id,
+        previousState: { status: "none", paymentStatus: "none", price: 0, balance: 0, totalPaid: 0 },
+        newState: appointmentToEdit,
+        changedBy: "public",
+        changedByName: appointmentToEdit.patientName || "Public Patient",
+        changedAt: appointmentToEdit.createdAt || appointmentToEdit.cachedAt || appointmentToEdit.updatedAt || new Date().toISOString(),
+        changeType: "update",
+        amount: appointmentToEdit.totalPaid || 0,
+        notes: appointmentToEdit.notes,
+      },
+    ];
+  }, [appointmentToEdit, isPublicCachedAppointment]);
+
+  const getLocalPublicPaymentLogs = useCallback(() => {
+    const amount = Number(appointmentToEdit?.totalPaid || 0);
+    if (!isPublicCachedAppointment || !appointmentToEdit?.id || amount <= 0) return [];
+
+    return [
+      {
+        id: `local_public_payment_${appointmentToEdit.id}`,
+        appointmentId: appointmentToEdit.id,
+        amount,
+        paymentMethod: appointmentToEdit.paymentMethod || "payment",
+        paymentStatus: appointmentToEdit.paymentStatus || "unpaid",
+        changedBy: "public",
+        changedByName: appointmentToEdit.patientName || "Public Patient",
+        changedAt: appointmentToEdit.createdAt || appointmentToEdit.cachedAt || appointmentToEdit.updatedAt || new Date().toISOString(),
+        previousBalance: appointmentToEdit.price || 0,
+        newBalance: appointmentToEdit.balance || 0,
+      },
+    ];
+  }, [appointmentToEdit, isPublicCachedAppointment]);
   const canEditAppointmentStatus = canManageStatuses && !isPatientReadonly;
-  const defaultAppointmentStatusValue = isPastAppointmentMode ? "tbd" : "scheduled";
-  const currentAppointmentStatusValue = appointmentStatus || appointmentToEdit?.status || defaultAppointmentStatusValue;
-  const baseAppointmentStatusOptions = appointmentStatuses.length > 0 ? appointmentStatuses : defaultAppointmentStatusOptions;
-  const selectableAppointmentStatusOptions = canManageStatuses
-    ? baseAppointmentStatusOptions.filter((status) =>
-        isPastAppointmentMode
-          ? PAST_APPOINTMENT_STATUS_VALUES.includes(status.value as typeof PAST_APPOINTMENT_STATUS_VALUES[number])
-          : status.value !== "pending"
-      )
-    : baseAppointmentStatusOptions;
-  const appointmentStatusOptions: AppointmentStatusOption[] =
-    currentAppointmentStatusValue &&
-    !(canManageStatuses && currentAppointmentStatusValue === "pending") &&
-    !(isPastAppointmentMode && !PAST_APPOINTMENT_STATUS_VALUES.includes(currentAppointmentStatusValue as typeof PAST_APPOINTMENT_STATUS_VALUES[number])) &&
-    !selectableAppointmentStatusOptions.some((status) => status.value === currentAppointmentStatusValue)
-      ? [
-          {
-            key: 0,
-            value: currentAppointmentStatusValue,
-            label: getStatusLabel(currentAppointmentStatusValue, []),
-            description: "Current appointment status",
-            bgColor: "bg-gray-100",
-            textColor: "text-gray-700",
-          },
-          ...selectableAppointmentStatusOptions,
-        ]
-      : selectableAppointmentStatusOptions;
+  const { appointmentStatusOptions } = getBookingAppointmentStatusConfig<AppointmentStatusOption>({
+    appointmentStatus,
+    existingStatus: appointmentToEdit?.status,
+    isPastStatusRestricted,
+    canManageStatuses,
+    statusOptions: appointmentStatuses,
+  });
   const getAppointmentStatusOption = (statusValue: string) =>
     appointmentStatusOptions.find((status) => status.value === statusValue);
-  const currentPaymentStatusValue = paymentStatus || appointmentToEdit?.paymentStatus || "unpaid";
-  const fetchedPaymentStatusOptions = paymentStatuses.length > 0 ? paymentStatuses : defaultPaymentStatusOptions;
-  const basePaymentStatusOptions = [
-    ...fetchedPaymentStatusOptions,
-    ...defaultPaymentStatusOptions.filter(
-      (fallbackStatus) => !fetchedPaymentStatusOptions.some((status) => status.value === fallbackStatus.value)
-    ),
-  ];
-  const paymentStatusOptions: PaymentStatusOption[] =
-    currentPaymentStatusValue &&
-    !basePaymentStatusOptions.some((status) => status.value === currentPaymentStatusValue)
-      ? [
-          {
-            key: 0,
-            value: currentPaymentStatusValue,
-            label: getPaymentStatusLabel(currentPaymentStatusValue, basePaymentStatusOptions),
-            description: "Current payment status",
-            bgColor: "bg-gray-100",
-            textColor: "text-gray-700",
-          },
-          ...basePaymentStatusOptions,
-        ]
-      : basePaymentStatusOptions;
+  const { paymentStatusOptions } = getBookingPaymentStatusConfig<PaymentStatusOption>({
+    paymentStatus,
+    existingStatus: appointmentToEdit?.paymentStatus,
+    statusOptions: paymentStatuses,
+  });
   const getPaymentStatusOption = (statusValue: string) =>
     paymentStatusOptions.find((status) => status.value === statusValue);
 
@@ -495,13 +475,18 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // Fetch logs when appointment is being edited
   useEffect(() => {
+    // Fetch logs for any appointment being edited, including public-cached ones.
+    // Public cached appointments may still have server logs, so avoid skipping fetch.
     if (open && appointmentToEdit?.id) {
       console.log(`[BookingModal] 🔍 FETCHING LOGS for appointment: ${appointmentToEdit.id}`);
       const fetchLogs = async () => {
         // Add a small delay to ensure backend has finished saving before fetching
         await new Promise(resolve => setTimeout(resolve, 500));
         try {
-          const res = await fetch(`http://localhost:3001/api/appointments/${appointmentToEdit.id}/logs`, { credentials: 'include' });
+          let url = apiUrl(`/api/appointments/${appointmentToEdit.id}/logs`);
+          const publicToken = (appointmentToEdit as any).publicToken || (appointmentToEdit as any).publicAccessToken;
+          if (publicToken) url = `${url}?publicToken=${encodeURIComponent(String(publicToken))}`;
+          const res = await fetch(url, { credentials: 'include' });
           if (res.ok) {
             const json = await res.json();
             console.log(`[BookingModal] ✅ LOGS FETCHED:`, { 
@@ -509,51 +494,59 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               logs: json.data 
             });
             if (json.success) {
-              setAppointmentLogs(json.data || []);
+              const logs = json.data || [];
+              setAppointmentLogs(logs.length > 0 ? logs : getLocalPublicAppointmentLogs());
             }
           } else if (res.status === 404) {
             // 404 is expected if logs endpoint doesn't exist or no logs available yet
             console.log(`[BookingModal] ℹ️ No logs available for this appointment`);
-            setAppointmentLogs([]);
+            setAppointmentLogs(getLocalPublicAppointmentLogs());
           } else {
             console.warn(`[BookingModal] ⚠️ Failed to fetch logs with status:`, res.status);
-            setAppointmentLogs([]);
+            setAppointmentLogs(getLocalPublicAppointmentLogs());
           }
         } catch (err) {
           console.warn("[BookingModal] ⚠️ Could not fetch appointment logs:", err);
-          setAppointmentLogs([]);
+          setAppointmentLogs(getLocalPublicAppointmentLogs());
         }
       };
       fetchLogs();
     } else if (!open) {
       setAppointmentLogs([]);
     }
-  }, [open, appointmentToEdit]);
+  }, [open, appointmentToEdit, isPublicCachedAppointment, getLocalPublicAppointmentLogs]);
 
   // Fetch payment logs when appointment is being edited
   useEffect(() => {
+    // Fetch payment logs for any appointment being edited, including public-cached ones.
     if (open && appointmentToEdit?.id) {
       const fetchPaymentLogs = async () => {
         // Add a small delay to ensure backend has finished saving before fetching
         await new Promise(resolve => setTimeout(resolve, 500));
         try {
-          const res = await fetch(`http://localhost:3001/api/appointments/${appointmentToEdit.id}/payments`, { credentials: 'include' });
+          let url = apiUrl(`/api/appointments/${appointmentToEdit.id}/payments`);
+          const publicToken = (appointmentToEdit as any).publicToken || (appointmentToEdit as any).publicAccessToken;
+          if (publicToken) url = `${url}?publicToken=${encodeURIComponent(String(publicToken))}`;
+          const res = await fetch(url, { credentials: 'include' });
           if (res.ok) {
             const json = await res.json();
             if (json.success) {
-              setPaymentLogs(json.data || []);
+              const logs = json.data || [];
+              setPaymentLogs(logs.length > 0 ? logs : getLocalPublicPaymentLogs());
             }
+          } else {
+            setPaymentLogs(getLocalPublicPaymentLogs());
           }
         } catch (err) {
           console.warn("[BookingModal] ⚠️ Could not fetch payment logs:", err);
-          setPaymentLogs([]);
+          setPaymentLogs(getLocalPublicPaymentLogs());
         }
       };
       fetchPaymentLogs();
     } else if (!open) {
       setPaymentLogs([]);
     }
-  }, [open, appointmentToEdit]);
+  }, [open, appointmentToEdit, isPublicCachedAppointment, getLocalPublicPaymentLogs]);
 
   // Check if a time + duration combination overlaps with existing appointments for selected doctor
   const checkDurationConflict = useCallback((time: string, durationMins: number): boolean => {
@@ -568,10 +561,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     const normalizeName = (name: string) => (name || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim();
     const targetDoctor = normalizeName(selectedDoctor);
 
-    // Filter daily appointments for the selected doctor - exclude pending as they can be overridden
+    // Filter daily appointments for the selected doctor - exclude cart items as they can be overridden
     const doctorAppts = dailyAppointments.filter(apt => 
       normalizeName(apt.doctor) === targetDoctor && 
-      (apt.status || "").toLowerCase() !== "pending"
+      !isCartAppointmentStatus(apt.status)
     );
     
     // DEBUG: Log the filtering process
@@ -624,7 +617,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     const targetDoctor = normalizeName(selectedDoctor);
     const doctorAppts = dailyAppointments.filter(apt => 
       normalizeName(apt.doctor) === targetDoctor && 
-      (apt.status || "").toLowerCase() !== "pending"
+      !isCartAppointmentStatus(apt.status)
     );
 
     for (const apt of doctorAppts) {
@@ -701,7 +694,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         const targetDoctor = normalizeName(selectedDoctor);
         const doctorAppts = dailyAppointments.filter(apt => 
           normalizeName(apt.doctor) === targetDoctor && 
-          (apt.status || "").toLowerCase() !== "pending"
+          !isCartAppointmentStatus(apt.status)
         );
         
         const blockingAppts = doctorAppts.filter((apt: any) => {
@@ -836,7 +829,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
     // For each appointment in dailyAppointments, check if it overlaps with our selected time slot
     for (const apt of dailyAppointments) {
-      if ((apt.status || "").toLowerCase() === "pending") continue;
+      if (isCartAppointmentStatus(apt.status)) continue;
       let aptStart: Date;
       if (typeof apt.date === 'string' && apt.date.includes('-') && !apt.date.includes(':')) {
         const [aptHours, aptMinutes] = (apt.time || '00:00').split(':').map(Number);
@@ -905,11 +898,11 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   }, [appointmentType]);
 
   useEffect(() => {
-    setSelectedDate(defaultDate ?? new Date());
+    setSelectedDate(getBookingDefaultDate(defaultDate));
   }, [defaultDate]);
 
   useEffect(() => {
-    setSelectedTime(defaultTime ?? "");
+    setSelectedTime(getBookingDefaultTime(defaultTime));
   }, [defaultTime]);
 
   // Debug: log incoming default patient id
@@ -966,168 +959,50 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     }
   }, [open, user?.role, doctors, selectedDoctor, appointmentToEdit?.doctor, doctorName]);
 
-  // Helper function to find next available slot (date + time)
-  const findNextAvailableSlot = useCallback(async (startDate: Date, doctorToCheck: string, durationToCheck: string, patientToCheck?: string): Promise<{ date: Date; time: string } | null> => {
-    if (!doctorToCheck || !durationToCheck) return null;
-    
-    const durationMins = parseInt(durationToCheck, 10) || 30;
-    const maxDaysToCheck = 30; // Check up to 30 days ahead
-    
-    // Helper to get available slots for a given date
-    const getSlotsForDate = async (date: Date): Promise<string[]> => {
-      try {
-        const dateStr = formatDateToYYYYMMDD(date);
-        const res = await fetch(
-          `http://localhost:3001/api/appointments?doctor=${encodeURIComponent(doctorToCheck)}&startDate=${dateStr}&endDate=${dateStr}&includeUnpaid=true`,
-          { credentials: 'include' }
-        );
-        
-        if (!res.ok) return [];
-
-        const json = await res.json();
-        const appointments = json.data || [];
-        console.log('[BookingModal] findNextAvailableSlot fetched appointments for', dateStr, { doctorToCheck, appointmentsCount: appointments.length });
-
-        // If patientToCheck is provided, also fetch that patient's appointments for the same date
-        let patientAppointmentsForDate: any[] = [];
-        if (patientToCheck) {
-          try {
-            const pres = await fetch(
-              `http://localhost:3001/api/appointments?patientId=${encodeURIComponent(patientToCheck)}&startDate=${dateStr}&endDate=${dateStr}&includeUnpaid=true`,
-              { credentials: 'include' }
-            );
-            if (pres.ok) {
-              const pjson = await pres.json();
-              patientAppointmentsForDate = pjson.data || [];
-            }
-          } catch (err) {
-            console.warn('[BookingModal] Failed to fetch patient appointments for auto-search', err);
-            patientAppointmentsForDate = [];
-          }
-          console.log('[BookingModal] findNextAvailableSlot fetched patient appointments for', dateStr, { patientToCheck, patientCount: patientAppointmentsForDate.length });
-        }
-        
-        // Calculate available slots
-        const now = new Date();
-        const todayStr = formatDateToYYYYMMDD(now);
-        const isToday = dateStr === todayStr;
-        
-        const currentHour = now.getHours();
-        const currentMinute = now.getMinutes();
-        
-        const timeToMinutes = (time: string): number => {
-          const [h, m] = time.split(':').map(Number);
-          return h * 60 + m;
-        };
-        
-        const availableSlots: string[] = [];
-        
-        for (const slot of TIME_SLOTS) {
-          const [hour, minute] = slot.split(':').map(Number);
-          const isPastTime = isToday && (hour < currentHour || (hour === currentHour && minute <= currentMinute));
-          
-          if (isPastTime) continue;
-          
-          // Check for booking conflicts
-          const slotMinutes = timeToMinutes(slot);
-          const slotEndMinutes = slotMinutes + durationMins;
-          
-          let isConflict = false;
-          // Check conflicts against doctor's appointments
-          for (const apt of appointments) {
-            if (apt.status === 'cancelled') continue;
-            if (apt.status === 'pending') continue; // Pending can be overridden
-
-            const aptStart = timeToMinutes(apt.time);
-            const aptEnd = aptStart + (apt.duration || 30);
-
-            if (slotMinutes < aptEnd && slotEndMinutes > aptStart) {
-              isConflict = true;
-              break;
-            }
-          }
-
-          // Also check conflicts against patient's own appointments for that date
-          if (!isConflict && patientAppointmentsForDate && patientAppointmentsForDate.length > 0) {
-            for (const apt of patientAppointmentsForDate) {
-              if (apt.status === 'cancelled') continue;
-              if (apt.status === 'pending') continue;
-
-              const aptStart = timeToMinutes(apt.time);
-              const aptEnd = aptStart + (apt.duration || 30);
-
-              if (slotMinutes < aptEnd && slotEndMinutes > aptStart) {
-                isConflict = true;
-                break;
-              }
-            }
-          }
-          
-          if (!isConflict) {
-            availableSlots.push(slot);
-          }
-        }
-        
-        return availableSlots;
-      } catch (err) {
-        console.warn(`[BookingModal] Failed to fetch appointments for date ${formatDateToYYYYMMDD(date)}:`, err);
-        return [];
-      }
-    };
-    
-    // Search for next available slot starting from startDate
-    for (let daysAhead = 0; daysAhead < maxDaysToCheck; daysAhead++) {
-      const checkDate = new Date(startDate);
-      checkDate.setDate(startDate.getDate() + daysAhead);
-      
-      // Skip past dates
-      const now = new Date();
-      now.setHours(0, 0, 0, 0);
-      if (checkDate < now) continue;
-      
-      const availableSlots = await getSlotsForDate(checkDate);
-      
-      if (availableSlots.length > 0) {
-        return {
-          date: checkDate,
-          time: availableSlots[0] // Return first available slot
-        };
-      }
-    }
-    
-    return null;
-  }, []);
-
   // Centralized auto-preselect/validation runner — callable on open and after patients load
   const runAutoPreselect = useCallback(async (patientId?: string) => {
-    if (appointmentToEdit) return; // don't preselect when editing
+    const autoPreselect = getBookingAutoPreselectConfig({
+      isEditing: Boolean(appointmentToEdit),
+      defaultDate,
+      defaultTime,
+      selectedTime,
+      appointmentType,
+      selectedDoctor,
+      selectedPatient,
+      defaultPatientId,
+      patientId,
+      appointmentTypeDurations,
+    });
 
-    // Once a date/time exists, schedule is authoritative. Doctor selection may
-    // surface conflicts, but it must not jump to another slot.
-    if ((defaultDate && defaultTime) || selectedTime) {
-      if (!appointmentType) setAppointmentType('Routine Cleaning');
-      if (defaultDate && defaultTime) {
-        setSelectedDate(defaultDate);
-        setSelectedTime(defaultTime);
-      }
-      return;
-    }
+    if (autoPreselect.type === "skip") return;
 
-    // Generic modal with no selected time can suggest an initial slot.
-    if (!selectedDoctor) {
+    if (!appointmentType) setAppointmentType(autoPreselect.defaultAppointmentType);
+
+    if (autoPreselect.type === "preserve_schedule") return;
+
+    if (autoPreselect.type === "wait_for_doctor") {
       console.log('[BookingModal] ⏳ Waiting for doctor to be selected before auto-preselect...');
       return;
     }
 
-    const defaultDur = appointmentTypeDurations[appointmentType || 'Routine Cleaning'] || 30;
-    const patientToSearch = patientId || selectedPatient || defaultPatientId || undefined;
-    const nextSlot = await findNextAvailableSlot(new Date(), selectedDoctor, String(defaultDur), patientToSearch);
+    if (isPublicBookingMode) {
+      return;
+    }
+
+    const nextSlot = await findNextAvailableBookingSlot({
+      startDate: new Date(),
+      doctorToCheck: autoPreselect.doctorToSearch,
+      durationToCheck: autoPreselect.durationToSearch,
+      patientToCheck: autoPreselect.patientToSearch,
+      timeSlots: TIME_SLOTS,
+    });
+
     if (nextSlot) {
       console.log('[BookingModal] ✅ Found next available slot (on open):', { date: formatDateToYYYYMMDD(nextSlot.date), time: nextSlot.time });
       setSelectedDate(nextSlot.date);
       setSelectedTime(nextSlot.time);
     }
-  }, [appointmentToEdit, defaultDate, defaultTime, appointmentType, selectedDoctor, selectedPatient, defaultPatientId, selectedTime, findNextAvailableSlot]);
+  }, [appointmentToEdit, defaultDate, defaultTime, appointmentType, selectedDoctor, selectedPatient, defaultPatientId, selectedTime, isPublicBookingMode]);
 
   const runAutoPreselectRef = useRef(runAutoPreselect);
 
@@ -1137,41 +1012,39 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // Auto-preselect date, time, and appointment type for all portals
   useEffect(() => {
+    const defaultScheduleAction = getBookingDefaultScheduleAction({
+      open,
+      isEditing: Boolean(appointmentToEdit),
+      defaultDate,
+      defaultTime,
+      doctorName,
+      appliedScheduleKey: appliedDefaultScheduleKeyRef.current,
+    });
+
+    if (defaultScheduleAction.type === "apply") {
+      if (defaultScheduleAction.source === "doctor_availability") {
+        console.log('[BookingModal] 📍 DoctorAvailabilityView context detected');
+        console.log('[BookingModal] ℹ️ Pre-filled with: date=' + formatDateToYYYYMMDD(defaultScheduleAction.date) + ', time=' + defaultScheduleAction.time + ', doctor=' + defaultScheduleAction.doctorName);
+      } else {
+        console.log('[BookingModal] 📍 Using explicitly passed date/time:', {
+          date: formatDateToYYYYMMDD(defaultScheduleAction.date),
+          time: defaultScheduleAction.time,
+          source: 'clicked_slot'
+        });
+      }
+
+      if (!appointmentType) setAppointmentType("Routine Cleaning");
+
+      if (defaultScheduleAction.shouldApplySchedule) {
+        setSelectedDate(defaultScheduleAction.date);
+        setSelectedTime(defaultScheduleAction.time);
+        appliedDefaultScheduleKeyRef.current = defaultScheduleAction.scheduleKey;
+      }
+      return;
+    }
+
     if (!open || appointmentToEdit) return; // Only for new appointments, not editing
-    
-    // CASE 1: Coming from DoctorAvailabilityView (has defaultDate, defaultTime, and doctorName)
-    // Keep the provided date/time. Availability should be shown as a conflict,
-    // not by moving the appointment to the next closest slot.
-    if (defaultDate && defaultTime && doctorName) {
-      console.log('[BookingModal] 📍 DoctorAvailabilityView context detected');
-      console.log('[BookingModal] ℹ️ Pre-filled with: date=' + formatDateToYYYYMMDD(defaultDate) + ', time=' + defaultTime + ', doctor=' + doctorName);
 
-      // Only preselect appointment type if not already set
-      if (!appointmentType) {
-        console.log('[BookingModal] 📋 Preselecting appointment type: Routine Cleaning');
-        setAppointmentType("Routine Cleaning");
-      }
-
-      setSelectedDate(defaultDate);
-      setSelectedTime(defaultTime);
-      return;
-    }
-    
-    // CASE 2: Generic booking modal (explicit defaults passed)
-    // Find next available slot automatically
-    if (defaultDate && defaultTime) {
-      // User clicked a specific time slot - respect it
-      console.log('[BookingModal] 📍 Using explicitly passed date/time:', {
-        date: formatDateToYYYYMMDD(defaultDate),
-        time: defaultTime,
-        source: 'clicked_slot'
-      });
-      if (!appointmentType) {
-        setAppointmentType("Routine Cleaning");
-      }
-      return;
-    }
-    
     // CASE 3: New appointment modal (no defaults at all)
     // Only preselect if not already set
     if (selectedTime) return;
@@ -1184,7 +1057,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     
     // Delegate to centralized runner only while no schedule has been chosen.
     runAutoPreselect();
-  }, [open, appointmentToEdit, defaultDate, defaultTime, doctorName, selectedTime, runAutoPreselect]);
+  }, [open, appointmentToEdit, defaultDate, defaultTime, doctorName, selectedTime, runAutoPreselect, appointmentType]);
 
   // Price calculations - handle custom types
   // finalPrice is the base price (before discount) - used in payment calculations
@@ -1234,7 +1107,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         const fetchOpts: RequestInit = { credentials: 'include' };
         
         // Always fetch from /api/patients - server will filter based on requester role
-        const res = await fetch(`http://localhost:3001/api/patients?limit=1000`, fetchOpts);
+        const res = await fetch(apiUrl(`/api/patients?limit=1000`), fetchOpts);
         
         if (!res.ok) {
           console.error('BookingModal: fetch failed', { status: res.status, statusText: res.statusText });
@@ -1251,7 +1124,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
           if (editPatientId && !list.some((p: any) => String(p.id) === editPatientId)) {
             try {
-              const patientRes = await fetch(`http://localhost:3001/api/patients/${encodeURIComponent(editPatientId)}`, fetchOpts);
+              const patientRes = await fetch(apiUrl(`/api/patients/${encodeURIComponent(editPatientId)}`), fetchOpts);
               const patientJson = await patientRes.json();
               if (patientJson?.success && patientJson.data) {
                 list = [toPatientOption(patientJson.data), ...list];
@@ -1357,8 +1230,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       // Notes from history remain visible in the AppointmentHistoryView below,
       // but they are not auto-copied into the editable notes field.
       setNotes('');
-      setSelectedDate(appointmentToEdit.date ? new Date(appointmentToEdit.date) : (defaultDate ?? new Date()));
-      setSelectedTime(appointmentToEdit.time || (defaultTime ?? ''));
+      setSelectedDate(getBookingEditDate({ appointmentDate: appointmentToEdit.date, defaultDate }));
+      setSelectedTime(getBookingEditTime({ appointmentTime: appointmentToEdit.time, defaultTime }));
       // Set doctor from the appointment
       if (appointmentToEdit.doctor) {
         setSelectedDoctor(appointmentToEdit.doctor);
@@ -1386,8 +1259,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       setDiscount('0');
       setCustomPrice('0');
       setNotes('');
-      setSelectedDate(defaultDate ?? (isPastAppointmentMode ? getDefaultPastAppointmentDate() : new Date()));
-      setSelectedTime(defaultTime ?? '');
+      setSelectedDate(getBookingCreateDate({ defaultDate, isPastAppointmentMode }));
+      setSelectedTime(getBookingCreateTime(defaultTime));
       setSelectedDoctor(doctorName || (user?.role === 'doctor' ? user.username : ''));
       setAmountToPay('');
       setAppointmentStatus(isPastAppointmentMode ? 'tbd' : 'scheduled');
@@ -1447,7 +1320,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
     return dailyAppointments.some((apt: any) => {
       if (normalizeDoctorName(apt.doctor) !== targetDoctor) return false;
-      if ((apt.status || "").toLowerCase() === "pending") return false;
+      if (isCartAppointmentStatus(apt.status)) return false;
 
       const aptDate = typeof apt.date === 'string' && apt.date.includes('-') && !apt.date.includes(':')
         ? new Date(apt.date)
@@ -1479,6 +1352,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     if (modalStep === 'schedule') return showDoctorStep ? 'Next: Doctor' : 'Next: Treatment';
     if (modalStep === 'doctor') return 'Next: Treatment';
     if (modalStep === 'treatment') return 'Next: Payment';
+    // final step (payment) - show 'Add to Cart' when the projected status is a cart item
+    if (modalStep === 'payment') {
+      return isCartAppointmentStatus(getFinalAppointmentStatus()) ? 'Add to Cart' : 'Confirm & Save';
+    }
     return 'Confirm & Save';
   };
   
@@ -1505,13 +1382,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // Handler for status changes that sets the flag
   const handleStatusChange = (newStatus: string) => {
-    if (isPastAppointmentMode && !PAST_APPOINTMENT_STATUS_VALUES.includes(newStatus as typeof PAST_APPOINTMENT_STATUS_VALUES[number])) {
+    if (isPastStatusRestricted && !PAST_APPOINTMENT_STATUS_VALUES.includes(newStatus as typeof PAST_APPOINTMENT_STATUS_VALUES[number])) {
       toast.error("Past appointments can only be Cancelled, Completed, or TBD.");
       return;
     }
 
-    if (canManageStatuses && newStatus === "pending") {
-      toast.error("Pending is reserved for patient carts.");
+    if (canManageStatuses && isCartAppointmentStatus(newStatus)) {
+      toast.error("Add to Cart is reserved for patient carts.");
       return;
     }
     setAppointmentStatus(newStatus);
@@ -1544,10 +1421,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // Calculate what the final status will be for display in summary
   const getProjectedStatus = () => {
-    if (isPastAppointmentMode) {
-      return PAST_APPOINTMENT_STATUS_VALUES.includes(appointmentStatus as typeof PAST_APPOINTMENT_STATUS_VALUES[number])
-        ? appointmentStatus
-        : 'tbd';
+    if (isPastStatusRestricted) {
+      return normalizePastAppointmentStatus(appointmentStatus || appointmentToEdit?.status);
     }
 
     const amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
@@ -1655,23 +1530,47 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         // Determine appointment status using the new function that includes override logic
         const updateAppointmentStatus = getFinalAppointmentStatus();
 
-        const updated = await updateAppointment(appointmentToEdit.id, {
-          patientId: selectedPatient,
-          patientName: patients.find(p => p.id === selectedPatient)?.name || selectedPatient,
-          doctor: appointmentToEdit.doctor || doctorName || '',
-          date: dateStr,
-          time: selectedTime,
-          type: getAppointmentTypeIndex(appointmentType),
-          customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-          duration: Number(duration) || 30,
-          price: finalPrice,
-          discount: Number(discount) || 0,
-          notes,
-          status: updateAppointmentStatus as any,
-          paymentStatus: updatePaymentStatus as any,
-          totalPaid: newTotalPaid,
-          balance: newBalance,
-        });
+        const selectedPatientRecord = patients.find(p => String(p.id) === String(selectedPatient));
+        const updated = isPublicCachedAppointment
+          ? cachePublicBookingAppointment({
+              ...appointmentToEdit,
+              patientId: selectedPatient,
+              patientName: selectedPatientRecord?.name || appointmentToEdit.patientName || selectedPatient,
+              publicPatient: selectedPatientRecord || appointmentToEdit.publicPatient,
+              doctor: selectedDoctor || appointmentToEdit.doctor || doctorName || '',
+              date: dateStr,
+              time: selectedTime,
+              type: getAppointmentTypeIndex(appointmentType),
+              customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
+              duration: Number(duration) || 30,
+              price: finalPrice,
+              discount: Number(discount) || 0,
+              notes,
+              status: updateAppointmentStatus as any,
+              paymentStatus: updatePaymentStatus as any,
+              paymentMethod,
+              totalPaid: newTotalPaid,
+              balance: newBalance,
+              updatedAt: new Date().toISOString(),
+              isPublicCache: true,
+            } as any)
+          : await updateAppointment(appointmentToEdit.id, {
+              patientId: selectedPatient,
+              patientName: selectedPatientRecord?.name || selectedPatient,
+              doctor: appointmentToEdit.doctor || doctorName || '',
+              date: dateStr,
+              time: selectedTime,
+              type: getAppointmentTypeIndex(appointmentType),
+              customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
+              duration: Number(duration) || 30,
+              price: finalPrice,
+              discount: Number(discount) || 0,
+              notes,
+              status: updateAppointmentStatus as any,
+              paymentStatus: updatePaymentStatus as any,
+              totalPaid: newTotalPaid,
+              balance: newBalance,
+            });
 
         // Log the updated appointment details
         console.log('[BookingModal Payment] ✅ APPOINTMENT UPDATED SUCCESSFULLY:', {
@@ -1727,8 +1626,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         });
 
         const selectedPatientRecord = patients.find(p => String(p.id) === String(selectedPatient));
-        const newApt = isPublicBookingMode
-          ? await createPublicBookingAppointment({
+        let newApt: any = null;
+        if (isPublicBookingMode) {
+          if (isCartAppointmentStatus(autoStatus)) {
+            newApt = await createPublicBookingAppointment({
               patient: selectedPatientRecord || { id: selectedPatient, name: selectedPatient },
               date: dateStr,
               time: selectedTime,
@@ -1737,26 +1638,127 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
               doctor: selectedDoctor || '',
               notes,
-            })
-          : await addAppointment({
-              patientId: selectedPatient,
-              patientName: selectedPatientRecord?.name || selectedPatient,
-              doctor: selectedDoctor || '',
-              date: dateStr,
-              time: selectedTime,
-              type: getAppointmentTypeIndex(appointmentType),
-              customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-              duration: Number(duration) || 30,
               price: finalPrice,
               discount: Number(discount) || 0,
-              notes,
               status: autoStatus as any,
               paymentStatus: paymentStatus as any,
+              paymentMethod,
               totalPaid: amountPaid,
               balance: newBalance,
             });
+          } else {
+            // Persist public booking to backend and fallback to local cache on failure
+            try {
+              const patientName = selectedPatientRecord?.name || String(selectedPatient || "");
+              const nameParts = String(patientName).trim().split(/\s+/);
+              const firstName = selectedPatientRecord?.firstName || nameParts[0] || "Patient";
+              const lastName = selectedPatientRecord?.lastName || nameParts.slice(1).join(" ") || "";
+              const payload: any = {
+                firstName,
+                lastName,
+                email: selectedPatientRecord?.email || "",
+                phone: selectedPatientRecord?.phone || "",
+                patientId: selectedPatientRecord?.id,
+                date: dateStr,
+                time: selectedTime,
+                duration: Number(duration) || 30,
+                type: getAppointmentTypeIndex(appointmentType),
+                customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
+                doctor: selectedDoctor || "",
+                notes,
+                // Include status/payment info so the public endpoint can persist non-cart bookings
+                status: autoStatus,
+                paymentStatus: paymentStatus,
+                totalPaid: amountPaid,
+                paymentMethod,
+                price: finalPrice,
+                discount: Number(discount) || 0,
+              };
 
-        // Auto-cancel any overlapping pending appointments for the same doctor
+              const resp = await fetch(apiUrl("/api/appointments/public-book"), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+              });
+              const json = await resp.json();
+              if (resp.ok && json.success) {
+                const serverAppointment = json.data;
+                const publicPatient = selectedPatientRecord
+                  ? cachePublicBookingPatient({
+                      ...selectedPatientRecord,
+                      id: serverAppointment.patientId || selectedPatientRecord.id,
+                      name: serverAppointment.patientName || selectedPatientRecord.name,
+                    })
+                  : undefined;
+                newApt =
+                  cachePublicBookingAppointment({
+                    ...serverAppointment,
+                    publicPatient: publicPatient || selectedPatientRecord,
+                  } as any) || serverAppointment;
+              } else {
+                console.warn("Public booking endpoint returned error, falling back to cache:", json);
+                toast.error(json?.message || "Could not save booking to server; saved locally instead.");
+                newApt = await createPublicBookingAppointment({
+                  patient: selectedPatientRecord || { id: selectedPatient, name: selectedPatient },
+                  date: dateStr,
+                  time: selectedTime,
+                  duration: Number(duration) || 30,
+                  type: getAppointmentTypeIndex(appointmentType),
+                  customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
+                  doctor: selectedDoctor || '',
+                  notes,
+                  price: finalPrice,
+                  discount: Number(discount) || 0,
+                  status: autoStatus as any,
+                  paymentStatus: paymentStatus as any,
+                  paymentMethod,
+                  totalPaid: amountPaid,
+                  balance: newBalance,
+                });
+              }
+            } catch (err) {
+              console.error("Public booking error, falling back to cache:", err);
+              toast.error("Could not save booking to server; saved locally instead.");
+              newApt = await createPublicBookingAppointment({
+                patient: selectedPatientRecord || { id: selectedPatient, name: selectedPatient },
+                date: dateStr,
+                time: selectedTime,
+                duration: Number(duration) || 30,
+                type: getAppointmentTypeIndex(appointmentType),
+                customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
+                doctor: selectedDoctor || '',
+                notes,
+                price: finalPrice,
+                discount: Number(discount) || 0,
+                status: autoStatus as any,
+                paymentStatus: paymentStatus as any,
+                paymentMethod,
+                totalPaid: amountPaid,
+                balance: newBalance,
+              });
+            }
+          }
+        } else {
+          newApt = await addAppointment({
+            patientId: selectedPatient,
+            patientName: selectedPatientRecord?.name || selectedPatient,
+            doctor: selectedDoctor || '',
+            date: dateStr,
+            time: selectedTime,
+            type: getAppointmentTypeIndex(appointmentType),
+            customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
+            duration: Number(duration) || 30,
+            price: finalPrice,
+            discount: Number(discount) || 0,
+            notes,
+            status: autoStatus as any,
+            paymentStatus: paymentStatus as any,
+            totalPaid: amountPaid,
+            balance: newBalance,
+          });
+        }
+
+        // Auto-cancel any overlapping cart appointments for the same doctor
         if (newApt && dailyAppointments.length > 0) {
           const timeToMinutes = (time: string): number => {
             const [h, m] = time.split(':').map(Number);
@@ -1767,8 +1769,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           const newSlotEnd = newSlotStart + (Number(duration) || 30);
 
           const pendingToCancel = dailyAppointments.filter((apt: any) => {
-            // Only cancel pending appointments
-            if (apt.status !== 'pending') return false;
+            // Only cancel cart appointments
+            if (!isCartAppointmentStatus(apt.status)) return false;
             // For the same doctor - use selectedDoctor (the actually selected doctor), not the prop
             const currentDocNormalized = (selectedDoctor || '').replace(/^Dr\.\s+/i, "").toLowerCase();
             const aptDocNormalized = apt.doctor.replace(/^Dr\.\s+/i, "").toLowerCase();
@@ -1781,13 +1783,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             return newSlotStart < aptEnd && newSlotEnd > aptStart;
           });
 
-          // Cancel all overlapping pending appointments
+          // Cancel all overlapping cart appointments
           for (const pendingApt of pendingToCancel) {
             await updateAppointment(pendingApt.id, {
               ...pendingApt,
               status: 'cancelled',
             });
-            console.log('[BookingModal] 🔄 Auto-cancelled overlapping pending appointment:', {
+            console.log('[BookingModal] Auto-cancelled overlapping cart appointment:', {
               pendingId: pendingApt.id,
               pendingPatient: pendingApt.patientName,
               newAppointmentId: newApt.id,
@@ -1837,14 +1839,23 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // Cancel handler (previously named handleDelete) — preserve behavior but use clearer name
   const handleCancel = async () => {
+    // Close the confirmation dialog immediately for better UX (optimistic UI)
+    setIsDeleteDialogOpen(false);
     if (!appointmentToEdit) return;
     setIsBooking(true);
     try {
       // Update status to cancelled instead of deleting
-      const updated = await updateAppointment(appointmentToEdit.id, {
-        ...appointmentToEdit,
-        status: 'cancelled',
-      });
+      const updated = isPublicCachedAppointment
+        ? cachePublicBookingAppointment({
+            ...appointmentToEdit,
+            status: 'cancelled',
+            updatedAt: new Date().toISOString(),
+            isPublicCache: true,
+          } as any)
+        : await updateAppointment(appointmentToEdit.id, {
+            ...appointmentToEdit,
+            status: 'cancelled',
+          });
       try { window.dispatchEvent(new CustomEvent('appointments:updated', { detail: { appointment: updated, appointmentId: appointmentToEdit.id, newStatus: 'cancelled' } })); } catch {}
       if (onBooked) onBooked(updated);
         if (onDeleted) onDeleted(updated);
@@ -1870,53 +1881,53 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 return (
     <>
       <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); else onOpenChange(true); }}>
-        <DialogContent className="max-w-4xl max-h-[95vh] p-0 overflow-hidden border-none shadow-2xl">
-          <DialogHeader className="p-6 bg-white border-b sticky top-0 z-20">
-            <div className="flex items-center justify-between mb-4">
+        <DialogContent className="max-w-full sm:max-w-5xl max-h-[95vh] p-0 overflow-hidden border-none shadow-2xl">
+          <DialogHeader className="p-6 bg-white border-b sticky top-0 z-20 shadow-sm">
+            <div className="flex items-center justify-between mb-2">
               {modalStep !== 'patient' ? (
                 <Button
                   variant="ghost"
                   size="icon"
                   onClick={handlePrevStep}
                   disabled={isBooking}
-                  className="rounded-full hover:bg-gray-100"
+                  className="rounded-full hover:bg-gray-100 h-9 w-9 transition-all"
                 >
                   <ChevronLeft className="h-5 w-5 text-gray-600" />
                 </Button>
               ) : (
-                <div className="w-10" />
+                <div className="w-9" />
               )}
 
-              <DialogTitle className="text-2xl font-bold text-gray-900 flex-1 text-center">
+              <DialogTitle className="text-xl font-black text-gray-900 flex-1 text-center tracking-tight">
                 {title ? title : (
-                  modalStep === 'payment' ? 'Payment Summary' : 
-                  appointmentToEdit ? (isPatientReadonly ? 'View Appointment' : 'Edit Appointment') : 'Appointment Details'
+                  modalStep === 'payment' ? 'Complete Booking' : 
+                  appointmentToEdit ? (isPatientReadonly ? 'View Appointment' : 'Edit Appointment') : 'Book Appointment'
                 )}
               </DialogTitle>
               {isEditMode && mergedHistoryLogs.length > 0 ? (
                 <button
                   type="button"
                   onClick={() => setIsHistoryDialogOpen(true)}
-                  className="relative flex h-10 w-10 items-center justify-center rounded-full text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600"
+                  className="relative flex h-9 w-9 items-center justify-center rounded-full text-gray-500 transition-all hover:bg-blue-50 hover:text-blue-600"
                   title="View appointment history"
                   aria-label="View appointment history"
                 >
-                  <History className="h-5 w-5" />
-                  <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-black text-white shadow-sm">
+                  <History className="h-4.5 w-4.5" />
+                  <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-4.5 items-center justify-center rounded-full bg-blue-600 px-1 text-[9px] font-black text-white shadow-sm">
                     {mergedHistoryLogs.length}
                   </span>
                 </button>
               ) : (
-                <div className="w-10" />
+                <div className="w-9" />
               )}
             </div>
 
             {/* STEP INDICATOR */}
             {!(isCancelled && user?.role === 'patient') && (
-              <div className="relative flex items-center justify-between w-full mt-2 mb-4 px-10">
-                <div className="absolute top-1/2 left-0 w-full h-0.5 bg-gray-100 -translate-y-1/2 z-0" />
+              <div className="relative flex items-center justify-between w-full mt-4 mb-6 px-4 sm:px-12">
+                <div className="absolute top-1/2 left-0 w-full h-1 bg-gray-100 -translate-y-1/2 z-0 rounded-full" />
                 <div
-                  className="absolute top-1/2 left-0 h-0.5 bg-blue-600 -translate-y-1/2 transition-all duration-500 z-0"
+                  className="absolute top-1/2 left-0 h-1 bg-blue-600 -translate-y-1/2 transition-all duration-500 z-0 rounded-full"
                   style={{ width: progressWidth }}
                 />
 
@@ -1931,23 +1942,23 @@ return (
                       type="button"
                       onClick={() => isClickable && setModalStep(step.id)}
                       disabled={!isClickable}
-                      className={`relative z-10 flex flex-col items-center group outline-none transition-all ${isClickable ? 'cursor-pointer hover:opacity-80' : 'cursor-not-allowed opacity-60'}`}
+                      className={`relative z-10 flex flex-col items-center group outline-none transition-all ${isClickable ? 'cursor-pointer' : 'cursor-not-allowed'}`}
                     >
                       <div className={`
-                        flex items-center justify-center w-8 h-8 rounded-full border-2 transition-all duration-300
-                        ${isActive ? 'bg-blue-600 border-blue-600 text-white scale-110 shadow-md' :
+                        flex items-center justify-center w-7 h-7 sm:w-8 sm:h-8 rounded-full border-2 transition-all duration-300
+                        ${isActive ? 'bg-blue-600 border-blue-600 text-white scale-110 shadow-lg shadow-blue-100' :
                           isCompleted ? 'bg-blue-600 border-blue-600 text-white' :
                             'bg-white border-gray-200 text-gray-400'}
                       `}>
                         {isCompleted ? (
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" />
                           </svg>
                         ) : (
-                          <span className="text-xs font-bold">{step.icon}</span>
+                          <span className="text-[10px] sm:text-xs font-bold">{step.icon}</span>
                         )}
                       </div>
-                      <span className={`absolute -bottom-6 text-[9px] font-black uppercase tracking-tighter ${isActive ? 'text-blue-600' : 'text-gray-400'}`}>
+                      <span className={`absolute -bottom-6 text-[8px] sm:text-[9px] font-black uppercase tracking-widest whitespace-nowrap ${isActive ? 'text-blue-600' : 'text-gray-400'}`}>
                         {step.label}
                       </span>
                     </button>
@@ -1957,19 +1968,19 @@ return (
             )}
           </DialogHeader>
 
-          <div className="p-8 overflow-y-auto max-h-[calc(95vh-200px)] bg-gray-50/30">
-            <div className="max-w-3xl mx-auto">
+          <div className="p-4 sm:p-10 overflow-y-auto max-h-[calc(95vh-180px)] bg-gray-50/20">
+            <div className="w-full mx-auto">
               
               {/* STEP 1: PATIENT */}
               {modalStep === 'patient' && (
                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-                  <div className="flex items-center gap-4 mb-8">
-                    <div className="bg-blue-600 p-3.5 rounded-2xl text-white shadow-lg shadow-blue-100">
-                      <Stethoscope className="h-6 w-6" />
+                  <div className="flex items-center gap-5 mb-10">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-[1.25rem] bg-blue-600 text-white shadow-xl shadow-blue-100 ring-4 ring-blue-50">
+                      <Stethoscope className="h-7 w-7" />
                     </div>
                     <div>
-                      <h3 className="text-xl font-black text-gray-900">Select Patient</h3>
-                      <p className="text-sm font-bold text-gray-500">Who is this appointment for?</p>
+                      <h3 className="text-2xl font-black text-gray-900 tracking-tight">Select Patient</h3>
+                      <p className="text-sm font-bold text-gray-400">Who is this appointment for?</p>
                     </div>
                     {canCreatePatients && !isPatientReadonly && (
                       <Button
@@ -1977,20 +1988,20 @@ return (
                         variant="outline"
                         size="sm"
                         onClick={() => openAddPatientModal({ publicBooking: isPublicBookingMode })}
-                        className="ml-auto h-11 px-4 gap-2 rounded-2xl text-xs font-bold border-2 hover:bg-gray-50"
+                        className="ml-auto h-12 px-5 gap-2 rounded-2xl text-[11px] font-black uppercase tracking-widest border-2 hover:bg-gray-50 hover:border-gray-200 transition-all shadow-sm"
                       >
-                        <Plus className="h-3.5 w-3.5" />
+                        <Plus className="h-4 w-4" />
                         New patient
                       </Button>
                     )}
                   </div>
                   <Select value={selectedPatient} onValueChange={setSelectedPatient}>
-                    <SelectTrigger className="h-16 rounded-[2rem] border-2 border-gray-100 bg-white px-6 text-base font-bold">
-                      <SelectValue placeholder="Choose a patient" />
+                    <SelectTrigger className="h-20 rounded-[2rem] border-2 border-gray-100 bg-white px-8 text-lg font-bold shadow-sm hover:border-blue-200 transition-all">
+                      <SelectValue placeholder="Search or choose a patient" />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="rounded-2xl border-none shadow-2xl">
                       {patients.map(p => (
-                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                        <SelectItem key={p.id} value={p.id} className="rounded-xl my-1 mx-2">{p.name}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -2000,35 +2011,35 @@ return (
               {/* STEP 2: SCHEDULE */}
               {modalStep === 'schedule' && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
-                  <div className="flex items-center gap-4 mb-8">
-                    <div className="bg-blue-600 p-3.5 rounded-2xl text-white shadow-lg shadow-blue-100">
-                      <CalendarIcon className="h-6 w-6" />
+                  <div className="flex items-center gap-5 mb-10">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-[1.25rem] bg-blue-600 text-white shadow-xl shadow-blue-100 ring-4 ring-blue-50">
+                      <CalendarIcon className="h-7 w-7" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <h3 className="text-xl font-black text-gray-900">Pick Schedule</h3>
-                      <p className="text-sm font-bold text-gray-500">Select your preferred date and time</p>
+                      <h3 className="text-2xl font-black text-gray-900 tracking-tight">Pick Schedule</h3>
+                      <p className="text-sm font-bold text-gray-400">Select your preferred date and time</p>
                     </div>
                     {scheduleDoctorName && (
-                      <div className="hidden sm:flex max-w-[240px] items-center gap-3 rounded-2xl bg-blue-50 px-4 py-2 text-blue-700">
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white text-blue-600 shadow-sm">
-                          <Stethoscope className="h-4 w-4" />
+                      <div className="hidden sm:flex max-w-[240px] items-center gap-3 rounded-[1.25rem] bg-blue-50 px-5 py-3 text-blue-700 shadow-sm">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-blue-600 shadow-sm">
+                          <Stethoscope className="h-5 w-5" />
                         </div>
                         <div className="min-w-0">
-                          <p className="text-[9px] font-black uppercase tracking-widest text-blue-500">Doctor</p>
-                          <p className="truncate text-xs font-black text-blue-900">{displayDoctor}</p>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-blue-400">Selected Doctor</p>
+                          <p className="truncate text-sm font-black tracking-tight">{displayDoctor}</p>
                         </div>
                       </div>
                     )}
                   </div>
 
                   {scheduleDoctorName && (
-                    <div className="flex sm:hidden items-center gap-3 rounded-2xl border-2 border-blue-100 bg-blue-50 px-4 py-3 text-blue-700">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-blue-600 shadow-sm">
-                        <Stethoscope className="h-4 w-4" />
+                    <div className="flex sm:hidden items-center gap-4 rounded-[1.25rem] border-2 border-blue-50 bg-blue-50/50 px-5 py-4 text-blue-700 shadow-sm">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white text-blue-600 shadow-md">
+                        <Stethoscope className="h-5 w-5" />
                       </div>
                       <div className="min-w-0">
-                        <p className="text-[9px] font-black uppercase tracking-widest text-blue-500">Selected Doctor</p>
-                        <p className="truncate text-sm font-black text-blue-900">{displayDoctor}</p>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-blue-400">Selected Doctor</p>
+                        <p className="truncate text-base font-black tracking-tight">{displayDoctor}</p>
                       </div>
                     </div>
                   )}
@@ -2067,16 +2078,16 @@ return (
               {/* STEP 3: DOCTOR */}
               {modalStep === 'doctor' && (
                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-                  <div className="flex items-center gap-4 mb-8">
-                    <div className="bg-blue-600 p-3.5 rounded-2xl text-white shadow-lg shadow-blue-100">
-                      <Award className="h-6 w-6" />
+                  <div className="flex items-center gap-5 mb-10">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-[1.25rem] bg-blue-600 text-white shadow-xl shadow-blue-100 ring-4 ring-blue-50">
+                      <Award className="h-7 w-7" />
                     </div>
                     <div className="flex-1">
-                      <h3 className="text-xl font-black text-gray-900">Choose Doctor</h3>
-                      <p className="text-sm font-bold text-gray-500">Select your dental specialist</p>
+                      <h3 className="text-2xl font-black text-gray-900 tracking-tight">Choose Doctor</h3>
+                      <p className="text-sm font-bold text-gray-400">Select your dental specialist</p>
                     </div>
                     <div className="hidden sm:block">
-                      <div className="rounded-2xl bg-blue-50 px-4 py-2 text-[10px] font-black uppercase text-blue-700">
+                      <div className="rounded-[1.25rem] bg-blue-50 px-5 py-3 text-[10px] font-black uppercase tracking-widest text-blue-700 shadow-sm">
                         {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} @ {selectedTime ? formatTimeTo12h(selectedTime) : '--:--'}
                       </div>
                     </div>
@@ -2150,13 +2161,13 @@ return (
                 <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4">
                   {/* Treatment Selection */}
                   <div className="space-y-6">
-                    <div className="flex items-center gap-4 mb-8">
-                      <div className="bg-blue-600 p-3.5 rounded-2xl text-white shadow-lg shadow-blue-100">
-                        <Plus className="h-6 w-6" />
+                    <div className="flex items-center gap-5 mb-10">
+                      <div className="flex h-14 w-14 items-center justify-center rounded-[1.25rem] bg-blue-600 text-white shadow-xl shadow-blue-100 ring-4 ring-blue-50">
+                        <Plus className="h-7 w-7" />
                       </div>
                       <div>
-                        <h3 className="text-xl font-black text-gray-900">Select Treatment</h3>
-                        <p className="text-sm font-bold text-gray-500">What service do you need today?</p>
+                        <h3 className="text-2xl font-black text-gray-900 tracking-tight">Select Treatment</h3>
+                        <p className="text-sm font-bold text-gray-400">What service do you need today?</p>
                       </div>
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -2300,40 +2311,42 @@ return (
 
               {/* FINAL STEP: PAYMENT & STATUS */}
               {modalStep === 'payment' && (
-                <div className="mx-auto max-w-3xl space-y-5 py-3 animate-in fade-in slide-in-from-bottom-4">
-                  <div className="flex items-center gap-4">
-                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500 text-white shadow-lg shadow-emerald-100">
-                      <CreditCard className="h-6 w-6" />
+                <div className="mx-auto max-w-4xl space-y-6 py-2 animate-in fade-in slide-in-from-bottom-4">
+                  <div className="flex items-center gap-5">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-[1.25rem] bg-emerald-500 text-white shadow-xl shadow-emerald-100 ring-4 ring-emerald-50">
+                      <CreditCard className="h-7 w-7" />
                     </div>
                     <div>
-                      <h3 className="text-xl font-black text-gray-900">Payment & Status</h3>
-                      <p className="text-sm font-bold text-gray-500">Review the balance and record the payment.</p>
+                      <h3 className="text-2xl font-black text-gray-900 tracking-tight">Payment & Status</h3>
+                      <p className="text-sm font-bold text-gray-400">Review the balance and record the payment.</p>
                     </div>
                   </div>
 
-                  <div className="overflow-hidden rounded-[1.75rem] border border-gray-100 bg-white shadow-sm">
-                    <div className="grid grid-cols-3 divide-x divide-gray-100 bg-gray-50/70">
-                      <div className="px-5 py-4">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Total</p>
-                        <p className="mt-1 text-lg font-black text-gray-900">&#8369;{discountedPrice.toLocaleString()}</p>
+                  <div className="overflow-hidden rounded-[2rem] border border-gray-100 bg-white shadow-xl shadow-gray-100/50">
+                    <div className="grid grid-cols-3 divide-x divide-gray-50 bg-gray-50/50">
+                      <div className="px-6 py-5">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Total Price</p>
+                        <p className="mt-1 text-2xl font-black text-gray-900 tracking-tighter">&#8369;{discountedPrice.toLocaleString()}</p>
                       </div>
-                      <div className="px-5 py-4">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Paid</p>
-                        <p className="mt-1 text-lg font-black text-emerald-600">&#8369;{previouslyPaidAmount.toLocaleString()}</p>
+                      <div className="px-6 py-5">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Amount Paid</p>
+                        <p className="mt-1 text-2xl font-black text-emerald-600 tracking-tighter">&#8369;{previouslyPaidAmount.toLocaleString()}</p>
                       </div>
-                      <div className="px-5 py-4">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Balance</p>
-                        <p className="mt-1 text-lg font-black text-blue-600">&#8369;{remainingBalance.toLocaleString()}</p>
+                      <div className="px-6 py-5">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Due Balance</p>
+                        <p className="mt-1 text-2xl font-black text-blue-600 tracking-tighter">&#8369;{remainingBalance.toLocaleString()}</p>
                       </div>
                     </div>
 
-                    <div className="grid gap-5 p-5 md:grid-cols-[minmax(0,1fr)_250px]">
-                      <div className="min-w-0">
-                        <div className="flex items-center justify-between gap-3">
+                    <div className="grid gap-8 p-8 md:grid-cols-[1fr_300px]">
+                      <div className="space-y-6">
+                        <div className="flex items-center justify-between gap-4">
                           <div className="min-w-0">
-                            <p className="truncate text-base font-black text-gray-900">{selectedTreatmentName}</p>
-                            <p className="text-xs font-bold text-gray-400">
-                              Remaining after payment: &#8369;{projectedRemainingBalance.toLocaleString()}
+                            <p className="truncate text-lg font-black text-gray-900 tracking-tight">{selectedTreatmentName || "Selected Treatment"}</p>
+                            <p className={`text-xs font-bold ${projectedRemainingBalance > 0 ? 'text-blue-500' : 'text-emerald-500'}`}>
+                              {projectedRemainingBalance > 0 
+                                ? `Remaining balance: ₱${projectedRemainingBalance.toLocaleString()}` 
+                                : 'Payment will fully cover the balance'}
                             </p>
                           </div>
                           <Button
@@ -2341,115 +2354,127 @@ return (
                             variant="outline"
                             onClick={() => setAmountToPay(String(remainingBalance))}
                             disabled={paymentMethod === "Pay at Clinic" || remainingBalance <= 0}
-                            className="h-9 shrink-0 rounded-full border-gray-200 px-3 text-[10px] font-black uppercase tracking-widest"
+                            className="h-10 shrink-0 rounded-xl border-gray-200 bg-white px-4 text-[10px] font-black uppercase tracking-widest hover:bg-gray-50 transition-all shadow-sm"
                           >
-                            Full
+                            Full Payment
                           </Button>
                         </div>
 
-                        <div className="relative mt-4 group">
-                          <span className="absolute left-5 top-1/2 -translate-y-1/2 text-xl font-black text-gray-300 transition-colors group-focus-within:text-blue-600">&#8369;</span>
+                        <div className="relative group">
+                          <div className="absolute inset-y-0 left-6 flex items-center pointer-events-none">
+                            <span className="text-2xl font-black text-gray-300 transition-colors group-focus-within:text-blue-600">&#8369;</span>
+                          </div>
                           <Input
                             type="number"
                             min="0"
-                            placeholder={remainingBalance > 0 ? remainingBalance.toLocaleString() : "0"}
+                            placeholder={remainingBalance > 0 ? String(remainingBalance) : "0"}
                             value={amountToPay}
                             onChange={(e: any) => setAmountToPay(e.target.value)}
-                            className="h-16 rounded-2xl border-2 border-gray-100 bg-white pl-12 pr-4 text-2xl font-black shadow-none transition-all appearance-none focus:border-blue-600"
+                            className="h-20 rounded-[1.5rem] border-2 border-gray-100 bg-gray-50/30 pl-14 pr-6 text-3xl font-black shadow-none transition-all appearance-none focus:border-blue-600 focus:bg-white focus:ring-0"
                             disabled={paymentMethod === "Pay at Clinic"}
                           />
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-3 gap-2 md:grid-cols-1">
-                        {[
-                          { id: "GCash", label: "GCash", icon: "GC", color: "bg-blue-600" },
-                          { id: "Card", label: "Card", icon: <CreditCard className="h-4 w-4"/>, color: "bg-indigo-600" },
-                          { id: "Pay at Clinic", label: "Clinic", icon: <Banknote className="h-4 w-4"/>, color: "bg-emerald-600" }
-                        ].map((pm) => (
-                          <button
-                            key={pm.id}
-                            type="button"
-                            aria-pressed={paymentMethod === pm.id}
-                            onClick={() => { setPaymentMethod(pm.id); if (pm.id === "Pay at Clinic") setAmountToPay("0"); }}
-                            className={`flex h-16 items-center justify-center gap-2 rounded-2xl border-2 px-3 text-center transition-all md:justify-start ${
-                              paymentMethod === pm.id
-                                ? 'border-blue-600 bg-blue-50 text-blue-700 shadow-sm shadow-blue-100'
-                                : 'border-gray-100 bg-white text-gray-700 hover:border-gray-200 hover:bg-gray-50'
-                            }`}
-                          >
-                            <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${pm.color} text-[10px] font-black italic text-white`}>
-                              {pm.icon}
-                            </span>
-                            <span className="min-w-0 truncate text-[11px] font-black uppercase tracking-tight">{pm.label}</span>
-                          </button>
-                        ))}
+                      <div className="space-y-3">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-1">Payment Method</p>
+                        <div className="grid grid-cols-1 gap-3">
+                          {[
+                            { id: "GCash", label: "GCash", icon: "GC", color: "bg-blue-600", shadow: "shadow-blue-100" },
+                            { id: "Card", label: "Credit Card", icon: <CreditCard className="h-4 w-4"/>, color: "bg-indigo-600", shadow: "shadow-indigo-100" },
+                            { id: "Pay at Clinic", label: "Pay at Clinic", icon: <Banknote className="h-4 w-4"/>, color: "bg-emerald-600", shadow: "shadow-emerald-100" }
+                          ].map((pm) => (
+                            <button
+                              key={pm.id}
+                              type="button"
+                              aria-pressed={paymentMethod === pm.id}
+                              onClick={() => { setPaymentMethod(pm.id); if (pm.id === "Pay at Clinic") setAmountToPay("0"); }}
+                              className={`flex h-[4.5rem] items-center gap-4 rounded-2xl border-2 px-4 transition-all ${
+                                paymentMethod === pm.id
+                                  ? `border-blue-600 bg-blue-50/50 text-blue-700 shadow-lg ${pm.shadow}`
+                                  : 'border-gray-100 bg-white text-gray-600 hover:border-gray-200 hover:bg-gray-50'
+                              }`}
+                            >
+                              <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${pm.color} text-[10px] font-black italic text-white shadow-lg`}>
+                                {pm.icon}
+                              </div>
+                              <span className="text-sm font-black tracking-tight">{pm.label}</span>
+                              {paymentMethod === pm.id && (
+                                <div className="ml-auto flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-white">
+                                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" />
+                                  </svg>
+                                </div>
+                              )}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <div className="rounded-[1.5rem] border border-gray-100 bg-white p-4 shadow-sm">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
-                            <Stethoscope className="h-4 w-4" />
+                  <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                    <div className="rounded-[2rem] border border-gray-100 bg-white p-6 shadow-xl shadow-gray-100/30 transition-all hover:shadow-gray-100/50">
+                        <div className="flex items-center gap-4">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-[0.9rem] bg-blue-50 text-blue-600 shadow-sm ring-4 ring-blue-50/50">
+                            <Stethoscope className="h-5 w-5" />
                           </div>
-                          <Label className="text-[11px] font-black uppercase tracking-widest text-gray-500">Appointment Status</Label>
+                          <Label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Appointment Status</Label>
                         </div>
-                        <div className="mt-3">
+                        <div className="mt-5">
                           {canEditAppointmentStatus ? (
                             <Select value={getFinalAppointmentStatus()} onValueChange={handleStatusChange} disabled={appointmentStatusOptions.length === 0}>
-                              <SelectTrigger className={`h-11 w-full rounded-xl border-0 bg-gray-50 px-4 text-sm font-black focus:ring-0 focus:ring-offset-0 ${
+                              <SelectTrigger className={`h-12 w-full rounded-xl border-2 border-gray-50 bg-gray-50/50 px-4 text-sm font-black transition-all hover:bg-gray-50 focus:ring-0 focus:ring-offset-0 ${
                                 getAppointmentStatusOption(getFinalAppointmentStatus())?.textColor || 'text-gray-900'
                               }`}>
                                 <SelectValue />
                               </SelectTrigger>
-                              <SelectContent className="rounded-xl">
+                              <SelectContent className="rounded-2xl border-none shadow-2xl">
                                 {appointmentStatusOptions.map((status) => (
-                                  <SelectItem key={status.value} value={status.value}>
+                                  <SelectItem key={status.value} value={status.value} className="rounded-xl my-1 mx-2">
                                     {status.label}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
                           ) : (
-                            <div className={`flex h-11 items-center rounded-xl bg-gray-50 px-4 text-sm font-black ${
+                            <div className={`flex h-12 items-center rounded-xl bg-gray-50/50 px-4 text-sm font-black border-2 border-gray-50 ${
                               getAppointmentStatusOption(getFinalAppointmentStatus())?.textColor || 'text-gray-900'
                             }`}>
-                              {getStatusLabel(getFinalAppointmentStatus(), appointmentStatusOptions)}
+                              {getBookingStatusLabel(getFinalAppointmentStatus(), appointmentStatusOptions)}
                             </div>
                           )}
                         </div>
                     </div>
 
-                    <div className="rounded-[1.5rem] border border-gray-100 bg-white p-4 shadow-sm">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
-                            <CreditCard className="h-4 w-4" />
+                    <div className="rounded-[2rem] border border-gray-100 bg-white p-6 shadow-xl shadow-gray-100/30 transition-all hover:shadow-gray-100/50">
+                        <div className="flex items-center gap-4">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-[0.9rem] bg-emerald-50 text-emerald-600 shadow-sm ring-4 ring-emerald-50/50">
+                            <CreditCard className="h-5 w-5" />
                           </div>
-                          <Label className="text-[11px] font-black uppercase tracking-widest text-gray-500">Payment Status</Label>
+                          <Label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Payment Status</Label>
                         </div>
-                        <div className="mt-3">
+                        <div className="mt-5">
                           {canManagePricing ? (
                             <Select value={getFinalPaymentStatus()} onValueChange={handlePaymentStatusChange}>
-                              <SelectTrigger className={`h-11 w-full rounded-xl border-0 bg-gray-50 px-4 text-sm font-black focus:ring-0 focus:ring-offset-0 ${
+                              <SelectTrigger className={`h-12 w-full rounded-xl border-2 border-gray-50 bg-gray-50/50 px-4 text-sm font-black transition-all hover:bg-gray-50 focus:ring-0 focus:ring-offset-0 ${
                                 getPaymentStatusOption(getFinalPaymentStatus())?.textColor || 'text-gray-900'
                               }`}>
                                 <SelectValue />
                               </SelectTrigger>
-                              <SelectContent className="rounded-xl">
+                              <SelectContent className="rounded-2xl border-none shadow-2xl">
                                 {paymentStatusOptions.map((status) => (
-                                  <SelectItem key={status.value} value={status.value}>
+                                  <SelectItem key={status.value} value={status.value} className="rounded-xl my-1 mx-2">
                                     {status.label}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
                           ) : (
-                            <div className={`flex h-11 items-center rounded-xl bg-gray-50 px-4 text-sm font-black ${
+                            <div className={`flex h-12 items-center rounded-xl bg-gray-50/50 px-4 text-sm font-black border-2 border-gray-50 ${
                               getPaymentStatusOption(getFinalPaymentStatus())?.textColor || 'text-gray-900'
                             }`}>
-                              {getPaymentStatusLabel(getFinalPaymentStatus(), paymentStatusOptions)}
+                              {getBookingStatusLabel(getFinalPaymentStatus(), paymentStatusOptions)}
                             </div>
                           )}
                         </div>
@@ -2458,35 +2483,58 @@ return (
 
                   <CompactNotesField
                     id="improved-booking-notes"
-                    label={isPatientLevelBookingMode ? "My Notes" : "Notes"}
-                    placeholder={isPatientLevelBookingMode ? "Add any notes for your dentist..." : "Any special instructions..."}
+                    label={isPatientLevelBookingMode ? "My Notes" : "Additional Notes"}
+                    placeholder={isPatientLevelBookingMode ? "Add any notes for your dentist..." : "Any special instructions or clinical notes..."}
                     value={notes}
                     onChange={setNotes}
                     disabled={isPatientReadonly && isCancelled}
-                    className="rounded-[1.5rem] border border-gray-100 bg-white p-4 shadow-sm"
-                    labelClassName="text-[11px] font-black uppercase tracking-widest text-gray-400"
-                    textareaClassName="min-h-[72px] rounded-xl border-2 border-gray-100 p-4 text-sm font-medium focus:border-blue-500"
+                    className="rounded-[2rem] border border-gray-100 bg-white p-6 shadow-xl shadow-gray-100/30 transition-all hover:shadow-gray-100/50"
+                    labelClassName="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-4"
+                    textareaClassName="min-h-[100px] rounded-2xl border-2 border-gray-50 bg-gray-50/30 p-5 text-sm font-medium focus:border-blue-500 focus:bg-white transition-all"
                   />
                 </div>
               )}
             </div>
           </div>
 
-           <DialogFooter className="p-6 bg-white border-t flex items-center justify-end">
-             <Button
-               onClick={modalStep === 'payment' ? handleConfirmPayment : handleConfirmBooking}
-               disabled={isBooking}
-               className="h-14 px-10 rounded-full bg-blue-600 hover:bg-blue-700 text-white font-black uppercase tracking-widest shadow-xl shadow-blue-200 min-w-[220px]"
+           <DialogFooter className="flex flex-col gap-3 border-t bg-gray-50/50 p-4 sm:p-6 sm:flex-row sm:items-center sm:justify-between sticky bottom-0 z-20 backdrop-blur-sm">
+            {isCancelled && user?.role === 'patient' ? (
+              <Button
+                onClick={handleClose}
+                className="h-12 w-full rounded-2xl border border-gray-200 bg-white px-8 font-black uppercase tracking-widest text-gray-600 shadow-sm hover:bg-gray-50 sm:w-auto sm:ml-auto"
               >
-                {isBooking ? <Loader2 className="h-5 w-5 animate-spin" /> : (
-                  <div className="flex items-center gap-3">
-                    <span>
-                      {getNextButtonLabel()}
-                    </span>
-                    <ChevronLeft className="w-5 h-5 rotate-180" />
-                  </div>
-                )}
+                Close
               </Button>
+            ) : (
+              <>
+                {canCancelAppointment && (
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={() => setIsDeleteDialogOpen(true)}
+                    disabled={isBooking}
+                    className="h-12 w-full rounded-2xl bg-red-500 px-6 font-black uppercase tracking-widest text-white shadow-lg shadow-red-100 hover:bg-red-600 hover:shadow-red-200 sm:w-auto sm:mr-auto transition-all"
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {isBooking ? "Processing..." : "Cancel Appointment"}
+                  </Button>
+                )}
+                <Button
+                  onClick={modalStep === 'payment' ? handleConfirmPayment : handleConfirmBooking}
+                  disabled={isBooking}
+                  className="h-12 w-full sm:min-w-[200px] rounded-2xl bg-blue-600 px-8 font-black uppercase tracking-widest text-white shadow-lg shadow-blue-200 hover:bg-blue-700 hover:shadow-blue-300 transition-all sm:w-auto"
+                >
+                  {isBooking ? <Loader2 className="h-5 w-5 animate-spin" /> : (
+                    <div className="flex items-center justify-center gap-2">
+                      <span>
+                        {getNextButtonLabel()}
+                      </span>
+                      <ChevronLeft className="w-4 h-4 rotate-180" />
+                    </div>
+                  )}
+                </Button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2651,7 +2699,7 @@ return (
                     } ${
                       getAppointmentStatusOption(getFinalAppointmentStatus())?.textColor || 'text-gray-700'
                     }`}>
-                      {getStatusLabel(getFinalAppointmentStatus(), appointmentStatusOptions)}
+                      {getBookingStatusLabel(getFinalAppointmentStatus(), appointmentStatusOptions)}
                     </span>
                   )}
                 </div>
@@ -2680,7 +2728,7 @@ return (
                     } ${
                       getPaymentStatusOption(getFinalPaymentStatus())?.textColor || 'text-gray-700'
                     }`}>
-                      {getPaymentStatusLabel(getFinalPaymentStatus(), paymentStatusOptions)}
+                      {getBookingStatusLabel(getFinalPaymentStatus(), paymentStatusOptions)}
                     </span>
                   )}
                 </div>
@@ -2734,13 +2782,22 @@ return (
             </div>
           </div>
 
+          {/* Patient-facing note: suggest payment to reserve when booking remains in the cart */}
+          {user?.role === 'patient' && isCartAppointmentStatus(getFinalAppointmentStatus()) && (
+            <div className="px-8">
+              <div className="rounded-lg p-3 bg-yellow-50 border border-yellow-100 text-yellow-800 text-sm font-semibold">
+                Note: This booking will be added to your cart. Adding a payment will reserve this schedule.
+              </div>
+            </div>
+          )}
+
           <DialogFooter className="p-8 bg-white border-t flex gap-4">
             <Button variant="outline" onClick={() => setIsConfirmSummaryOpen(false)} disabled={isBooking} className="h-14 flex-1 rounded-2xl font-bold border-2">
               Back to Edit
             </Button>
             <Button className="bg-blue-600 hover:bg-blue-700 text-white h-14 flex-1 rounded-2xl font-black uppercase tracking-widest shadow-lg shadow-blue-100" onClick={handleConfirmSummary} disabled={isBooking}>
               {isBooking ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : null}
-              Confirm & Save
+              {isCartAppointmentStatus(getFinalAppointmentStatus()) ? 'Add to Cart' : 'Confirm & Save'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2756,8 +2813,8 @@ return (
         logDate={snapshotToView?.changedAt || new Date().toISOString()}
       />
 
-      <DatePickerModal open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen} selectedDate={selectedDate} onDateSelect={setSelectedDate} doctorName={selectedDoctor} selectedTime={selectedTime} duration={duration} dateSelectionMode={isPastAppointmentMode ? "past" : "standard"} />
-      <TimePickerModal open={isTimePickerOpen} onOpenChange={setIsTimePickerOpen} selectedDate={selectedDate} selectedTime={selectedTime} doctorName={selectedDoctor} duration={duration} onTimeSelect={setSelectedTime} onDateChange={setSelectedDate} excludeAppointmentId={appointmentToEdit?.id} patientId={selectedPatient} dateSelectionMode={isPastAppointmentMode ? "past" : "standard"} />
+      <DatePickerModal open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen} selectedDate={selectedDate} onDateSelect={setSelectedDate} doctorName={selectedDoctor} selectedTime={selectedTime} duration={duration} dateSelectionMode={isPastAppointmentMode ? "past" : "standard"} appointmentSource={isPublicBookingMode ? "cache" : "server"} cachedAppointments={publicBlockingAppointments as any} />
+      <TimePickerModal open={isTimePickerOpen} onOpenChange={setIsTimePickerOpen} selectedDate={selectedDate} selectedTime={selectedTime} doctorName={selectedDoctor} duration={duration} onTimeSelect={setSelectedTime} onDateChange={setSelectedDate} excludeAppointmentId={appointmentToEdit?.id} patientId={selectedPatient} dateSelectionMode={isPastAppointmentMode ? "past" : "standard"} appointmentSource={isPublicBookingMode ? "cache" : "server"} cachedAppointments={publicBlockingAppointments as any} />
     </>
   );
  }

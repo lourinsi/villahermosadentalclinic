@@ -1,11 +1,13 @@
 "use client";
 
+import { apiUrl } from "@/lib/api";
+
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useDoctors } from "@/hooks/useDoctors";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useAuth } from "@/hooks/useAuth";
-import { useAppointments, Appointment } from "@/hooks/useAppointments";
+import { Appointment } from "@/hooks/useAppointments";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { DoctorCalendar } from "@/components/DoctorCalendar";
@@ -26,16 +28,25 @@ import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import ViewMode from "@/components/viewMode";
 import { toast } from "sonner";
+import { getCachedPublicBlockingAppointments } from "@/lib/publicBookingCache";
+import { isCartAppointmentStatus, isReservedAppointmentStatus } from "@/lib/appointment-status";
 
 interface DoctorAvailabilityViewProps {
   doctorName: string;
-  portal: "admin" | "patient";
+  portal: "admin" | "patient" | "public";
+  onBookSlot?: (date?: Date, time?: string, doctorName?: string) => void;
+  onOpenAppointment?: (appointment: Appointment) => void;
 }
 
-export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilityViewProps) {
+export function DoctorAvailabilityView({
+  doctorName,
+  portal,
+  onBookSlot,
+  onOpenAppointment,
+}: DoctorAvailabilityViewProps) {
   const router = useRouter();
   const { user } = useAuth();
-  const { doctors, isLoadingDoctors } = useDoctors();
+  const { doctors, isLoadingDoctors } = useDoctors(undefined, { publicBooking: portal === "public" && !user?.role });
   const { updateAppointment, openEditModal, openPatientBookingModal } = useAppointmentModal();
   
   const [viewMode, setViewMode] = useState<ViewMode>("day");
@@ -47,6 +58,34 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
   const doctor = useMemo(() => {
     return doctors.find(d => d.name === doctorName);
   }, [doctors, doctorName]);
+
+  const doctorsListPath = portal === "admin" ? "/admin/doctors" : portal === "patient" ? "/patient/doctors" : "/doctors";
+
+  const normalizeDoctorName = (name?: string) =>
+    String(name || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim();
+
+  const handleBookSlot = useCallback((date?: Date, time?: string) => {
+    if (onBookSlot) {
+      onBookSlot(date, time, doctorName);
+      return;
+    }
+
+    openPatientBookingModal(date, time, doctorName);
+  }, [doctorName, onBookSlot, openPatientBookingModal]);
+
+  const isOwnAppointment = useCallback((apt: Appointment | undefined): boolean => {
+    if (!apt) return false;
+
+    if (portal === "public") {
+      return Boolean((apt as any).isPublicCache);
+    }
+
+    if (portal === "patient" && user?.patientId) {
+      return String(apt.patientId) === String(user.patientId);
+    }
+
+    return false;
+  }, [portal, user?.patientId]);
 
   const dateRange = useMemo(() => {
     const start = new Date(selectedDate);
@@ -73,21 +112,44 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
       try {
         setIsLoadingAvailability(true);
         
-        let url = `http://localhost:3001/api/appointments?doctor=${encodeURIComponent(doctorName)}&startDate=${dateRange.start}&endDate=${dateRange.end}&includeUnpaid=true`;
+        let url = portal === "public"
+          ? apiUrl(`/api/appointments/public-availability?doctor=${encodeURIComponent(doctorName)}&startDate=${dateRange.start}&endDate=${dateRange.end}`)
+          : apiUrl(`/api/appointments?doctor=${encodeURIComponent(doctorName)}&startDate=${dateRange.start}&endDate=${dateRange.end}&includeUnpaid=true`);
         
         // If we have a patientId (logged in patient), include it in the query with OR logic
         // This will return appointments for THIS doctor OR for THIS patient (any doctor)
-        if (user?.patientId) {
+        if (portal !== "public" && user?.patientId) {
           url += `&patientId=${user.patientId}&parentId=${user.patientId}&matchType=or`;
         }
 
-        const response = await fetch(url);
-        const result = await response.json();
-        if (result.success) {
-          setAppointments(result.data);
+        const token = typeof window !== "undefined" ? localStorage.getItem("authToken") : null;
+        const headers: HeadersInit = { "Content-Type": "application/json" };
+        if (token && portal !== "public") {
+          headers.Authorization = `Bearer ${token}`;
+        }
+        const response = await fetch(url, { headers, credentials: "include" });
+        const result = response.ok ? await response.json() : { success: false, data: [] };
+        const serverAppointments = result.success ? result.data || [] : [];
+        const publicCacheAppointments = portal === "public"
+          ? getCachedPublicBlockingAppointments().filter((appointment) => {
+              if (appointment.date < dateRange.start || appointment.date > dateRange.end) return false;
+              return normalizeDoctorName(appointment.doctor) === normalizeDoctorName(doctorName);
+            })
+          : [];
+
+        if (result.success || portal === "public") {
+          setAppointments([...serverAppointments, ...publicCacheAppointments] as Appointment[]);
         }
       } catch (error) {
         console.error("Failed to fetch doctor appointments", error);
+        if (portal === "public") {
+          setAppointments(
+            getCachedPublicBlockingAppointments().filter((appointment) => {
+              if (appointment.date < dateRange.start || appointment.date > dateRange.end) return false;
+              return normalizeDoctorName(appointment.doctor) === normalizeDoctorName(doctorName);
+            }) as Appointment[]
+          );
+        }
       } finally {
         setIsLoadingAvailability(false);
       }
@@ -107,7 +169,7 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
     return () => {
       window.removeEventListener('appointments:updated', handler as EventListener);
     };
-  }, [dateRange, doctorName, user]);
+  }, [dateRange, doctorName, portal, user]);
 
   const getDaySlots = useCallback((date: Date) => {
     const dateStr = formatDateToYYYYMMDD(date);
@@ -122,10 +184,10 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
     });
     
     // For checking actual availability (blocked slots)
-    // PENDING appointments do NOT block availability - they can be overridden
-    // Only scheduled, reserved, tentative, and completed block availability
+    // Cart appointments do NOT block availability - they can be overridden
+    // Only scheduled, reserved, and completed block availability
     const dayAppointmentsForAvailability = dayAppointmentsForDisplay.filter(apt => 
-      apt.status !== 'cancelled' && apt.status !== 'pending'
+      apt.status !== 'cancelled' && !isCartAppointmentStatus(apt.status)
     );
     
     const now = new Date();
@@ -157,8 +219,8 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
       let cancelledAppointment: Appointment | undefined;
       let pendingAppointments: Appointment[] = [];
       
-      // Collect pending appointments that overlap this slot (they don't block, but we'll show the count)
-      for (const apt of dayAppointmentsForDisplay.filter(a => a.status === 'pending')) {
+      // Collect cart appointments that overlap this slot (they don't block, but we'll show the count)
+      for (const apt of dayAppointmentsForDisplay.filter(a => isCartAppointmentStatus(a.status))) {
         const aptStart = timeToMinutes(apt.time);
         const aptEnd = aptStart + (apt.duration || 30);
         
@@ -167,28 +229,33 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
         }
       }
       
-      // Check for active appointments that actually block availability
-      for (const apt of dayAppointmentsForAvailability) {
+      const overlappingAppointments = dayAppointmentsForAvailability.filter((apt) => {
         const aptStart = timeToMinutes(apt.time);
         const aptEnd = aptStart + (apt.duration || 30);
+        return slotMinutes < aptEnd && slotEndMinutes > aptStart;
+      });
+
+      const ownOverlappingAppointment = overlappingAppointments.find(isOwnAppointment);
+      const blockingAppointment = ownOverlappingAppointment || overlappingAppointments[0];
+      
+      if (blockingAppointment) {
+        isBooked = true;
+        slotAppointment = blockingAppointment;
+
+        // Check if this appointment is with a different doctor
+        // Normalize names for comparison (remove "Dr. " prefix)
+        const currentDocNormalized = doctorName.replace(/^Dr\.\s+/i, "").toLowerCase();
+        const aptDocNormalized = blockingAppointment.doctor.replace(/^Dr\.\s+/i, "").toLowerCase();
         
-        if (slotMinutes < aptEnd && slotEndMinutes > aptStart) {
-          isBooked = true;
-          slotAppointment = apt;
+        if (aptDocNormalized !== currentDocNormalized) {
+          isOtherDoctor = true;
+        }
 
-          // Check if this appointment is with a different doctor
-          // Normalize names for comparison (remove "Dr. " prefix)
-          const currentDocNormalized = doctorName.replace(/^Dr\.\s+/i, "").toLowerCase();
-          const aptDocNormalized = apt.doctor.replace(/^Dr\.\s+/i, "").toLowerCase();
-          
-          if (aptDocNormalized !== currentDocNormalized) {
-            isOtherDoctor = true;
-          }
-
-          if (apt.status === 'tentative' || apt.status === 'reserved' || apt.paymentStatus === 'half-paid') {
-            isTentative = true;
-          }
-          break;
+        if (
+          isReservedAppointmentStatus(blockingAppointment.status) ||
+          blockingAppointment.paymentStatus === 'half-paid'
+        ) {
+          isTentative = true;
         }
       }
 
@@ -216,23 +283,47 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
         isOtherDoctor,
         isPast,
         pendingAppointments,
+        isOwnAppointment: isOwnAppointment(slotAppointment || cancelledAppointment),
         appointment: slotAppointment || cancelledAppointment
       };
     });
-  }, [appointments, user]);
-
-  const isOwnAppointment = (apt: Appointment | undefined): boolean => {
-    if (!apt || !user) return false;
-    return apt.patientId === user.patientId;
-  };
+  }, [appointments, doctorName, isOwnAppointment, user]);
 
   const handleSlotClick = async (slot: any) => {
-    // If slot is available (including slots with pending appointments that can be overridden),
+    // If slot is available (including slots with cart appointments that can be overridden),
     // always open the booking modal
     if (slot.isAvailable) {
-      openPatientBookingModal(selectedDate, slot.time, doctorName);
+      handleBookSlot(selectedDate, slot.time);
     } else if (!slot.isAvailable && slot.isBooked && slot.appointment) {
-      // Only open edit modal for actually booked/blocked slots (not pending)
+      if (slot.isOwnAppointment) {
+        if (portal === "public") {
+          onOpenAppointment?.(slot.appointment);
+          return;
+        }
+
+        if (portal === "patient") {
+          if (slot.appointment.paymentStatus === 'paid' && slot.appointment.status !== 'scheduled') {
+            setIsProcessing(true);
+            try {
+              await updateAppointment(slot.appointment.id, { ...slot.appointment, status: 'scheduled' });
+              window.dispatchEvent(new CustomEvent('appointments:updated'));
+            } catch (err) {
+              console.error('Failed to auto-update appointment status', err);
+            } finally {
+              setIsProcessing(false);
+            }
+          }
+          openEditModal(slot.appointment, true);
+          return;
+        }
+      }
+
+      if (portal === "public") {
+        toast.error("This slot is unavailable");
+        return;
+      }
+
+      // Only open edit modal for actually booked/blocked slots (not cart)
       if (portal === "patient") {
         // Patient can only view their own appointments
         if (isOwnAppointment(slot.appointment)) {
@@ -345,7 +436,7 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
                               </TooltipTrigger>
                               <TooltipContent side="top" className="max-w-xs">
                                 <div className="space-y-2">
-                                  <p className="font-semibold text-sm">Pending Appointments:</p>
+                                  <p className="font-semibold text-sm">Cart Appointments:</p>
                                   {slot.pendingAppointments.map((apt, idx) => (
                                     <div key={idx} className="text-xs border-t border-emerald-700 pt-1 flex items-center justify-between">
                                       <div>
@@ -440,7 +531,7 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
                             <button
                               key={slot.time}
                               onClick={() => {
-                              openPatientBookingModal(date, slot.time, doctorName);
+                              handleBookSlot(date, slot.time);
                             }}
                               className="w-full px-2 py-1 rounded text-[10px] font-bold transition-all text-center bg-emerald-100 text-emerald-700 hover:bg-emerald-200 cursor-pointer"
                             >
@@ -560,7 +651,7 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
                         <button
                           key={i}
                           onClick={() => {
-                            openPatientBookingModal(date, slot.time, doctorName);
+                            handleBookSlot(date, slot.time);
                           }}
                           className="text-[9px] font-bold px-1.5 py-0.5 rounded truncate bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-all text-left"
                         >
@@ -602,7 +693,7 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
       <div className="p-8 text-center bg-gray-50 min-h-screen flex flex-col items-center justify-center">
         <h2 className="text-2xl font-bold text-gray-900">Doctor not found</h2>
         <Button 
-          onClick={() => router.push(portal === 'admin' ? '/admin/doctors' : '/patient/doctors')} 
+          onClick={() => router.push(doctorsListPath)} 
           className="mt-4 bg-blue-600"
         >
           Back to Doctors
@@ -619,7 +710,7 @@ export function DoctorAvailabilityView({ doctorName, portal }: DoctorAvailabilit
             <Button 
               variant="outline" 
               size="icon"
-              onClick={() => router.push(portal === 'admin' ? '/admin/doctors' : '/patient/doctors')}
+              onClick={() => router.push(doctorsListPath)}
               className="rounded-xl border-gray-200 shadow-sm bg-white"
             >
               <ChevronLeft className="h-5 w-5" />

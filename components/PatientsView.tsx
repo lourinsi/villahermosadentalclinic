@@ -1,5 +1,7 @@
 "use client";
 
+import { apiUrl } from "@/lib/api";
+
 import React, { useState, useEffect, useRef, useImperativeHandle } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
@@ -202,7 +204,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
 
     const fetchDoctorAppointments = async () => {
       try {
-        const response = await fetch(`http://localhost:3001/api/appointments?doctor=${encodeURIComponent(doctorFilter)}`);
+        const response = await fetch(apiUrl(`/api/appointments?doctor=${encodeURIComponent(doctorFilter)}`));
         const result = await response.json();
         if (result.success && result.data) {
           setDoctorAppointments(result.data);
@@ -229,7 +231,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
       const statusParam = statusFilter || "all";
       const doctorParam = doctorFilter ? `&doctor=${encodeURIComponent(doctorFilter)}` : "";
       const res = await fetch(
-        `http://localhost:3001/api/patients?page=${page}&limit=${itemsPerPage}&search=${q}&status=${statusParam}${doctorParam}`,
+        apiUrl(`/api/patients?page=${page}&limit=${itemsPerPage}&search=${q}&status=${statusParam}${doctorParam}`),
         { signal: controller.signal, credentials: 'include' }
       );
 
@@ -351,7 +353,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
 
     setIsDeleting(true);
     try {
-      const res = await fetch(`http://localhost:3001/api/patients/${patientToDelete.id}`, {
+      const res = await fetch(apiUrl(`/api/patients/${patientToDelete.id}`), {
         method: "DELETE",
       });
       if (res.ok) {
@@ -404,7 +406,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
     }
 
     try {
-      const response = await fetch("http://localhost:3001/api/messages", {
+      const response = await fetch(apiUrl("/api/messages"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1058,10 +1060,16 @@ const PatientDetails = React.forwardRef<{
     const totalPaid = Number(appointment.totalPaid ?? originalAppointment?.totalPaid ?? 0);
     const balance = Math.max(0, price - totalPaid);
     const logDate = transaction?.date || appointment.updatedAt || originalAppointment?.updatedAt || appointment.createdAt || originalAppointment?.createdAt || new Date().toISOString();
+    const patientDisplayName =
+      appointment.patientName ||
+      originalAppointment?.patientName ||
+      patient.name ||
+      [patient.firstName, patient.lastName].filter(Boolean).join(" ");
 
     setSelectedSnapshot({
       ...(originalAppointment || {}),
       ...appointment,
+      patientName: patientDisplayName,
       date: displayDate,
       time: displayTime,
       price,
@@ -1248,7 +1256,7 @@ const PatientDetails = React.forwardRef<{
         
         // 1. If this patient has a parentId, fetch the parent
         if (patient.parentId && patient.parentId !== patient.id) {
-          const parentRes = await fetch(`http://localhost:3001/api/patients/${patient.parentId}`, { credentials: 'include' });
+          const parentRes = await fetch(apiUrl(`/api/patients/${patient.parentId}`), { credentials: 'include' });
           const parentJson = await parentRes.json();
           if (parentJson.success) {
             setParentPatient(parentJson.data);
@@ -1258,7 +1266,7 @@ const PatientDetails = React.forwardRef<{
         }
 
         // 2. Fetch all dependents (patients where parentId is this patient's id)
-        const familyRes = await fetch(`http://localhost:3001/api/patients?parentId=${patient.id}`, { credentials: 'include' });
+        const familyRes = await fetch(apiUrl(`/api/patients?parentId=${patient.id}`), { credentials: 'include' });
         const familyJson = await familyRes.json();
         if (familyJson.success) {
           // Filter out the current patient from the family list
@@ -1328,7 +1336,7 @@ const PatientDetails = React.forwardRef<{
       }
 
       try {
-        const res = await fetch(`http://localhost:3001/api/patients/${patient.id}`, { credentials: 'include' });
+        const res = await fetch(apiUrl(`/api/patients/${patient.id}`), { credentials: 'include' });
         const json = await res.json();
         if (json?.success && json.data) {
           const p = json.data;
@@ -1376,7 +1384,7 @@ const PatientDetails = React.forwardRef<{
         try {
           const patientName = patient.name || `${patient.firstName} ${patient.lastName}`;
           const response = await fetch(
-            `http://localhost:3001/api/appointments?doctor=${encodeURIComponent(doctorFilter)}`,
+            apiUrl(`/api/appointments?doctor=${encodeURIComponent(doctorFilter)}`),
             { credentials: 'include' }
           );
           const result = await response.json();
@@ -1411,7 +1419,7 @@ const PatientDetails = React.forwardRef<{
 
         try {
           const response = await fetch(
-            `http://localhost:3001/api/appointments?patientId=${encodeURIComponent(patient.id)}`,
+            apiUrl(`/api/appointments?patientId=${encodeURIComponent(patient.id)}`),
             { credentials: 'include' }
           );
           const result = await response.json();
@@ -1525,7 +1533,7 @@ const PatientDetails = React.forwardRef<{
 
       // Fetch payments from new payments collection and merge into history
       if (patient?.id) {
-        fetch(`http://localhost:3001/api/payments/patient/${patient.id}`, {
+        fetch(apiUrl(`/api/payments/patient/${patient.id}`), {
           headers: getAuthHeaders({ "Content-Type": "application/json" }),
           credentials: 'include',
         })
@@ -1546,11 +1554,7 @@ const PatientDetails = React.forwardRef<{
 
     setIsSaving(true);
     try {
-      const response = await fetch(`http://localhost:3001/api/patients/${patient.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...formData })
-      });
+      const response = await fetch(apiUrl(`/api/patients/${patient.id}`), { method: "PUT", headers: getAuthHeaders({ "Content-Type": "application/json" }), credentials: 'include', body: JSON.stringify({ ...formData }) });
 
       const result = await response.json();
       console.log("Update response:", result);
@@ -1589,7 +1593,7 @@ const PatientDetails = React.forwardRef<{
     }
     
     try {
-      const deleteUrl = `http://localhost:3001/api/payments/${paymentId}`;
+      const deleteUrl = apiUrl(`/api/payments/${paymentId}`);
       console.log("DELETE URL:", deleteUrl);
       
       const response = await fetch(deleteUrl, {

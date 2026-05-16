@@ -1,5 +1,7 @@
 "use client";
 
+import { apiUrl } from "@/lib/api";
+
 import React, { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
@@ -35,6 +37,7 @@ import {
 } from "lucide-react";
 import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
+import { formatAppointmentStatusLabel, isCartAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
 import { parseBackendDateToLocal } from "../lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Input } from "./ui/input";
@@ -75,7 +78,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       if (!appointment) return;
 
       // Update all notifications related to this appointment
-      await fetch(`http://localhost:3001/api/notifications/update-by-appointment`, {
+      await fetch(apiUrl(`/api/notifications/update-by-appointment`), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -90,7 +93,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   };
   
   useEffect(() => {
-    // Pending appointments are patient cart records and should stay out of staff request/history views.
+    // Add to Cart appointments are patient cart records and should stay out of staff request/history views.
     refreshAppointments();
   }, [refreshAppointments]);
 
@@ -103,19 +106,18 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
 
   // Normalize status strings to canonical backend keys for reliable comparisons
   const canonicalStatus = (s?: string) => {
-    if (!s) return "";
-    return String(s).toLowerCase().trim();
+    return normalizeAppointmentStatus(s);
   };
 
   const isPatientCartStatus = (status?: string) => {
-    return canonicalStatus(status) === "pending";
+    return isCartAppointmentStatus(status);
   };
 
   const staffVisibleStatusOptions = (APPOINTMENT_STATUSES || []).filter((status: any) => !isPatientCartStatus(status.value));
 
   const isActionableStatus = (status?: string) => {
     const k = canonicalStatus(status);
-    return k === "reserved" || k === "tentative" || k === "to-pay" || k === "half-paid" || k === "tbd";
+    return k === "reserved" || k === "to-pay" || k === "half-paid" || k === "tbd";
   };
 
   // History shows completed appointments (not pending payments)
@@ -124,14 +126,14 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     return k === "scheduled" || k === "completed" || k === "cancelled";
   };
 
-  // Pending requests include these statuses (action required)
+  // Appointment requests include these statuses (action required)
   const isPendingRequestStatus = (status?: string) => {
     const k = canonicalStatus(status);
     // TBD also appears in requests because it needs action (marking completed/cancelled)
     return isActionableStatus(k);
   };
 
-  // Pending filters state
+  // Request filters state
   const [pendingSearchTerm, setPendingSearchTerm] = useState("");
   const [pendingStatusFilter, setPendingStatusFilter] = useState("all");
   const [pendingDoctorFilter, setPendingDoctorFilter] = useState("all");
@@ -171,7 +173,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const requests = useMemo(() => {
     const result = appointments.filter((apt) => {
       const matchesDoctor = !doctorFilter || (apt.doctor || "").toLowerCase() === doctorFilter.toLowerCase();
-      // Requests are those with pending statuses (including TBD)
+      // Requests are those with actionable statuses (including TBD)
       if (isPatientCartStatus(apt.status) || !isPendingRequestStatus(apt.status) || !matchesDoctor) {
         return false;
       }
@@ -181,7 +183,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         return false;
       }
       
-      // Status filter (compare canonical keys so UI filters like 'To Pay' or 'tentative' still match backend values)
+      // Status filter (compare canonical keys so UI filters like 'To Pay' still match backend values)
       if (pendingStatusFilter !== "all" && canonicalStatus(apt.status) !== canonicalStatus(pendingStatusFilter)) {
         return false;
       }
@@ -248,7 +250,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       let newStatus = "scheduled";
       if (pendingApproveAppointment.status === "tbd") {
         newStatus = "completed";
-      } else if (pendingApproveAppointment.status === "reserved" || pendingApproveAppointment.status === "tentative") {
+      } else if (canonicalStatus(pendingApproveAppointment.status) === "reserved") {
         newStatus = "scheduled";
       }
       
@@ -295,7 +297,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
 
   const handleStatusChangeRequest = (appointment: Appointment, statusKey: string) => {
     if (isPatientCartStatus(statusKey)) {
-      toast.error("Pending is reserved for patient carts.");
+      toast.error("Add to Cart is reserved for patient carts.");
       return;
     }
     // statusKey comes from the select dropdown and directly maps to backend status values
@@ -320,7 +322,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
 
   const handleHistoryStatusChange = async (appointmentId: string, newStatus: string) => {
     if (isPatientCartStatus(newStatus)) {
-      toast.error("Pending is reserved for patient carts.");
+      toast.error("Add to Cart is reserved for patient carts.");
       return;
     }
 
@@ -369,7 +371,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       );
     }
     
-    return <Badge variant="outline" className="font-medium capitalize">{status}</Badge>;
+    return <Badge variant="outline" className="font-medium capitalize">{formatAppointmentStatusLabel(status)}</Badge>;
   };
 
   const getPaymentStatusBadge = (paymentStatus: string | undefined) => {
@@ -1081,7 +1083,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600">Current Status:</span>
                   <div>
-                    {getStatusBadge(pendingApproveAppointment?.status || "pending")}
+                    {getStatusBadge(pendingApproveAppointment?.status || "reserved")}
                   </div>
                 </div>
               </div>

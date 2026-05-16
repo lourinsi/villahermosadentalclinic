@@ -1,3 +1,4 @@
+import { apiUrl } from "@/lib/api";
 import { useEffect, useState, useCallback } from 'react';
 
 export interface PaymentStatusOption {
@@ -41,7 +42,7 @@ export const usePaymentStatuses = (): UsePaymentStatusesReturn => {
   const fetchStatuses = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await fetch('http://localhost:3001/api/statuses/payments', {
+      const response = await fetch(apiUrl('/api/statuses/payments'), {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include'

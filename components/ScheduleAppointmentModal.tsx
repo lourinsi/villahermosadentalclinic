@@ -1,5 +1,7 @@
 "use client";
 
+import { apiUrl } from "@/lib/api";
+
 import { useState, useEffect, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
@@ -16,6 +18,7 @@ import { formatDateToYYYYMMDD } from "../lib/utils";
 import { APPOINTMENT_TYPES } from "../lib/appointment-types";
 import { Appointment } from "@/hooks/useAppointments";
 import { DoctorCalendar } from "./DoctorCalendar";
+import { isCartAppointmentStatus, isReservedAppointmentStatus } from "@/lib/appointment-status";
 
 export function ScheduleAppointmentModal() {
   const {
@@ -94,7 +97,7 @@ export function ScheduleAppointmentModal() {
       }
       setIsLoadingDateAppointments(true);
       try {
-        const response = await fetch(`http://localhost:3001/api/appointments?startDate=${formData.date}&endDate=${formData.date}`);
+        const response = await fetch(apiUrl(`/api/appointments?startDate=${formData.date}&endDate=${formData.date}`));
         const result = await response.json();
         if (result.success) {
           setDateAppointments(result.data || []);
@@ -117,7 +120,7 @@ export function ScheduleAppointmentModal() {
     const newEnd = newStart + duration;
 
     return dateAppointments.some(apt => {
-      if (apt.status === 'cancelled' || apt.status === 'pending') return false;
+      if (apt.status === 'cancelled' || isCartAppointmentStatus(apt.status)) return false;
       
       const [aptHours, aptMinutes] = apt.time.split(':').map(Number);
       const aptStart = aptHours * 60 + aptMinutes;
@@ -261,9 +264,9 @@ export function ScheduleAppointmentModal() {
 
                     const isPast = isPastDate || isPastTime;
 
-                    // Check appointments for this date to know if it's booked or tentative
+                    // Check appointments for this date to know if it's booked or reserved
                     const isBooked = dateAppointments.some(apt => apt.time === slot && apt.status !== 'cancelled' && apt.paymentStatus !== 'unpaid');
-                    const isTentative = dateAppointments.some(apt => apt.time === slot && (apt.status === 'tentative' || apt.status === 'pending'));
+                    const isTentative = dateAppointments.some(apt => apt.time === slot && isReservedAppointmentStatus(apt.status));
 
                     const disabled = isPast || busy || isBooked || isTentative;
 

@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth.tsx";
 import { useBookingModalMode } from "@/hooks/useBookingModalMode";
 import { Button } from "@/components/ui/button";
-import { LogOut, User, LayoutDashboard, Calendar, Users, Settings, Bell, ClipboardList } from "lucide-react";
+import { LogOut, User, LayoutDashboard, Calendar, Users, Bell, ClipboardList } from "lucide-react";
 import { toast } from "sonner";
 import NotificationsOpened from "./notificationsOpened";
 import BookingModalWrapper from "./BookingModalWrapper";
@@ -76,7 +76,6 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
     { href: "/doctor/calendar", label: "My Schedule", icon: Calendar },
     { href: "/doctor/patients", label: "My Patients", icon: Users },
     { href: "/doctor/notifications", label: "Notifications", icon: Bell },
-    { href: "/doctor/settings", label: "Settings", icon: Settings },
   ];
 
   return (

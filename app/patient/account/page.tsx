@@ -1,5 +1,7 @@
 "use client";
 
+import { apiUrl } from "@/lib/api";
+
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { Patient } from "@/lib/patient-types";
@@ -36,7 +38,7 @@ const AccountPage = () => {
             headers["Authorization"] = `Bearer ${token}`;
           }
           
-          const response = await fetch(`http://localhost:3001/api/patients/${user.patientId}`, { 
+          const response = await fetch(apiUrl(`/api/patients/${user.patientId}`), { 
             headers, 
             credentials: "include" 
           });
@@ -74,7 +76,7 @@ const AccountPage = () => {
           headers["Authorization"] = `Bearer ${token}`;
         }
         
-        const response = await fetch(`http://localhost:3001/api/questionnaires/${user.patientId}`, { 
+        const response = await fetch(apiUrl(`/api/questionnaires/${user.patientId}`), { 
           headers, 
           credentials: "include" 
         });
@@ -120,7 +122,7 @@ const AccountPage = () => {
         headers["Authorization"] = `Bearer ${token}`;
       }
       
-      const response = await fetch(`http://localhost:3001/api/patients/${patient.id}`, {
+      const response = await fetch(apiUrl(`/api/patients/${patient.id}`), {
         method: 'PUT',
         headers,
         credentials: "include",
@@ -155,7 +157,7 @@ const AccountPage = () => {
         headers["Authorization"] = `Bearer ${token}`;
       }
       
-      const response = await fetch(`http://localhost:3001/api/patients/${patient.id}/change-password`, {
+      const response = await fetch(apiUrl(`/api/patients/${patient.id}/change-password`), {
         method: 'POST',
         headers,
         credentials: "include",
@@ -186,7 +188,7 @@ const AccountPage = () => {
         headers["Authorization"] = `Bearer ${token}`;
       }
       
-      const response = await fetch(`http://localhost:3001/api/patients/${patient.id}`, {
+      const response = await fetch(apiUrl(`/api/patients/${patient.id}`), {
         method: 'PUT',
         headers,
         credentials: "include",
@@ -260,7 +262,7 @@ const AccountPage = () => {
         headers["Authorization"] = `Bearer ${token}`;
       }
       
-      const response = await fetch(`http://localhost:3001/api/questionnaires/${patient.id}`, {
+      const response = await fetch(apiUrl(`/api/questionnaires/${patient.id}`), {
         method: 'PUT',
         headers,
         credentials: "include",

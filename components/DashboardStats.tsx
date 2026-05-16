@@ -43,7 +43,7 @@ export function DashboardStats({
           bgColor: "bg-green-50"
         },
         {
-          title: "Pending Approvals",
+          title: "Appointment Requests",
           value: pendingAppointmentsCount.toString(),
           change: "Action required",
           icon: AlertCircle,
@@ -93,7 +93,7 @@ export function DashboardStats({
           bgColor: "bg-emerald-50"
         },
         {
-          title: "Pending Approvals",
+          title: "Appointment Requests",
           value: pendingAppointmentsCount.toString(),
           change: "Awaiting",
           icon: AlertCircle,
@@ -161,7 +161,7 @@ export function DashboardStats({
             <div className="text-3xl font-black tracking-tight text-gray-900 mb-2">{stat.value}</div>
             <div className="flex items-center gap-2">
               <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-bold ${
-                stat.title.toUpperCase() === "PENDING APPROVALS" || stat.title.toUpperCase() === "PENDING BALANCE" 
+                stat.title.toUpperCase() === "APPOINTMENT REQUESTS" || stat.title.toUpperCase() === "PENDING BALANCE" 
                   ? "bg-amber-50 text-amber-600" 
                   : "bg-emerald-50 text-emerald-600"
               }`}>

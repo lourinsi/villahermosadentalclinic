@@ -39,10 +39,7 @@ export function NotificationPage({ portal }: NotificationPageProps) {
   const handleUpdateAppointmentStatus = async (appointmentId: string, status: Appointment['status'], notificationId: string) => {
     try {
       await updateAppointment(appointmentId, { status });
-      const message = status === 'tentative' 
-        ? "Cancellation request sent" 
-        : `Appointment status updated to ${status}`;
-      toast.success(message);
+      toast.success(`Appointment status updated to ${status}`);
       
       // Mark notification as read after action
       await markAsRead(notificationId);

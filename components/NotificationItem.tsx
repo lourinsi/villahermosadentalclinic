@@ -108,8 +108,8 @@ export function NotificationItem({
       : !notification.isRead ? 'bg-violet-50/40' : ''
   }`;
 
-  const acceptStatuses = new Set(['cancelled', 'pending', 'tentative', 'topay', 'reserved', 'halfpaid', 'scheduled']);
-  const cancelStatuses = new Set(['scheduled', 'pending', 'tentative', 'topay', 'reserved', 'halfpaid']);
+  const acceptStatuses = new Set(['cancelled', 'topay', 'reserved', 'halfpaid', 'scheduled']);
+  const cancelStatuses = new Set(['scheduled', 'topay', 'reserved', 'halfpaid']);
 
   const handleItemClick = (e: React.MouseEvent) => {
     e.preventDefault();

@@ -1,5 +1,7 @@
 "use client";
 
+import { apiUrl } from "@/lib/api";
+
 import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import React from "react";
@@ -7,6 +9,7 @@ import { ChevronLeft, ChevronRight, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { Appointment } from "@/hooks/useAppointments";
+import { isCartAppointmentStatus } from "@/lib/appointment-status";
 import type { BookingCreationMode } from "./sharedBookingLogic";
 
 interface DatePickerModalProps {
@@ -18,6 +21,8 @@ interface DatePickerModalProps {
   selectedTime?: string;
   duration?: string;
   dateSelectionMode?: BookingCreationMode;
+  appointmentSource?: "server" | "cache";
+  cachedAppointments?: Appointment[];
 }
 
 const getAppointmentFetchOptions = (): RequestInit => {
@@ -31,6 +36,9 @@ const getAppointmentFetchOptions = (): RequestInit => {
   return { headers, credentials: "include" };
 };
 
+const normalizeDoctorName = (doctor?: string) =>
+  String(doctor || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim();
+
 export function DatePickerModal({ 
   open, 
   onOpenChange, 
@@ -40,6 +48,8 @@ export function DatePickerModal({
   selectedTime,
   duration,
   dateSelectionMode = "standard",
+  appointmentSource = "server",
+  cachedAppointments = [],
 }: DatePickerModalProps) {
   const [viewDate, setViewDate] = useState<Date>(new Date(selectedDate));
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -62,7 +72,7 @@ export function DatePickerModal({
     // Check for overlap with any appointment on that date
     const dayAppointments = appointments.filter(apt => {
       const aptDateStr = formatDateToYYYYMMDD(new Date(apt.date));
-      return aptDateStr === dateStr && apt.status !== 'cancelled' && apt.status !== 'pending';
+      return aptDateStr === dateStr && apt.status !== 'cancelled' && !isCartAppointmentStatus(apt.status);
     });
 
     for (const apt of dayAppointments) {
@@ -102,6 +112,18 @@ export function DatePickerModal({
 
     const fetchMonthAppointments = async () => {
       try {
+        if (appointmentSource === "cache") {
+          const doctorKey = normalizeDoctorName(doctorName);
+          setAppointments(
+            cachedAppointments.filter(
+              (appointment) =>
+                !doctorKey ||
+                normalizeDoctorName(appointment.doctor) === doctorKey
+            )
+          );
+          return;
+        }
+
         const year = viewDate.getFullYear();
         const month = viewDate.getMonth();
         
@@ -112,7 +134,7 @@ export function DatePickerModal({
         const startDateStr = formatDateToYYYYMMDD(firstDay);
         const endDateStr = formatDateToYYYYMMDD(lastDay);
         
-        const url = `http://localhost:3001/api/appointments?doctor=${encodeURIComponent(doctorName)}&startDate=${startDateStr}&endDate=${endDateStr}&includeUnpaid=true`;
+        const url = apiUrl(`/api/appointments?doctor=${encodeURIComponent(doctorName)}&startDate=${startDateStr}&endDate=${endDateStr}&includeUnpaid=true`);
         
         const response = await fetch(url, getAppointmentFetchOptions());
         const result = await response.json();
@@ -128,7 +150,7 @@ export function DatePickerModal({
     };
 
     fetchMonthAppointments();
-  }, [open, viewDate, doctorName]);
+  }, [open, viewDate, doctorName, appointmentSource, cachedAppointments]);
 
   const daysInMonth = React.useMemo(() => {
     const year = viewDate.getFullYear();
@@ -189,7 +211,7 @@ export function DatePickerModal({
     const dateStr = formatDateToYYYYMMDD(date);
     const dayAppointments = appointments.filter(apt => {
       const aptDateStr = formatDateToYYYYMMDD(new Date(apt.date));
-      return aptDateStr === dateStr && apt.status !== 'cancelled' && apt.status !== 'pending';
+      return aptDateStr === dateStr && apt.status !== 'cancelled' && !isCartAppointmentStatus(apt.status);
     });
 
     // Assuming 8 AM - 5 PM with 30-min slots = 18 slots per day

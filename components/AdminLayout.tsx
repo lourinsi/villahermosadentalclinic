@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth.tsx";
 import { useBookingModalMode } from "@/hooks/useBookingModalMode";
 import { Button } from "@/components/ui/button";
-import { LogOut, User, LayoutDashboard, Users, Calendar, CreditCard, Shield, Settings, Bell, ClipboardList, Stethoscope } from "lucide-react";
+import { LogOut, User, LayoutDashboard, Users, Calendar, Shield, Bell, ClipboardList, Stethoscope } from "lucide-react";
 import { toast } from "sonner";
 import NotificationsOpened from "./notificationsOpened";
 import BookingModalWrapper from "./BookingModalWrapper";
@@ -76,29 +76,30 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
     { href: "/admin/patients", label: "Patients", icon: Users },
     { href: "/admin/doctors", label: "Find Doctors", icon: Stethoscope },
     { href: "/admin/calendar", label: "Calendar", icon: Calendar },
-    { href: "/admin/finance", label: "Finance", icon: CreditCard },
     { href: "/admin/staff", label: "Staff", icon: Shield },
     { href: "/admin/notifications", label: "Notifications", icon: Bell },
-    { href: "/admin/settings", label: "Settings", icon: Settings },
   ];
 
   return (
     <div className="flex h-screen bg-gray-100">
-      <aside className="w-64 bg-gray-800 text-white flex-shrink-0 flex flex-col">
-        <div className="p-4 text-2xl font-bold border-b border-gray-700">Admin</div>
+      <aside className="w-64 bg-blue-900 text-white flex-shrink-0 flex flex-col">
+        <div className="p-4 text-2xl font-bold border-b border-blue-800">Admin</div>
         <nav className="flex-1 py-4">
           <ul className="space-y-1">
             {navItems.map((item) => {
               const Icon = item.icon;
+              const isActive = pathname === item.href;
               return (
                 <li key={item.href}>
                   <Link
                     href={item.href}
-                    className={`flex items-center gap-3 px-4 py-3 hover:bg-gray-700 transition-colors ${
-                      pathname === item.href ? "bg-gray-900 border-l-4 border-violet-500" : ""
+                    className={`flex items-center gap-3 px-4 py-3 mx-2 rounded-lg transition-colors ${
+                      isActive
+                        ? "bg-blue-950 text-white"
+                        : "text-blue-100 hover:bg-blue-800 hover:text-white"
                     }`}
                   >
-                    <Icon className="w-5 h-5 text-gray-400" />
+                    <Icon className="w-5 h-5" />
                     <span>{item.label}</span>
                   </Link>
                 </li>
@@ -106,15 +107,15 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
             })}
           </ul>
         </nav>
-        <div className="p-4 border-t border-gray-700 space-y-3">
-          <div className="flex items-center space-x-2 px-2 py-2 bg-gray-700 rounded">
-            <User className="w-4 h-4" />
-            <span className="text-sm font-medium">{user?.username || "Admin"}</span>
+        <div className="p-4 border-t border-blue-800 space-y-3">
+          <div className="flex items-center space-x-2 px-3 py-2 bg-blue-800 rounded-lg">
+            <User className="w-4 h-4 text-blue-200" />
+            <span className="text-sm font-medium truncate">{user?.username || "Admin"}</span>
           </div>
           <Button
             onClick={handleLogout}
             variant="outline"
-            className="w-full justify-start text-gray-800 hover:bg-gray-100"
+            className="w-full justify-start text-blue-900 hover:bg-blue-50 bg-white"
           >
             <LogOut className="w-4 h-4 mr-2" />
             Logout

@@ -1,5 +1,7 @@
 "use client";
 
+import { apiUrl } from "@/lib/api";
+
 import React, { useState, useEffect } from "react";
 import {
   Dialog,
@@ -86,7 +88,7 @@ export function RecordPaymentModal() {
         notes,
       };
 
-      const res = await fetch(`http://localhost:3001/api/payments`, {
+      const res = await fetch(apiUrl(`/api/payments`), {
         method: "POST",
         headers: getAuthHeaders({ "Content-Type": "application/json" }),
         credentials: "include",

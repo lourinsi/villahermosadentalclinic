@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { Input } from "@/components/ui/input";
+import { isCartAppointmentStatus } from "@/lib/appointment-status";
 import {
     Select,
     SelectContent,
@@ -122,7 +123,7 @@ const OrdersContent = () => {
                              doctorName.includes(searchQuery.toLowerCase());
 
         // Status filter
-        const matchesStatus = statusFilter === "all" ? apt.status !== "pending" : apt.status === statusFilter;
+        const matchesStatus = statusFilter === "all" ? !isCartAppointmentStatus(apt.status) : apt.status === statusFilter;
 
         // Payment status filter
         const matchesPaymentStatus = paymentStatusFilter === "all" || apt.paymentStatus === paymentStatusFilter;
@@ -320,7 +321,7 @@ const OrdersContent = () => {
                             </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="all">All Statuses</SelectItem>
-                                {APPOINTMENT_STATUSES.map((status) => (
+                                {APPOINTMENT_STATUSES.filter((status) => !isCartAppointmentStatus(status.value)).map((status) => (
                                     <SelectItem key={status.value} value={status.value}>
                                         {status.label}
                                     </SelectItem>

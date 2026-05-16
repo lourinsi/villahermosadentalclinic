@@ -11,12 +11,13 @@ import { Badge } from "@/components/ui/badge";
 import { Loader2, Search, Calendar, Mail, Award } from "lucide-react";
 
 interface DoctorsGridProps {
-  portal: "admin" | "patient";
+  portal: "admin" | "patient" | "public";
+  onDoctorSelect?: (doctor: any) => void;
 }
 
-export function DoctorsGrid({ portal }: DoctorsGridProps) {
+export function DoctorsGrid({ portal, onDoctorSelect }: DoctorsGridProps) {
   const router = useRouter();
-  const { doctors, isLoadingDoctors } = useDoctors();
+  const { doctors, isLoadingDoctors } = useDoctors(undefined, { publicBooking: portal === "public" });
   const [searchTerm, setSearchTerm] = useState("");
 
   const filteredDoctors = useMemo(() => {
@@ -29,21 +30,31 @@ export function DoctorsGrid({ portal }: DoctorsGridProps) {
   }, [doctors, searchTerm]);
 
   const handleDoctorClick = (doctor: any) => {
+    if (onDoctorSelect) {
+      onDoctorSelect(doctor);
+      return;
+    }
+
     if (portal === "admin") {
       router.push(`/admin/doctors/${encodeURIComponent(doctor.name)}`);
-    } else {
+    } else if (portal === "patient") {
       router.push(`/patient/doctors/${encodeURIComponent(doctor.name)}`);
+    } else {
+      router.push(`/doctors/${encodeURIComponent(doctor.name)}`);
     }
   };
 
   const getButtonText = () => {
-    return portal === "admin" ? "Book Appointment" : "View Availability";
+    if (portal === "admin") return "Book Appointment";
+    return "View Availability";
   };
 
   const getDescription = () => {
-    return portal === "admin"
-      ? "Meet our team of experienced professionals. Select a doctor to book an appointment for a patient."
-      : "Meet our team of experienced professionals dedicated to your oral health.";
+    if (portal === "admin") {
+      return "Meet our team of experienced professionals. Select a doctor to book an appointment for a patient.";
+    }
+
+    return "Meet our team of experienced professionals dedicated to your oral health.";
   };
 
   if (isLoadingDoctors) {

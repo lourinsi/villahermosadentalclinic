@@ -1,5 +1,7 @@
 "use client";
 
+import { apiUrl } from "@/lib/api";
+
 import React, { useState } from "react";
 import {
   Dialog,
@@ -22,6 +24,7 @@ import { Appointment } from "@/hooks/useAppointments";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import { Label } from "./ui/label";
 import { Input } from "./ui/input";
+import { isCartAppointmentStatus } from "@/lib/appointment-status";
 
 export function PatientPaymentModal() {
   const {
@@ -76,7 +79,7 @@ export function PatientPaymentModal() {
         notes: paymentMethod === "Pay at Clinic" ? "Cash upon appointment" : "Online payment via Patient Portal",
       };
 
-      const res = await fetch(`http://localhost:3001/api/payments`, {
+      const res = await fetch(apiUrl(`/api/payments`), {
         method: "POST",
         headers: getAuthHeaders({ "Content-Type": "application/json" }),
         credentials: "include",
@@ -93,7 +96,7 @@ export function PatientPaymentModal() {
         toast.success("Request received! Your appointment is now set to 'To Pay' and is scheduled. See you at the clinic!");
       } else if (isPartial) {
         toast.success("Partial payment received! Your slot is reserved (status: Reserved).");
-      } else if (json.data?.appointment?.status === 'pending') {
+      } else if (isCartAppointmentStatus(json.data?.appointment?.status)) {
         toast.success("Payment received! Our staff will review your booking shortly.");
       } else {
         toast.success("Payment successful! Your appointment is now confirmed and added to your calendar.");
@@ -104,8 +107,8 @@ export function PatientPaymentModal() {
       try {
         const appointmentId = json.data?.appointment?.id || selectedAppointment.id;
         const newPaymentStatus = isPartial ? 'half-paid' : (paymentMethod === 'Pay at Clinic' ? (selectedAppointment.paymentStatus || 'unpaid') : 'paid');
-        // Map to internal appointment status: full paid -> scheduled/confirmed (use 'scheduled'), partial -> tentative/reserved
-        const newStatus = isPartial ? 'tentative' : (paymentMethod === 'Pay at Clinic' ? (json.data?.appointment?.status || selectedAppointment.status) : 'scheduled');
+        // Map to internal appointment status: full paid -> scheduled, partial -> reserved
+        const newStatus = isPartial ? 'reserved' : (paymentMethod === 'Pay at Clinic' ? (json.data?.appointment?.status || selectedAppointment.status) : 'scheduled');
         const ev = new CustomEvent('appointments:updated', { detail: { appointmentId, newStatus, newPaymentStatus } });
         window.dispatchEvent(ev);
       } catch (e) {
@@ -141,7 +144,7 @@ export function PatientPaymentModal() {
         notes: paymentMethod === "Pay at Clinic" ? "Cash upon appointment" : "Online payment via Patient Portal",
       };
 
-      const res = await fetch(`http://localhost:3001/api/payments`, {
+      const res = await fetch(apiUrl(`/api/payments`), {
         method: "POST",
         headers: getAuthHeaders({ "Content-Type": "application/json" }),
         credentials: "include",
@@ -160,7 +163,7 @@ export function PatientPaymentModal() {
         toast.success("Request received! Your appointment is now set to 'To Pay' and is scheduled. See you at the clinic!");
       } else if (isPartial) {
         toast.success("Partial payment received! Your slot is reserved (status: Reserved).");
-      } else if (json.data?.appointment?.status === 'pending') {
+      } else if (isCartAppointmentStatus(json.data?.appointment?.status)) {
         toast.success("Payment received! Our staff will review your booking shortly.");
       } else {
         toast.success("Payment successful! Your appointment is now confirmed and added to your calendar.");
@@ -171,7 +174,7 @@ export function PatientPaymentModal() {
       try {
         const appointmentId = json.data?.appointment?.id || selectedAppointment.id;
         const newPaymentStatus = isPartial ? 'half-paid' : (paymentMethod === 'Pay at Clinic' ? (selectedAppointment.paymentStatus || 'unpaid') : 'paid');
-        const newStatus = isPartial ? 'tentative' : (paymentMethod === 'Pay at Clinic' ? (json.data?.appointment?.status || selectedAppointment.status) : 'scheduled');
+        const newStatus = isPartial ? 'reserved' : (paymentMethod === 'Pay at Clinic' ? (json.data?.appointment?.status || selectedAppointment.status) : 'scheduled');
         const ev = new CustomEvent('appointments:updated', { detail: { appointmentId, newStatus, newPaymentStatus } });
         window.dispatchEvent(ev);
       } catch (e) {

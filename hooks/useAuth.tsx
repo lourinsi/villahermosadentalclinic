@@ -1,5 +1,7 @@
 "use client";
 
+import { apiUrl } from "@/lib/api";
+
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
 
 interface User {
@@ -35,7 +37,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const checkAuth = async () => {
     try {
       setIsLoading(true);
-      const response = await fetch("http://localhost:3001/api/auth/verify", {
+      const response = await fetch(apiUrl("/api/auth/verify"), {
         method: "GET",
         credentials: "include",
         headers: {
@@ -68,7 +70,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const login = async (username: string, password: string) => {
     try {
       setIsLoading(true);
-      const response = await fetch("http://localhost:3001/api/auth/login", {
+      const response = await fetch(apiUrl("/api/auth/login"), {
         method: "POST",
         credentials: "include",
         headers: {
@@ -107,7 +109,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const logout = async () => {
     try {
       setIsLoading(true);
-      await fetch("http://localhost:3001/api/auth/logout", {
+      await fetch(apiUrl("/api/auth/logout"), {
         method: "POST",
         credentials: "include",
         headers: {

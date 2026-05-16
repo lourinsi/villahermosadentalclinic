@@ -9,6 +9,7 @@ import { useAppointments } from "@/hooks/useAppointments";
 import { CalendarView } from "./CalendarView";
 import { Suspense } from "react";
 import PastAppointmentButton from "./PastAppointmentButton";
+import { isCartAppointmentStatus } from "@/lib/appointment-status";
 
 interface CalendarPageLayoutProps {
   portal: "admin" | "doctor" | "patient";
@@ -53,7 +54,7 @@ export function CalendarPageLayout({ portal, doctorName, defaultStatusFilter }: 
             const doctorNorm = doctorName.replace(/^Dr\.\s+/i, "").toLowerCase().trim();
             
             if (aptDoctorNorm !== doctorNorm || apt.date !== dateStr) return false;
-            if ((apt.status || "").toLowerCase() === "pending") return false;
+            if (isCartAppointmentStatus(apt.status)) return false;
 
             const [aptHour, aptMin] = apt.time.split(':').map(Number);
             const aptDuration = apt.duration || 30;

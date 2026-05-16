@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "./ui/button";
 import { Clock, Calendar } from "lucide-react";
 import { Appointment } from "@/hooks/useAppointments";
@@ -24,9 +25,14 @@ export function NextAppointmentCard({
   onViewAll,
   showHeader = false,
 }: NextAppointmentCardProps) {
+  const router = useRouter();
   const [currentIndex, setCurrentIndex] = useState(0);
   
   const displayAppointments = appointment ? [appointment, ...sameTimeAppointments] : [];
+  const doctorsRoute =
+    role === "patient" ? "/patient/doctors" :
+    role === "admin" ? "/admin/doctors" :
+    "/doctors";
 
   // Rotate through same-time appointments every 5 seconds
   useEffect(() => {
@@ -53,10 +59,7 @@ export function NextAppointmentCard({
           </div>
           <Button 
             className="bg-violet-600 hover:bg-violet-700 text-white font-bold px-6"
-            onClick={() => {
-              // This would need to be passed as a prop if you want to open the booking modal
-              // For now, we'll just provide the button
-            }}
+            onClick={() => router.push(doctorsRoute)}
           >
             Book Now
           </Button>

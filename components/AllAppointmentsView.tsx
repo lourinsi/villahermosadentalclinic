@@ -2,6 +2,12 @@ import React, { useState, useMemo } from "react";
 import { Appointment } from "../hooks/useAppointments";
 import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
 import { usePaymentStatuses } from "@/hooks/usePaymentStatuses";
+import {
+  CART_APPOINTMENT_STATUS,
+  formatAppointmentStatusLabel,
+  isCartAppointmentStatus,
+  normalizeAppointmentStatus,
+} from "@/lib/appointment-status";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import {
   Table,
@@ -36,6 +42,7 @@ interface AllAppointmentsViewProps {
   isLoading: boolean;
   onPay?: (appointment: Appointment) => void;
   onDelete?: (id: string) => void;
+  onOpenAppointment?: (appointment: Appointment) => void;
   isCart?: boolean;
 }
 
@@ -44,6 +51,7 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
   isLoading, 
   onPay, 
   onDelete,
+  onOpenAppointment,
   isCart 
 }) => {
   const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
@@ -51,9 +59,7 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
 
   const displayStatus = (s?: string) => {
     if (!s) return "";
-    if (s.toLowerCase() === 'tentative') return 'Reserved';
-    // keep original casing for multi-word (e.g., 'To Pay') but normalize simple words
-    return s.split(' ').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+    return formatAppointmentStatusLabel(s);
   };
 
   const displayPaymentStatus = (p?: string) => {
@@ -138,8 +144,8 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
   };
 
   const getStatusBadgeClass = (status: string = "") => {
-    const k = status.toLowerCase().trim();
-    const statusOption = APPOINTMENT_STATUSES.find(s => s.value.toLowerCase() === k);
+    const k = normalizeAppointmentStatus(status);
+    const statusOption = APPOINTMENT_STATUSES.find(s => normalizeAppointmentStatus(s.value) === k);
     if (statusOption) {
       return `${statusOption.bgColor} ${statusOption.textColor} border-none`;
     }
@@ -149,9 +155,8 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
       case "confirmed": return "bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200";
       case "completed": return "bg-green-100 text-green-700 border-green-200";
       case "cancelled": return "bg-red-100 text-red-700 border-red-200";
-      case "pending": return "bg-amber-100 text-amber-700 border-amber-200";
-      case "to pay": return "bg-cyan-100 text-cyan-700 border-cyan-200";
-      case "tentative": return "bg-emerald-200 text-emerald-800 border-emerald-200"; // Reserved (visible green)
+      case CART_APPOINTMENT_STATUS: return "bg-orange-100 text-orange-700 border-orange-200";
+      case "to-pay": return "bg-cyan-100 text-cyan-700 border-cyan-200";
       case "booked": return "bg-emerald-700 text-white border-emerald-800"; // Booked (brighter green)
       default: return "bg-gray-100 text-gray-700 border-gray-200";
     }
@@ -264,14 +269,18 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
             </TableHeader>
             <TableBody>
               {filteredAndSortedAppointments.map((appointment) => (
-                <TableRow key={appointment.id} className="hover:bg-gray-50/50 transition-colors">
+                <TableRow
+                  key={appointment.id}
+                  className={`hover:bg-gray-50/50 transition-colors ${onOpenAppointment ? "cursor-pointer" : ""}`}
+                  onClick={() => onOpenAppointment?.(appointment)}
+                >
                   <TableCell className="font-semibold text-gray-900">{appointment.patientName}</TableCell>
                   <TableCell className="text-gray-600 font-medium">{`${appointment.date} @ ${appointment.time}`}</TableCell>
                   <TableCell>{getAppointmentTypeName(appointment.type, appointment.customType)}</TableCell>
                   <TableCell className="text-gray-600">Dr. {appointment.doctor}</TableCell>
                   <TableCell>
                     <Badge variant="outline" className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-tighter ${getStatusBadgeClass(appointment.status)}`}>
-                      {isCart ? (appointment.status) : displayStatus(appointment.status)}
+                      {displayStatus(appointment.status)}
                     </Badge>
                   </TableCell>
                   <TableCell>
@@ -287,17 +296,23 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
                           <Button 
                             size="sm" 
                             className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white text-[12px] font-semibold uppercase px-4 shadow-sm active:scale-95 transition-all"
-                            onClick={() => onPay(appointment)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onPay(appointment);
+                            }}
                           >
                             Pay Now
                           </Button>
                         )}
-                        {onDelete && (appointment.status === "pending" || appointment.status === "tentative") && (
+                        {onDelete && isCartAppointmentStatus(appointment.status) && (
                           <Button 
                             size="sm" 
                             variant="ghost" 
                             className="h-8 text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 text-[12px] font-semibold uppercase px-4 shadow-sm active:scale-95 transition-all"
-                            onClick={() => onDelete(appointment.id || "")}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onDelete(appointment.id || "");
+                            }}
                           >
                             Cancel
                           </Button>
@@ -313,11 +328,15 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredAndSortedAppointments.map((appointment) => (
-            <Card key={appointment.id} className="hover:shadow-md transition-all border-gray-200 group relative overflow-hidden">
+            <Card
+              key={appointment.id}
+              className={`hover:shadow-md transition-all border-gray-200 group relative overflow-hidden ${onOpenAppointment ? "cursor-pointer" : ""}`}
+              onClick={() => onOpenAppointment?.(appointment)}
+            >
                <div className={`absolute top-0 left-0 w-1 h-full ${
                 appointment.status === "completed" ? "bg-green-500" :
                 appointment.status === "cancelled" ? "bg-red-500" :
-                appointment.status === "pending" ? "bg-amber-500" :
+                isCartAppointmentStatus(appointment.status) ? "bg-orange-500" :
                 "bg-brand"
               }`} />
               
@@ -369,17 +388,23 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
                       <Button 
                         size="sm" 
                         className="bg-emerald-600 hover:bg-emerald-700 text-white text-[12px] font-semibold uppercase px-4 rounded-lg shadow-sm"
-                        onClick={() => onPay(appointment)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onPay(appointment);
+                        }}
                       >
                         Pay
                       </Button>
                     )}
-                    {onDelete && (appointment.status === "pending" || appointment.status === "tentative") && (
+                    {onDelete && isCartAppointmentStatus(appointment.status) && (
                       <Button 
                         size="sm" 
                         variant="ghost" 
                         className="text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 text-[12px] font-semibold uppercase px-3"
-                        onClick={() => onDelete(appointment.id || "")}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onDelete(appointment.id || "");
+                        }}
                       >
                         Cancel
                       </Button>

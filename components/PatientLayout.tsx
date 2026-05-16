@@ -84,21 +84,24 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
 
   return (
     <div className="flex h-screen bg-gray-100">
-      <aside className="w-64 bg-gray-800 text-white flex-shrink-0 flex flex-col">
-        <div className="p-4 text-2xl font-bold border-b border-gray-700">Patient Portal</div>
+      <aside className="w-64 bg-emerald-900 text-white flex-shrink-0 flex flex-col">
+        <div className="p-4 text-2xl font-bold border-b border-emerald-800">Patient Portal</div>
         <nav className="flex-1 py-4">
           <ul className="space-y-1">
             {navItems.map((item) => {
               const Icon = item.icon;
+              const isActive = pathname === item.href;
               return (
                 <li key={item.href}>
                   <Link
                     href={item.href}
-                    className={`flex items-center gap-3 px-4 py-3 hover:bg-gray-700 transition-colors ${
-                      pathname === item.href ? "bg-gray-900 border-l-4 border-blue-500" : ""
+                    className={`flex items-center gap-3 px-4 py-3 mx-2 rounded-lg transition-colors ${
+                      isActive
+                        ? "bg-emerald-950 text-white"
+                        : "text-emerald-100 hover:bg-emerald-800 hover:text-white"
                     }`}
                   >
-                    <Icon className="w-5 h-5 text-gray-400" />
+                    <Icon className="w-5 h-5" />
                     <span>{item.label}</span>
                   </Link>
                 </li>
@@ -106,15 +109,15 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
             })}
           </ul>
         </nav>
-        <div className="p-4 border-t border-gray-700 space-y-3">
-          <div className="flex items-center space-x-2 px-2 py-2 bg-gray-700 rounded">
-            <User className="w-4 h-4" />
-            <span className="text-sm font-medium">{user?.username || "Patient"}</span>
+        <div className="p-4 border-t border-emerald-800 space-y-3">
+          <div className="flex items-center space-x-2 px-3 py-2 bg-emerald-800 rounded-lg">
+            <User className="w-4 h-4 text-emerald-200" />
+            <span className="text-sm font-medium truncate">{user?.username || "Patient"}</span>
           </div>
           <Button
             onClick={handleLogout}
             variant="outline"
-            className="w-full justify-start text-gray-800 hover:bg-gray-100"
+            className="w-full justify-start text-emerald-900 hover:bg-emerald-50 bg-white"
           >
             <LogOut className="w-4 h-4 mr-2" />
             Logout

@@ -2,7 +2,7 @@ import React from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, CreditCard, Award } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, CreditCard, UserRound } from "lucide-react";
 import { getAppointmentTypeName } from "@/lib/appointmentTypes";
 import { formatTimeTo12h } from "@/lib/time-slots";
 
@@ -27,6 +27,19 @@ const resolveAppointmentTypeName = (type: unknown, customType?: string) => {
   return customType || "Appointment";
 };
 
+const resolvePatientName = (appointmentSnapshot: any) => {
+  const patient = appointmentSnapshot?.patient;
+  const nestedPatientName = typeof patient === "string"
+    ? patient
+    : patient?.name || patient?.fullName || [patient?.firstName, patient?.lastName].filter(Boolean).join(" ");
+  const directPatientName =
+    appointmentSnapshot?.patientName ||
+    appointmentSnapshot?.patient_name ||
+    [appointmentSnapshot?.patientFirstName, appointmentSnapshot?.patientLastName].filter(Boolean).join(" ");
+
+  return directPatientName || nestedPatientName || appointmentSnapshot?.patientId || "No patient assigned";
+};
+
 export default function AppointmentHistoryView({ open, onOpenChange, appointmentSnapshot, logDate }: AppointmentHistoryViewProps) {
   if (!appointmentSnapshot) return null;
 
@@ -47,6 +60,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       ? parsedLogDate.toLocaleDateString()
       : parsedLogDate.toLocaleString();
   const typeName = resolveAppointmentTypeName(appointmentSnapshot.type, appointmentSnapshot.customType);
+  const patientName = resolvePatientName(appointmentSnapshot);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -64,6 +78,16 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto pr-2">
           {/* Schedule Info */}
           <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="bg-white p-2 rounded-md shadow-sm border border-slate-200">
+                <UserRound className="w-5 h-5 text-blue-600" />
+              </div>
+              <div>
+                <Label className="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Patient</Label>
+                <p className="font-medium text-slate-900">{patientName}</p>
+              </div>
+            </div>
+
             <div className="flex items-center gap-3">
               <div className="bg-white p-2 rounded-md shadow-sm border border-slate-200">
                 <CalendarIcon className="w-5 h-5 text-blue-600" />

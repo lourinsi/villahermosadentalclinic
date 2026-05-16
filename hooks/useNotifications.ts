@@ -1,3 +1,4 @@
+import { apiUrl } from "@/lib/api";
 import { useState, useEffect, useCallback } from "react";
 import { Notification } from "@/lib/notification-types";
 import { toast } from "sonner";
@@ -25,7 +26,7 @@ export const useNotifications = () => {
       setIsLoading(true);
       setError(null);
       console.log(`[useNotifications] Fetching notifications for userId: ${userId}`);
-  const response = await fetch(`http://localhost:3001/api/notifications?userId=${userId}&includeDeleted=true`, { credentials: 'include' });
+  const response = await fetch(apiUrl(`/api/notifications?userId=${userId}&includeDeleted=true`), { credentials: 'include' });
       console.log(`[useNotifications] Response status: ${response.status}`);
       if (!response.ok) {
         const text = await response.text();
@@ -84,7 +85,7 @@ export const useNotifications = () => {
 
   const markAsRead = async (id: string) => {
     try {
-      const response = await fetch(`http://localhost:3001/api/notifications/${id}`, {
+      const response = await fetch(apiUrl(`/api/notifications/${id}`), {
         method: "PUT",
         credentials: 'include',
         headers: { "Content-Type": "application/json" },
@@ -107,7 +108,7 @@ export const useNotifications = () => {
   const markAsUnread = async (id: string) => {
     try {
       console.log(`[useNotifications] Marking notification ${id} as unread`);
-      const response = await fetch(`http://localhost:3001/api/notifications/${id}`, {
+      const response = await fetch(apiUrl(`/api/notifications/${id}`), {
         method: "PUT",
         credentials: 'include',
         headers: { "Content-Type": "application/json" },
@@ -131,7 +132,7 @@ export const useNotifications = () => {
 
   const deleteNotification = async (id: string) => {
     try {
-      const response = await fetch(`http://localhost:3001/api/notifications/${id}`, {
+      const response = await fetch(apiUrl(`/api/notifications/${id}`), {
         method: "DELETE",
         credentials: 'include',
       });
@@ -154,7 +155,7 @@ export const useNotifications = () => {
     if (!userId) return;
 
     try {
-      const response = await fetch(`http://localhost:3001/api/notifications/mark-all-read?userId=${userId}`, {
+      const response = await fetch(apiUrl(`/api/notifications/mark-all-read?userId=${userId}`), {
         method: "PUT",
         credentials: 'include',
       });
@@ -177,7 +178,7 @@ export const useNotifications = () => {
     if (!userId) return;
 
     try {
-      const response = await fetch(`http://localhost:3001/api/notifications?userId=${userId}`, {
+      const response = await fetch(apiUrl(`/api/notifications?userId=${userId}`), {
         method: "DELETE",
         credentials: 'include',
       });
@@ -198,7 +199,7 @@ export const useNotifications = () => {
 
   const restoreNotification = async (id: string) => {
     try {
-      const response = await fetch(`http://localhost:3001/api/notifications/${id}/restore`, {
+      const response = await fetch(apiUrl(`/api/notifications/${id}/restore`), {
         method: "PUT",
         credentials: 'include',
       });
@@ -220,7 +221,7 @@ export const useNotifications = () => {
   // Return boolean success so callers can perform optimistic UI and rollback on failure
   const deleteNotificationWithResult = async (id: string): Promise<boolean> => {
     try {
-      const response = await fetch(`http://localhost:3001/api/notifications/${id}`, {
+      const response = await fetch(apiUrl(`/api/notifications/${id}`), {
         method: "DELETE",
         credentials: 'include',
       });

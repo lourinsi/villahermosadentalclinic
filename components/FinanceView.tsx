@@ -1,5 +1,7 @@
 "use client";
 
+import { apiUrl } from "@/lib/api";
+
 import { toast } from "sonner";
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -127,43 +129,43 @@ export function FinanceView() {
     setIsLoading(true);
     try {
       // Fetch Revenue Data
-      const revenueRes = await fetch("http://localhost:3001/api/finance/revenue");
+      const revenueRes = await fetch(apiUrl("/api/finance/revenue"));
       if (!revenueRes.ok) throw new Error(`HTTP error! status: ${revenueRes.status} for revenue data`);
       const revenueData = (await revenueRes.json()).data || [];
       setRevenueData(revenueData);
 
       // Fetch Expense Breakdown
-      const expenseBreakdownRes = await fetch("http://localhost:3001/api/finance/expense-breakdown");
+      const expenseBreakdownRes = await fetch(apiUrl("/api/finance/expense-breakdown"));
       if (!expenseBreakdownRes.ok) throw new Error(`HTTP error! status: ${expenseBreakdownRes.status} for expense breakdown`);
       const expenseBreakdownData = (await expenseBreakdownRes.json()).data || [];
       setExpenseBreakdown(expenseBreakdownData);
 
       // Fetch Detailed Expenses
-      const detailedExpensesRes = await fetch("http://localhost:3001/api/finance/detailed-expenses");
+      const detailedExpensesRes = await fetch(apiUrl("/api/finance/detailed-expenses"));
       if (!detailedExpensesRes.ok) throw new Error(`HTTP error! status: ${detailedExpensesRes.status} for detailed expenses`);
       const detailedExpensesData = (await detailedExpensesRes.json()).data || [];
       setDetailedExpenses(detailedExpensesData);
 
       // Fetch Recurring Expenses
-      const recurringExpensesRes = await fetch("http://localhost:3001/api/finance/recurring-expenses");
+      const recurringExpensesRes = await fetch(apiUrl("/api/finance/recurring-expenses"));
       if (!recurringExpensesRes.ok) throw new Error(`HTTP error! status: ${recurringExpensesRes.status} for recurring expenses`);
       const recurringExpensesData = (await recurringExpensesRes.json()).data || [];
       setRecurringExpenses(recurringExpensesData);
 
       // Fetch Inventory Data
-      const inventoryRes = await fetch("http://localhost:3001/api/inventory"); // Assuming /api/inventory route
+      const inventoryRes = await fetch(apiUrl("/api/inventory")); // Assuming /api/inventory route
       if (!inventoryRes.ok) throw new Error(`HTTP error! status: ${inventoryRes.status} for inventory data`);
       const inventoryData = (await inventoryRes.json()).data || [];
       setInventoryData(inventoryData);
 
       // Fetch Payroll Data
-      const payrollRes = await fetch("http://localhost:3001/api/finance/payroll"); // Assuming /api/finance/payroll route
+      const payrollRes = await fetch(apiUrl("/api/finance/payroll")); // Assuming /api/finance/payroll route
       if (!payrollRes.ok) throw new Error(`HTTP error! status: ${payrollRes.status} for payroll data`);
       const payrollData = (await payrollRes.json()).data || [];
       setPayrollData(payrollData);
 
       // Fetch Recent Transactions
-      const transactionsRes = await fetch("http://localhost:3001/api/finance/recent-transactions");
+      const transactionsRes = await fetch(apiUrl("/api/finance/recent-transactions"));
       if (!transactionsRes.ok) throw new Error(`HTTP error! status: ${transactionsRes.status} for recent transactions`);
       const transactionsData = (await transactionsRes.json()).data || [];
       setRecentTransactions(transactionsData);

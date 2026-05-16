@@ -1,5 +1,7 @@
 "use client";
 
+import { apiUrl } from "@/lib/api";
+
 import { createContext, useContext, useState, ReactNode, useCallback, useMemo } from "react";
 import { useAppointments, Appointment, AppointmentFilters } from "./useAppointments";
 
@@ -102,14 +104,13 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
   const closeScheduleModal = useCallback(() => setScheduleModalOpen(false), []);
 
   // openPatientBookingModal should open the create appointment modal for patients
-  // without performing any redirects. It sets the tentative date/time/doctor
+  // without performing any redirects. It sets the selected date/time/doctor
   // then opens the modal.
   // 
   // Status logic for patient bookings:
-  // - If NO payment: status = "reserved" (24hr timer, auto-cancel if unpaid)
+  // - If NO payment: status = "add-to-cart" (patient cart item)
   // - If PARTIAL payment: status = "reserved" (no time limit, awaits doctor approval)
   // - If FULL payment: status = "scheduled" (confirmed)
-  // - Pay at clinic: status = "pending" (awaits doctor/admin acceptance)
   const openPatientBookingModal = (date?: Date | null, time?: string, doctor?: string) => {
     try {
       if (date !== undefined) setNewAppointmentDate(date ?? undefined);
@@ -159,7 +160,7 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
         headers["Authorization"] = `Bearer ${token}`;
       }
       
-      const response = await fetch(`http://localhost:3001/api/appointments/${id}`, { 
+      const response = await fetch(apiUrl(`/api/appointments/${id}`), { 
         headers,
         credentials: "include" 
       });

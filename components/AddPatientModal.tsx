@@ -1,5 +1,7 @@
 "use client";
 
+import { apiUrl } from "@/lib/api";
+
 import { useState, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
@@ -7,7 +9,7 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { toast } from "sonner";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
-import { cachePublicBookingPatient } from "@/lib/publicBookingCache";
+import { createCachedPublicBookingPatient } from "@/lib/publicBookingCache";
 
 export function AddPatientModal() {
   const {
@@ -78,10 +80,24 @@ export function AddPatientModal() {
       };
       const isPublicBookingPatient = addPatientModalMode === "publicBooking";
 
+      if (isPublicBookingPatient) {
+        const publicPatient = createCachedPublicBookingPatient(patientData);
+        toast.success("Patient added to public booking cache!");
+        notifyPatientAdded(publicPatient);
+        closeAddPatientModal();
+        setShowSummary(false);
+        setFormData({
+          firstName: "",
+          lastName: "",
+          email: "",
+          phone: "",
+          dateOfBirth: "",
+        });
+        return;
+      }
+
       const response = await fetch(
-        isPublicBookingPatient
-          ? "http://localhost:3001/api/patients/public-booking"
-          : "http://localhost:3001/api/patients",
+        apiUrl("/api/patients"),
         {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -94,9 +110,6 @@ export function AddPatientModal() {
       if (result.success) {
         toast.success("Patient added successfully!");
         if (result.data) {
-          if (isPublicBookingPatient) {
-            cachePublicBookingPatient(result.data);
-          }
           notifyPatientAdded(result.data);
         } else {
           refreshPatients();

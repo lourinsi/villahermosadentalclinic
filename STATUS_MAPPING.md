@@ -4,101 +4,47 @@ This document defines the meaning of each appointment status in the Villahermosa
 
 ## Status Definitions
 
-### 1. **scheduled** ✅ CONFIRMED & PAID
-- Appointment is fully booked and paid in full
-- Shows in patient's calendar view
-- Shows in doctor's calendar view
-- Patient can request cancellation
-- Doctor/Admin can modify or cancel
+### 1. **scheduled** - Confirmed
+- Appointment is confirmed and scheduled.
+- Shows in patient and clinic calendar views.
+- Patient, doctor, or admin can view permitted actions.
 
-### 2. **confirmed** ✅ PAID & ACCEPTED
-- Appointment is confirmed by doctor/admin and fully paid
-- Shows in patient's calendar view
-- Shows in doctor's calendar view
-- Patient can request cancellation
-- Doctor/Admin can modify or cancel
+### 2. **add-to-cart** - Add to Cart
+- Patient has added the appointment to their cart without payment.
+- Does not block clinic availability and can be overridden by a scheduled or reserved appointment.
+- Shows in the patient's cart only.
+- Hidden from staff request/history views.
 
-### 3. **reserved** 🛒 CART ITEM (Unpaid or Partially Paid)
-- **Unpaid**: Patient added to cart but hasn't paid
-  - Auto-cancels after 24 hours if no payment made
-  - Status changes to `cancelled` after 24hr timeout
-  
-- **Partially Paid**: Patient made partial payment
-  - No time limit
-  - Awaits doctor approval in the Requests tab
-  - Doctor can accept/decline
-  - Shows in Requests/Pending section for doctor
+### 3. **reserved** - Reserved
+- Appointment has a partial payment or needs clinic confirmation.
+- Blocks availability.
+- Shows in staff Requests for approval when action is required.
 
-- **Does NOT show** in patient's confirmed calendar view (only in cart)
-- Doctor sees these in "Requests" tab for action
+### 4. **cancelled** - Cancelled
+- Appointment has been cancelled.
+- Stays in history/records.
 
-### 4. **pending** ⏳ PAY AT CLINIC
-- Patient chose "Pay at Clinic" option during booking
-- Appointment reserved but payment due at visit
-- Awaits doctor/admin acceptance
-- Doctor/Admin review in Requests tab
-- Can be approved or declined
-- Once approved, status changes to `scheduled`
-- Does NOT show in patient's confirmed calendar view (only in cart)
+### 5. **completed** - Completed
+- Appointment has been completed.
+- Stays in history/records.
 
-### 5. **cancelled** ❌ CANCELLED
-- Appointment has been cancelled
-- Does NOT show in active calendars
-- Stays in history/records
-- Can be manually cancelled by:
-  - Patient (if allowed)
-  - Doctor/Admin
-  - System (auto-cancel after 24hrs for unpaid "reserved")
+### 6. **tbd** - TBD
+- Past appointment awaiting final completion or cancellation status.
 
-## Status Flow Diagram
+## Status Flow
 
-```
-Patient Books Appointment
-    ↓
-    ├─ Pays Full Amount → scheduled ✅
-    │
-    ├─ Pays Partial Amount → reserved (partial) → Awaits Doctor Approval
-    │   ├─ Doctor Approves → scheduled ✅
-    │   └─ Doctor Declines → cancelled ❌
-    │
-    ├─ No Payment → reserved (unpaid) → 24hr Timer
-    │   ├─ Pays within 24hrs → scheduled ✅
-    │   └─ No Payment after 24hrs → cancelled ❌ (auto)
-    │
-    └─ Pay at Clinic → pending → Awaits Doctor Acceptance
-        ├─ Doctor Approves → scheduled ✅
-        └─ Doctor Declines → cancelled ❌
+```text
+Patient books appointment
+  Full payment     -> scheduled
+  Partial payment  -> reserved -> staff approves -> scheduled
+  No payment       -> add-to-cart -> patient pays -> scheduled/reserved
+  Staff booking    -> reserved/scheduled
+  Cancelled        -> cancelled
+  Past unresolved  -> tbd
 ```
 
-## Patient Calendar View
+## Legacy Aliases
 
-**Shows ONLY:**
-- `scheduled` appointments
-- `confirmed` appointments
-
-**Does NOT show:**
-- `reserved` (cart items)
-- `pending` (pay at clinic)
-- `cancelled` (cancelled)
-
-## Doctor/Admin Calendar View
-
-**Shows:**
-- `scheduled` (confirmed bookings)
-- `confirmed` (confirmed bookings)
-- May see `reserved`/`pending` in separate "Requests" tab
-
-## Implementation Notes
-
-1. When a patient books without full payment:
-   - If partial payment: Status = `reserved`
-   - If no payment: Status = `reserved`
-   - If pay at clinic: Status = `pending`
-
-2. Backend should implement 24-hour auto-cancel for `reserved` status with no payment
-
-3. Doctors use Requests tab to manage `reserved` and `pending` appointments
-
-4. Payment updates may automatically promote status:
-   - `reserved` (unpaid) + payment → `scheduled`
-   - `pending` (doctor approved) → `scheduled`
+- `pending` is treated as `add-to-cart`.
+- `tentative` is treated as `reserved`.
+- `confirmed` is treated as `scheduled`.

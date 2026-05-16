@@ -3,14 +3,16 @@
 import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
-import { Users, Calendar, DollarSign, AlertCircle, TrendingUp } from "lucide-react";
-import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { Users, Calendar, DollarSign, AlertCircle, TrendingUp, Clock, Heart } from "lucide-react";
+import { useAppointmentModal } from "../hooks/useAppointmentModal";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
-import { getNextAvailableSlot } from "../lib/appointment-utils";
+import { Badge } from "./ui/badge";
 import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal } from "../lib/utils";
+import BookingModalWrapper from "./BookingModalWrapper";
 import { NextAppointmentCard } from "./NextAppointmentCard";
+import { isCartAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
 
 const revenueData = [
   { month: "Jan", revenue: 42000, appointments: 180 },
@@ -24,11 +26,13 @@ const revenueData = [
 // Derive appointment types/counts from real appointments
 const colorPalette = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4", "#f97316"];
 
-export function Dashboard() {
+export function Dashboard({ portal }: { portal?: string }) {
   const { openCreateModal, openAddPatientModal, appointments, refreshTrigger, openEditModal } = useAppointmentModal();
   const [viewMode, setViewMode] = useState<"day" | "week" | "month">("day");
   const [totalPatients, setTotalPatients] = useState(0);
   const [isLoadingView, setIsLoadingView] = useState(false);
+  const [bookingModalOpen, setBookingModalOpen] = useState(false);
+  const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
 
   // Fetch total patients from backend
   useEffect(() => {
@@ -59,20 +63,11 @@ export function Dashboard() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Canonical status helper
-    const canonicalStatus = (s?: string) => String(s || "").toLowerCase().trim();
-    
-    // Statuses that represent "Requests" (action required)
-    const isRequestStatus = (status?: string) => {
-      const k = canonicalStatus(status);
-      return k === "pending" || k === "reserved" || k === "tentative" || k === "tbd";
-    };
-
     if (viewMode === "day") {
       const dayStr = today.toISOString().split("T")[0];
       return appointments
         .filter((apt: Appointment) => parseBackendDateToLocal(apt.date).toISOString().split("T")[0] === dayStr)
-        .filter((apt: Appointment) => !isRequestStatus(apt.status));
+        .filter((apt: Appointment) => !isCartAppointmentStatus(apt.status));
     } else if (viewMode === "week") {
       const weekStart = new Date(today);
       weekStart.setDate(today.getDate() - today.getDay());
@@ -87,7 +82,7 @@ export function Dashboard() {
           const aptDate = parseBackendDateToLocal(apt.date);
           return aptDate >= weekStart && aptDate <= weekEnd;
         })
-        .filter((apt: Appointment) => !isRequestStatus(apt.status));
+        .filter((apt: Appointment) => !isCartAppointmentStatus(apt.status));
     } else {
       // month - today's month
       const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -101,16 +96,12 @@ export function Dashboard() {
           const aptDate = parseBackendDateToLocal(apt.date);
           return aptDate >= monthStart && aptDate <= monthEnd;
         })
-        .filter((apt: Appointment) => !isRequestStatus(apt.status));
+        .filter((apt: Appointment) => !isCartAppointmentStatus(apt.status));
     }
   }, [appointments, viewMode]);
 
   const pendingAppointmentsCount = useMemo(() => {
-    const canonicalStatus = (s?: string) => String(s || "").toLowerCase().trim();
-    return appointments.filter(apt => {
-      const k = canonicalStatus(apt.status);
-      return k === "pending" || k === "reserved" || k === "tentative" || k === "tbd";
-    }).length;
+    return appointments.filter(apt => ["reserved", "to-pay", "tbd"].includes(normalizeAppointmentStatus(apt.status))).length;
   }, [appointments]);
 
   // Get next upcoming appointment (regardless of view mode)
@@ -160,7 +151,7 @@ export function Dashboard() {
       bgColor: "bg-green-50"
     },
     {
-      title: "Tentative Patients",
+      title: "Action Needed",
       value: pendingAppointmentsCount.toString(),
       change: "Action required",
       icon: AlertCircle,
@@ -192,6 +183,20 @@ export function Dashboard() {
     }
   };
 
+  const appointmentTypeCounts = appointments.reduce<Record<string, number>>((acc, apt: Appointment) => {
+    const key = getAppointmentTypeName(apt.type, apt.customType);
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+
+  const totalAppointments = (Object.values(appointmentTypeCounts) as number[]).reduce((s: number, v: number) => s + v, 0) || 1;
+
+  const appointmentTypes = Object.keys(appointmentTypeCounts).map((name, idx) => ({
+    name,
+    value: Math.round(((appointmentTypeCounts[name] as number) / totalAppointments) * 100),
+    color: colorPalette[idx % colorPalette.length]
+  }));
+
   return (
     <div className="p-6 space-y-6">
       <div>
@@ -216,7 +221,7 @@ export function Dashboard() {
               <div className="text-3xl font-extrabold tracking-tight text-gray-900 mb-1">{stat.value}</div>
               <p className="text-sm font-medium flex items-center gap-1.5">
                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold ${
-                  stat.title === "Tentative Patients" 
+                  stat.title === "Action Needed" 
                     ? "bg-amber-100 text-amber-700" 
                     : "bg-emerald-100 text-emerald-700"
                 }`}>
@@ -305,10 +310,10 @@ export function Dashboard() {
                 return acc;
               }, {});
 
-              const total = Object.values(typeCounts).reduce((s: number, v: number) => s + v, 0) || 1;
+              const total = (Object.values(typeCounts) as number[]).reduce((s, v) => s + v, 0) || 1;
               const chartData = Object.keys(typeCounts).map((name, idx) => ({
                 name,
-                value: Math.round((typeCounts[name] / total) * 100),
+                value: Math.round(((typeCounts[name] as number) / total) * 100),
                 color: colorPalette[idx % colorPalette.length]
               }));
 
@@ -403,7 +408,8 @@ export function Dashboard() {
                     key={appointment.id}
                     className="group flex items-center justify-between p-4 hover:bg-violet-50/50 transition-all duration-300 cursor-pointer"
                     onClick={() => {
-                      openEditModal(appointment);
+                      setSelectedAppointment(appointment);
+                      setBookingModalOpen(true);
                     }}
                   >
                     <div className="flex items-center space-x-4">
@@ -420,7 +426,7 @@ export function Dashboard() {
                           <span className="h-1 w-1 rounded-full bg-gray-300"></span>
                           <span className={`capitalize ${
                             appointment.status === 'scheduled' ? 'text-emerald-600' : 
-                            appointment.status === 'pending' ? 'text-blue-600' : 'text-gray-600'
+                            isCartAppointmentStatus(appointment.status) ? 'text-blue-600' : 'text-gray-600'
                           }`}>{appointment.status}</span>
                         </div>
                         {(viewMode === "week" || viewMode === "month") && (
@@ -491,10 +497,7 @@ export function Dashboard() {
               <Button
                 variant="outline"
                 className="group relative flex items-center justify-between p-6 h-auto border-gray-100 hover:border-blue-200 hover:bg-blue-50/50 rounded-2xl transition-all duration-300 overflow-hidden"
-                onClick={() => {
-                  const slot = getNextAvailableSlot(appointments);
-                  openCreateModal(slot.date, slot.time);
-                }}
+                onClick={() => openCreateModal()}
               >
                 <div className="flex items-center space-x-4 relative z-10">
                   <div className="p-3 rounded-xl bg-blue-100 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors duration-300">
@@ -551,12 +554,24 @@ export function Dashboard() {
             role="admin"
             sameTimeAppointments={sameTimeAppointments}
             onViewDetails={(apt) => {
-              openEditModal(apt);
+              setSelectedAppointment(apt);
+              setBookingModalOpen(true);
             }}
             showHeader={true}
           />
         )}
       </div>
+
+      {/* Booking Modal */}
+      <BookingModalWrapper
+        open={bookingModalOpen}
+        onOpenChange={setBookingModalOpen}
+        appointmentToEdit={selectedAppointment}
+        onBooked={() => {
+          setSelectedAppointment(null);
+          setBookingModalOpen(false);
+        }}
+      />
     </div>
   );
 }

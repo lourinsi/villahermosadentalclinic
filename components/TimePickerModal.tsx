@@ -1,5 +1,7 @@
 "use client";
 
+import { apiUrl } from "@/lib/api";
+
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { TIME_SLOTS, formatTimeTo12h } from "@/lib/time-slots";
@@ -7,6 +9,7 @@ import { formatDateToYYYYMMDD, cn } from "@/lib/utils";
 import { Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { Appointment } from "@/hooks/useAppointments";
 import AppointmentHistoryView from "./AppointmentHistoryView";
+import { isCartAppointmentStatus, isReservedAppointmentStatus } from "@/lib/appointment-status";
 import type { BookingCreationMode } from "./sharedBookingLogic";
 
 interface TimePickerModalProps {
@@ -21,6 +24,8 @@ interface TimePickerModalProps {
   excludeAppointmentId?: string;
   patientId?: string | null;
   dateSelectionMode?: BookingCreationMode;
+  appointmentSource?: "server" | "cache";
+  cachedAppointments?: Appointment[];
 }
 
 const getAppointmentFetchOptions = (): RequestInit => {
@@ -34,6 +39,9 @@ const getAppointmentFetchOptions = (): RequestInit => {
   return { headers, credentials: "include" };
 };
 
+const normalizeDoctorName = (doctor?: string) =>
+  String(doctor || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim();
+
 export function TimePickerModal({
   open,
   onOpenChange,
@@ -46,6 +54,8 @@ export function TimePickerModal({
   excludeAppointmentId,
   patientId,
   dateSelectionMode = "standard",
+  appointmentSource = "server",
+  cachedAppointments = [],
 }: TimePickerModalProps) {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -61,6 +71,24 @@ export function TimePickerModal({
     try {
       setIsLoading(true);
       const dateStr = formatDateToYYYYMMDD(dateToFetch);
+
+      if (appointmentSource === "cache") {
+        const doctorKey = normalizeDoctorName(doctorName);
+        setAppointments(
+          cachedAppointments.filter((appointment) => {
+            if (appointment.date !== dateStr) return false;
+
+            const sameDoctor =
+              doctorKey && normalizeDoctorName(appointment.doctor) === doctorKey;
+            const samePatient =
+              patientId && String(appointment.patientId) === String(patientId);
+
+            return Boolean(sameDoctor || samePatient);
+          })
+        );
+        return;
+      }
+
       const params = new URLSearchParams({
         startDate: dateStr,
         endDate: dateStr,
@@ -78,7 +106,7 @@ export function TimePickerModal({
         }
       }
 
-      const url = `http://localhost:3001/api/appointments?${params.toString()}`;
+      const url = apiUrl(`/api/appointments?${params.toString()}`);
       
       const response = await fetch(url, getAppointmentFetchOptions());
       const result = await response.json();
@@ -93,7 +121,7 @@ export function TimePickerModal({
     } finally {
       setIsLoading(false);
     }
-  }, [doctorName, patientId]);
+  }, [doctorName, patientId, appointmentSource, cachedAppointments]);
 
   // When modal opens, sync viewDate with selectedDate and fetch appointments
   useEffect(() => {
@@ -190,9 +218,9 @@ export function TimePickerModal({
           if (isDoctorConflict) {
             isBooked = true;
             appointment = apt;
-            if (apt.status === 'tentative' || apt.status === 'reserved') {
+            if (isReservedAppointmentStatus(apt.status)) {
               isTentative = true;
-            } else if (apt.status === 'pending') {
+            } else if (isCartAppointmentStatus(apt.status)) {
               isPending = true;
             }
           }

@@ -1,5 +1,7 @@
 "use client";
 
+import { apiUrl } from "@/lib/api";
+
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { Patient } from "@/lib/patient-types";
@@ -20,6 +22,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import { Appointment } from "@/hooks/useAppointments";
+import { isCartAppointmentStatus } from "@/lib/appointment-status";
 
 const FamilyPage = () => {
   const { user, isLoading: authLoading } = useAuth();
@@ -63,7 +66,7 @@ const FamilyPage = () => {
           headers["Authorization"] = `Bearer ${token}`;
         }
         
-        const response = await fetch(`http://localhost:3001/api/patients?parentId=${user.patientId}`, { 
+        const response = await fetch(apiUrl(`/api/patients?parentId=${user.patientId}`), { 
           headers, 
           credentials: "include" 
         });
@@ -111,7 +114,7 @@ const FamilyPage = () => {
         headers["Authorization"] = `Bearer ${token}`;
       }
       
-      const response = await fetch("http://localhost:3001/api/patients/dependent", {
+      const response = await fetch(apiUrl("/api/patients/dependent"), {
         method: "POST",
         headers,
         credentials: "include",
@@ -169,7 +172,7 @@ const FamilyPage = () => {
         headers["Authorization"] = `Bearer ${token}`;
       }
       
-      const response = await fetch(`http://localhost:3001/api/patients/${selectedMember.id}`, {
+      const response = await fetch(apiUrl(`/api/patients/${selectedMember.id}`), {
         method: "PUT",
         headers,
         credentials: "include",
@@ -203,7 +206,7 @@ const FamilyPage = () => {
         headers["Authorization"] = `Bearer ${token}`;
       }
       
-      const response = await fetch(`http://localhost:3001/api/appointments?patientId=${memberId}`, { 
+      const response = await fetch(apiUrl(`/api/appointments?patientId=${memberId}`), { 
         headers, 
         credentials: "include" 
       });
@@ -516,7 +519,7 @@ const FamilyPage = () => {
                     <Badge className={`
                       uppercase text-[9px] font-black
                       ${apt.status === 'confirmed' || apt.status === 'scheduled' ? 'bg-green-100 text-green-700 border-green-200' : 
-                        apt.status === 'pending' ? 'bg-yellow-100 text-yellow-700 border-yellow-200' : 
+                        isCartAppointmentStatus(apt.status) ? 'bg-orange-100 text-orange-700 border-orange-200' : 
                         'bg-gray-100 text-gray-600 border-gray-200'}
                     `}>
                       {apt.status}

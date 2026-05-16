@@ -1,3 +1,20 @@
+import { apiUrl } from "@/lib/api";
+import {
+  CART_APPOINTMENT_STATUS,
+  CART_APPOINTMENT_STATUS_LABEL,
+  formatAppointmentStatusLabel,
+  isCartAppointmentStatus,
+  normalizeAppointmentStatus,
+} from "@/lib/appointment-status";
+
+export {
+  CART_APPOINTMENT_STATUS,
+  CART_APPOINTMENT_STATUS_LABEL,
+  formatAppointmentStatusLabel,
+  isCartAppointmentStatus,
+  normalizeAppointmentStatus,
+};
+
 type Toast = { error?: (msg: string) => void } | ((msg: string) => void);
 
 type BookingFlow = 'details-payment' | 'multi-step';
@@ -6,7 +23,67 @@ type BookingActorRole = 'public' | 'patient' | 'admin' | 'doctor' | '';
 export type BookingMode = 'standard' | 'public';
 export type BookingCreationMode = 'standard' | 'past';
 
-export const PAST_APPOINTMENT_STATUS_VALUES = ['cancelled', 'completed', 'tbd'] as const;
+export const PAST_APPOINTMENT_STATUS_VALUES = ['tbd', 'cancelled', 'completed'] as const;
+type PastAppointmentStatus = typeof PAST_APPOINTMENT_STATUS_VALUES[number];
+
+export function parseLocalDateOnly(dateInput?: Date | string | null): Date | null {
+  if (!dateInput) return null;
+
+  if (dateInput instanceof Date) {
+    if (Number.isNaN(dateInput.getTime())) return null;
+    return new Date(dateInput.getFullYear(), dateInput.getMonth(), dateInput.getDate());
+  }
+
+  const value = String(dateInput).trim();
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+
+  if (dateMatch) {
+    const year = Number(dateMatch[1]);
+    const month = Number(dateMatch[2]);
+    const day = Number(dateMatch[3]);
+    const date = new Date(year, month - 1, day);
+
+    if (
+      date.getFullYear() === year &&
+      date.getMonth() === month - 1 &&
+      date.getDate() === day
+    ) {
+      return date;
+    }
+
+    return null;
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+export function isPastAppointmentDate(dateInput?: Date | string | null, now: Date = new Date()) {
+  const appointmentDate = parseLocalDateOnly(dateInput);
+  if (!appointmentDate) return false;
+
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return appointmentDate.getTime() < today.getTime();
+}
+
+export function isPastAppointmentStatusValue(status?: string | null): status is PastAppointmentStatus {
+  return PAST_APPOINTMENT_STATUS_VALUES.includes(
+    String(status || '').toLowerCase().trim() as PastAppointmentStatus
+  );
+}
+
+export function normalizePastAppointmentStatus(status?: string | null): PastAppointmentStatus {
+  const normalized = String(status || '').toLowerCase().trim();
+  return isPastAppointmentStatusValue(normalized) ? normalized : 'tbd';
+}
+
+export function getPastAppointmentStatusOptions<T extends { value: string }>(options: T[]): T[] {
+  const optionsByValue = new Map(options.map((option) => [option.value, option]));
+  return PAST_APPOINTMENT_STATUS_VALUES
+    .map((value) => optionsByValue.get(value))
+    .filter((option): option is T => Boolean(option));
+}
 
 export function getDefaultPastAppointmentDate(now: Date = new Date()) {
   const date = new Date(now);
@@ -24,6 +101,503 @@ export type BookingConflictWarning = {
   label: string;
   message: string;
 };
+
+export type BookingStatusOption = {
+  key: number;
+  value: string;
+  label: string;
+  description?: string;
+  bgColor?: string;
+  textColor?: string;
+};
+
+export const DEFAULT_APPOINTMENT_STATUS_OPTIONS: BookingStatusOption[] = [
+  { key: 1, value: "scheduled", label: "Scheduled", description: "Confirmed and scheduled", bgColor: "bg-emerald-100", textColor: "text-emerald-700" },
+  { key: 2, value: CART_APPOINTMENT_STATUS, label: CART_APPOINTMENT_STATUS_LABEL, description: "In the patient's appointment cart awaiting checkout", bgColor: "bg-orange-100", textColor: "text-orange-700" },
+  { key: 3, value: "reserved", label: "Reserved", description: "Reserved awaiting payment or clinic confirmation", bgColor: "bg-amber-100", textColor: "text-amber-700" },
+  { key: 4, value: "cancelled", label: "Cancelled", description: "Appointment cancelled", bgColor: "bg-red-100", textColor: "text-red-700" },
+  { key: 5, value: "completed", label: "Completed", description: "Appointment completed", bgColor: "bg-blue-100", textColor: "text-blue-700" },
+  { key: 6, value: "tbd", label: "TBD", description: "Past appointment awaiting completion status", bgColor: "bg-red-100", textColor: "text-red-700" },
+];
+
+export const DEFAULT_PAYMENT_STATUS_OPTIONS: BookingStatusOption[] = [
+  { key: 1, value: "paid", label: "Paid", description: "Payment completed in full", bgColor: "bg-emerald-50", textColor: "text-emerald-700" },
+  { key: 2, value: "unpaid", label: "Unpaid", description: "Payment not yet made", bgColor: "bg-gray-50", textColor: "text-gray-700" },
+  { key: 3, value: "half-paid", label: "Half Paid", description: "Partial payment received", bgColor: "bg-orange-50", textColor: "text-orange-700" },
+  { key: 4, value: "overdue", label: "Overdue", description: "Payment past due date", bgColor: "bg-red-50", textColor: "text-red-700" },
+  { key: 5, value: "pay-at-clinic", label: "Pay at Clinic", description: "Payment to be made at clinic", bgColor: "bg-blue-50", textColor: "text-blue-700" },
+];
+
+type AppointmentTypeDurations = Record<string, number>;
+
+export const DEFAULT_APPOINTMENT_TYPE_DURATIONS: AppointmentTypeDurations = {
+  "Routine Cleaning": 30,
+  "Checkup": 30,
+  "Filling": 60,
+  "Root Canal": 90,
+  "Extraction": 60,
+  "Whitening": 60,
+  "Other": 30,
+};
+
+type DefaultScheduleAction =
+  | { type: 'none' }
+  | {
+      type: 'apply';
+      source: 'doctor_availability' | 'clicked_slot';
+      date: Date;
+      time: string;
+      doctorName?: string | null;
+      scheduleKey: string;
+      shouldApplySchedule: boolean;
+    };
+
+type AutoPreselectConfig =
+  | { type: 'skip' }
+  | { type: 'preserve_schedule'; defaultAppointmentType: string }
+  | { type: 'wait_for_doctor'; defaultAppointmentType: string }
+  | {
+      type: 'search';
+      defaultAppointmentType: string;
+      doctorToSearch: string;
+      durationToSearch: string;
+      patientToSearch?: string;
+    };
+
+export type BookingSlot = {
+  date: Date;
+  time: string;
+};
+
+export function getBookingAppointmentTypeIndex(typeName: string): number {
+  const typeMap: Record<string, number> = {
+    "Routine Cleaning": 0,
+    "Checkup": 1,
+    "Filling": 2,
+    "Root Canal": 3,
+    "Extraction": 4,
+    "Whitening": 5,
+    "Other": 6,
+  };
+  return typeMap[typeName] ?? 6;
+}
+
+export function formatBookingDoctorName(name?: string): string {
+  if (!name || name === "—" || name === "â€”") return "—";
+  const cleanName = name.replace(/^Dr\.\s+/i, "");
+  return `Dr. ${cleanName}`;
+}
+
+export function normalizeBookingDoctorName(name?: string) {
+  return (name || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim();
+}
+
+export function getBookingDoctorInitials(name?: string) {
+  const cleanName = (name || "Doctor").replace(/^Dr\.\s+/i, "").trim();
+  return cleanName
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+}
+
+export function toBookingPatientOption(patient: any) {
+  return {
+    id: String(patient.id),
+    name: patient.name || `${patient.firstName || ""} ${patient.lastName || ""}`.trim() || "Patient",
+    ...patient,
+  };
+}
+
+export function getBookingStatusLabel<T extends { value: string; label: string }>(
+  statusValue: string,
+  statuses: T[]
+) {
+  const normalizedStatusValue = normalizeAppointmentStatus(statusValue);
+  const status = statuses.find((item) => normalizeAppointmentStatus(item.value) === normalizedStatusValue);
+  return status?.label || formatAppointmentStatusLabel(statusValue);
+}
+
+const buildCurrentStatusOption = <T extends BookingStatusOption>(
+  value: string,
+  label: string,
+  description: string
+): T => ({
+  key: 0,
+  value,
+  label,
+  description,
+  bgColor: "bg-gray-100",
+  textColor: "text-gray-700",
+}) as T;
+
+export function getBookingAppointmentStatusConfig<T extends BookingStatusOption>({
+  appointmentStatus,
+  existingStatus,
+  isPastStatusRestricted,
+  canManageStatuses,
+  statusOptions,
+  fallbackStatusOptions = DEFAULT_APPOINTMENT_STATUS_OPTIONS as T[],
+}: {
+  appointmentStatus?: string | null;
+  existingStatus?: string | null;
+  isPastStatusRestricted: boolean;
+  canManageStatuses: boolean;
+  statusOptions: T[];
+  fallbackStatusOptions?: T[];
+}) {
+  const defaultAppointmentStatusValue = isPastStatusRestricted ? "tbd" : "scheduled";
+  const rawCurrentAppointmentStatusValue = appointmentStatus || existingStatus || defaultAppointmentStatusValue;
+  const currentAppointmentStatusValue = isPastStatusRestricted
+    ? normalizePastAppointmentStatus(rawCurrentAppointmentStatusValue)
+    : normalizeAppointmentStatus(rawCurrentAppointmentStatusValue);
+  const baseAppointmentStatusOptions = statusOptions.length > 0 ? statusOptions : fallbackStatusOptions;
+  const selectableAppointmentStatusOptions = isPastStatusRestricted
+    ? getPastAppointmentStatusOptions(baseAppointmentStatusOptions)
+    : canManageStatuses
+      ? baseAppointmentStatusOptions.filter((status) => !isCartAppointmentStatus(status.value))
+      : baseAppointmentStatusOptions;
+  const appointmentStatusOptions =
+    currentAppointmentStatusValue &&
+    !(canManageStatuses && isCartAppointmentStatus(currentAppointmentStatusValue)) &&
+    !selectableAppointmentStatusOptions.some((status) => normalizeAppointmentStatus(status.value) === currentAppointmentStatusValue)
+      ? [
+          buildCurrentStatusOption<T>(
+            currentAppointmentStatusValue,
+            getBookingStatusLabel(currentAppointmentStatusValue, selectableAppointmentStatusOptions),
+            "Current appointment status"
+          ),
+          ...selectableAppointmentStatusOptions,
+        ]
+      : selectableAppointmentStatusOptions;
+
+  return {
+    currentAppointmentStatusValue,
+    appointmentStatusOptions,
+  };
+}
+
+export function getBookingPaymentStatusConfig<T extends BookingStatusOption>({
+  paymentStatus,
+  existingStatus,
+  statusOptions,
+  fallbackStatusOptions = DEFAULT_PAYMENT_STATUS_OPTIONS as T[],
+}: {
+  paymentStatus?: string | null;
+  existingStatus?: string | null;
+  statusOptions: T[];
+  fallbackStatusOptions?: T[];
+}) {
+  const currentPaymentStatusValue = paymentStatus || existingStatus || "unpaid";
+  const fetchedPaymentStatusOptions = statusOptions.length > 0 ? statusOptions : fallbackStatusOptions;
+  const basePaymentStatusOptions = [
+    ...fetchedPaymentStatusOptions,
+    ...fallbackStatusOptions.filter(
+      (fallbackStatus) => !fetchedPaymentStatusOptions.some((status) => status.value === fallbackStatus.value)
+    ),
+  ];
+  const paymentStatusOptions =
+    currentPaymentStatusValue &&
+    !basePaymentStatusOptions.some((status) => status.value === currentPaymentStatusValue)
+      ? [
+          buildCurrentStatusOption<T>(
+            currentPaymentStatusValue,
+            getBookingStatusLabel(currentPaymentStatusValue, basePaymentStatusOptions),
+            "Current payment status"
+          ),
+          ...basePaymentStatusOptions,
+        ]
+      : basePaymentStatusOptions;
+
+  return {
+    currentPaymentStatusValue,
+    paymentStatusOptions,
+  };
+}
+
+export function formatBookingDateKey(dateInput?: Date | string | null) {
+  const date = parseLocalDateOnly(dateInput);
+  if (!date) return "";
+
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+export function bookingTimeToMinutes(time: string) {
+  const [hours, minutes] = String(time || "").split(":").map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return 0;
+  return hours * 60 + minutes;
+}
+
+export function getBookingDefaultDate(defaultDate?: Date | null) {
+  return parseLocalDateOnly(defaultDate) ?? new Date();
+}
+
+export function getBookingDefaultTime(defaultTime?: string | null) {
+  return defaultTime ?? "";
+}
+
+export function getBookingEditDate({
+  appointmentDate,
+  defaultDate,
+}: {
+  appointmentDate?: Date | string | null;
+  defaultDate?: Date | null;
+}) {
+  return parseLocalDateOnly(appointmentDate) ?? parseLocalDateOnly(defaultDate) ?? new Date();
+}
+
+export function getBookingEditTime({
+  appointmentTime,
+  defaultTime,
+}: {
+  appointmentTime?: string | null;
+  defaultTime?: string | null;
+}) {
+  return appointmentTime || (defaultTime ?? "");
+}
+
+export function getBookingCreateDate({
+  defaultDate,
+  isPastAppointmentMode,
+}: {
+  defaultDate?: Date | null;
+  isPastAppointmentMode?: boolean;
+}) {
+  return parseLocalDateOnly(defaultDate) ?? (isPastAppointmentMode ? getDefaultPastAppointmentDate() : new Date());
+}
+
+export function getBookingCreateTime(defaultTime?: string | null) {
+  return defaultTime ?? "";
+}
+
+export function getBookingScheduleKey({
+  date,
+  time,
+  doctorName,
+}: {
+  date?: Date | string | null;
+  time?: string | null;
+  doctorName?: string | null;
+}) {
+  return `${formatBookingDateKey(date)}|${time || ""}|${doctorName || ""}`;
+}
+
+export function getBookingDefaultScheduleAction({
+  open,
+  isEditing,
+  defaultDate,
+  defaultTime,
+  doctorName,
+  appliedScheduleKey,
+}: {
+  open: boolean;
+  isEditing: boolean;
+  defaultDate?: Date | null;
+  defaultTime?: string | null;
+  doctorName?: string | null;
+  appliedScheduleKey?: string | null;
+}): DefaultScheduleAction {
+  if (!open || isEditing || !defaultDate || !defaultTime) return { type: "none" };
+
+  const scheduleDate = parseLocalDateOnly(defaultDate);
+  if (!scheduleDate) return { type: "none" };
+
+  const scheduleKey = getBookingScheduleKey({ date: scheduleDate, time: defaultTime, doctorName });
+  return {
+    type: "apply",
+    source: doctorName ? "doctor_availability" : "clicked_slot",
+    date: scheduleDate,
+    time: defaultTime,
+    doctorName,
+    scheduleKey,
+    shouldApplySchedule: appliedScheduleKey !== scheduleKey,
+  };
+}
+
+export function getBookingAutoPreselectConfig({
+  isEditing,
+  defaultDate,
+  defaultTime,
+  selectedTime,
+  appointmentType,
+  selectedDoctor,
+  selectedPatient,
+  defaultPatientId,
+  patientId,
+  appointmentTypeDurations,
+  defaultAppointmentType = "Routine Cleaning",
+}: {
+  isEditing: boolean;
+  defaultDate?: Date | null;
+  defaultTime?: string | null;
+  selectedTime?: string | null;
+  appointmentType?: string | null;
+  selectedDoctor?: string | null;
+  selectedPatient?: string | null;
+  defaultPatientId?: string | null;
+  patientId?: string | null;
+  appointmentTypeDurations: AppointmentTypeDurations;
+  defaultAppointmentType?: string;
+}): AutoPreselectConfig {
+  if (isEditing) return { type: "skip" };
+
+  if ((defaultDate && defaultTime) || selectedTime) {
+    return { type: "preserve_schedule", defaultAppointmentType };
+  }
+
+  if (!selectedDoctor) {
+    return { type: "wait_for_doctor", defaultAppointmentType };
+  }
+
+  const selectedAppointmentType = appointmentType || defaultAppointmentType;
+  const durationToSearch = String(appointmentTypeDurations[selectedAppointmentType] || 30);
+
+  return {
+    type: "search",
+    defaultAppointmentType,
+    doctorToSearch: selectedDoctor,
+    durationToSearch,
+    patientToSearch: patientId || selectedPatient || defaultPatientId || undefined,
+  };
+}
+
+export async function findNextAvailableBookingSlot({
+  startDate,
+  doctorToCheck,
+  durationToCheck,
+  patientToCheck,
+  timeSlots,
+  maxDaysToCheck = 30,
+  logPrefix = "BookingModal",
+}: {
+  startDate: Date;
+  doctorToCheck: string;
+  durationToCheck: string;
+  patientToCheck?: string;
+  timeSlots: string[];
+  maxDaysToCheck?: number;
+  logPrefix?: string;
+}): Promise<BookingSlot | null> {
+  if (!doctorToCheck || !durationToCheck) return null;
+
+  const durationMins = parseInt(durationToCheck, 10) || 30;
+  const start = parseLocalDateOnly(startDate) ?? new Date();
+
+  const getSlotsForDate = async (date: Date) => {
+    try {
+      const dateStr = formatBookingDateKey(date);
+      if (!dateStr) return [];
+
+      const response = await fetch(
+        apiUrl(`/api/appointments?doctor=${encodeURIComponent(doctorToCheck)}&startDate=${dateStr}&endDate=${dateStr}&includeUnpaid=true`),
+        { credentials: "include" }
+      );
+
+      if (!response.ok) return [];
+
+      const json = await response.json();
+      const appointments = Array.isArray(json.data) ? json.data : [];
+      console.log(`[${logPrefix}] findNextAvailableSlot fetched appointments for`, dateStr, {
+        doctorToCheck,
+        appointmentsCount: appointments.length,
+      });
+
+      let patientAppointmentsForDate: any[] = [];
+      if (patientToCheck) {
+        try {
+          const patientResponse = await fetch(
+            apiUrl(`/api/appointments?patientId=${encodeURIComponent(patientToCheck)}&startDate=${dateStr}&endDate=${dateStr}&includeUnpaid=true`),
+            { credentials: "include" }
+          );
+
+          if (patientResponse.ok) {
+            const patientJson = await patientResponse.json();
+            patientAppointmentsForDate = Array.isArray(patientJson.data) ? patientJson.data : [];
+          }
+        } catch (err) {
+          console.warn(`[${logPrefix}] Failed to fetch patient appointments for auto-search`, err);
+          patientAppointmentsForDate = [];
+        }
+
+        console.log(`[${logPrefix}] findNextAvailableSlot fetched patient appointments for`, dateStr, {
+          patientToCheck,
+          patientCount: patientAppointmentsForDate.length,
+        });
+      }
+
+      const now = new Date();
+      const isToday = dateStr === formatBookingDateKey(now);
+      const currentHour = now.getHours();
+      const currentMinute = now.getMinutes();
+      const availableSlots: string[] = [];
+
+      for (const slot of timeSlots) {
+        const [hour, minute] = slot.split(":").map(Number);
+        const isPastTime = isToday && (hour < currentHour || (hour === currentHour && minute <= currentMinute));
+        if (isPastTime) continue;
+
+        const slotMinutes = bookingTimeToMinutes(slot);
+        const slotEndMinutes = slotMinutes + durationMins;
+        let isConflict = false;
+
+        for (const appointment of appointments) {
+          if (appointment.status === "cancelled") continue;
+          if (isCartAppointmentStatus(appointment.status)) continue;
+
+          const appointmentStart = bookingTimeToMinutes(appointment.time);
+          const appointmentEnd = appointmentStart + (appointment.duration || 30);
+          if (slotMinutes < appointmentEnd && slotEndMinutes > appointmentStart) {
+            isConflict = true;
+            break;
+          }
+        }
+
+        if (!isConflict && patientAppointmentsForDate.length > 0) {
+          for (const appointment of patientAppointmentsForDate) {
+            if (appointment.status === "cancelled") continue;
+            if (isCartAppointmentStatus(appointment.status)) continue;
+
+            const appointmentStart = bookingTimeToMinutes(appointment.time);
+            const appointmentEnd = appointmentStart + (appointment.duration || 30);
+            if (slotMinutes < appointmentEnd && slotEndMinutes > appointmentStart) {
+              isConflict = true;
+              break;
+            }
+          }
+        }
+
+        if (!isConflict) availableSlots.push(slot);
+      }
+
+      return availableSlots;
+    } catch (err) {
+      console.warn(`[${logPrefix}] Failed to fetch appointments for date ${formatBookingDateKey(date)}:`, err);
+      return [];
+    }
+  };
+
+  for (let daysAhead = 0; daysAhead < maxDaysToCheck; daysAhead += 1) {
+    const checkDate = new Date(start);
+    checkDate.setDate(start.getDate() + daysAhead);
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (checkDate < today) continue;
+
+    const availableSlots = await getSlotsForDate(checkDate);
+    if (availableSlots.length > 0) {
+      return {
+        date: checkDate,
+        time: availableSlots[0],
+      };
+    }
+  }
+
+  return null;
+}
 
 export function getBookingActor({
   userRole,
@@ -47,6 +621,24 @@ export function getBookingActor({
     canManagePricing: isStaffBookingMode,
     canManageStatuses,
     isDoctorSelectionLocked: userRole === 'doctor',
+  };
+}
+
+export function getBookingCancellationConfig({
+  appointmentToEdit,
+  appointmentStatus,
+}: {
+  appointmentToEdit?: any;
+  appointmentStatus?: string | null;
+}) {
+  const currentStatus = String(
+    appointmentStatus || appointmentToEdit?.status || ""
+  ).toLowerCase();
+  const isCancelled = currentStatus === "cancelled";
+
+  return {
+    isCancelled,
+    canCancelAppointment: Boolean(appointmentToEdit) && !isCancelled,
   };
 }
 
@@ -131,10 +723,12 @@ export function getProjectedBookingStatus({
   totalPrice: number;
 }) {
   const { isStaffBookingMode } = getBookingActor({ userRole, bookingMode });
+  const normalizedSelectedStatus = normalizeAppointmentStatus(selectedStatus);
+  const normalizedExistingStatus = normalizeAppointmentStatus(existingStatus);
   const safeSelectedStatus =
-    isStaffBookingMode && selectedStatus === 'pending'
+    isStaffBookingMode && isCartAppointmentStatus(normalizedSelectedStatus)
       ? 'reserved'
-      : selectedStatus || existingStatus || (isStaffBookingMode ? 'reserved' : 'pending');
+      : normalizedSelectedStatus || normalizedExistingStatus || (isStaffBookingMode ? 'reserved' : CART_APPOINTMENT_STATUS);
 
   if (statusChangedByUser) {
     return safeSelectedStatus;
@@ -159,7 +753,7 @@ export function getProjectedBookingStatus({
   if (balance <= 0) return 'scheduled';
   if (amountPaid > 0) return 'reserved';
 
-  return isStaffBookingMode ? 'reserved' : 'pending';
+  return isStaffBookingMode ? 'reserved' : CART_APPOINTMENT_STATUS;
 }
 
 export function getProjectedPaymentStatus({

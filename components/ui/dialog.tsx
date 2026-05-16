@@ -50,10 +50,37 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  title,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
+  /** Optional title text to render as a visually-hidden Dialog.Title when no title is provided by callers */
+  title?: string
 }) {
+  // Utility: recursively check whether children (or nested children) include a Dialog title
+  function containsDialogTitle(node: React.ReactNode): boolean {
+    let found = false;
+    React.Children.forEach(node, (child) => {
+      if (found) return;
+      if (!React.isValidElement(child)) return;
+      const propsAny: any = child.props || {};
+      if (propsAny["data-slot"] === "dialog-title") {
+        found = true;
+        return;
+      }
+      if (child.type === DialogPrimitive.Title) {
+        found = true;
+        return;
+      }
+      if (propsAny.children) {
+        if (containsDialogTitle(propsAny.children)) {
+          found = true;
+          return;
+        }
+      }
+    });
+    return found;
+  }
   return (
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay />
@@ -65,6 +92,12 @@ function DialogContent({
         )}
         {...props}
       >
+        {/* If caller did not provide a DialogTitle, render a visually-hidden one for accessibility */}
+        {!containsDialogTitle(children) && (
+          <DialogPrimitive.Title data-slot="dialog-title" className={cn("sr-only")}>
+            {title || "Dialog"}
+          </DialogPrimitive.Title>
+        )}
         {children}
         {showCloseButton && (
           <DialogPrimitive.Close

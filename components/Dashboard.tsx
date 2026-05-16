@@ -1,5 +1,7 @@
 "use client";
 
+import { apiUrl } from "@/lib/api";
+
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "./ui/button";
@@ -13,6 +15,7 @@ import { RevenueOverview } from "./RevenueOverview";
 import { RecentSchedule } from "./RecentSchedule";
 import { VisitStatistics } from "./VisitStatistics";
 import { QuickActions } from "./QuickActions";
+import { isCartAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
 
 const revenueData = [
   { month: "Jan", revenue: 42000, appointments: 180 },
@@ -49,7 +52,7 @@ export function Dashboard({ portal }: DashboardProps) {
   useEffect(() => {
     const fetchPatientCount = async () => {
       try {
-        const response = await fetch("http://localhost:3001/api/patients?page=1&limit=1", { credentials: 'include' });
+        const response = await fetch(apiUrl("/api/patients?page=1&limit=1"), { credentials: 'include' });
         const result = await response.json();
         if (result.success) {
           const total = result.meta?.total ?? (Array.isArray(result.data) ? result.data.length : 0);
@@ -97,7 +100,7 @@ export function Dashboard({ portal }: DashboardProps) {
       const dayStr = today.toISOString().split("T")[0];
       return filtered
         .filter((apt: Appointment) => parseBackendDateToLocal(apt.date).toISOString().split("T")[0] === dayStr)
-        .filter((apt: Appointment) => apt.status !== "pending");
+        .filter((apt: Appointment) => !isCartAppointmentStatus(apt.status));
     } else if (viewMode === "week") {
       const weekStart = new Date(today);
       weekStart.setDate(today.getDate() - today.getDay());
@@ -112,7 +115,7 @@ export function Dashboard({ portal }: DashboardProps) {
           const aptDate = parseBackendDateToLocal(apt.date);
           return aptDate >= weekStart && aptDate <= weekEnd;
         })
-        .filter((apt: Appointment) => apt.status !== "pending");
+        .filter((apt: Appointment) => !isCartAppointmentStatus(apt.status));
     } else {
       const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
       monthStart.setHours(0, 0, 0, 0);
@@ -168,7 +171,7 @@ export function Dashboard({ portal }: DashboardProps) {
         apt.patientName.toLowerCase() === user.username.toLowerCase()
       );
     }
-    return filtered.filter(apt => apt.status === "pending" || apt.status === "tentative" || apt.status === "To Pay").length;
+    return filtered.filter(apt => ["reserved", "to-pay", "tbd"].includes(normalizeAppointmentStatus(apt.status))).length;
   }, [appointments, portal, user]);
 
   const getViewTitle = (): string => {

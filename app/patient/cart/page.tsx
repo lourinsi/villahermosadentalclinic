@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { useState } from "react";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { isCartAppointmentStatus } from "@/lib/appointment-status";
 
 const CartPage = () => {
     const { user } = useAuth();
@@ -46,8 +47,8 @@ const CartPage = () => {
     }, [filters, refreshAppointments]);
 
     const cartAppointments = useMemo(() => {
-        // Cart should only show pending (unpaid) appointments — tentative/reserved appear in Orders
-        return appointments.filter(apt => apt.status === "pending");
+        // Cart should only show unpaid appointment cart items; reserved appointments appear in Orders.
+        return appointments.filter(apt => isCartAppointmentStatus(apt.status));
     }, [appointments]);
 
     const handlePay = (appointment: Appointment) => {
@@ -85,7 +86,7 @@ const CartPage = () => {
                         <div>
                             <CardTitle className="text-2xl font-bold">My Appointment Cart</CardTitle>
                             <CardDescription>
-                                Confirm and pay for your pending appointments to secure your schedule.
+                                Confirm and pay for appointments in your cart to secure your schedule.
                             </CardDescription>
                         </div>
                     </div>
@@ -100,7 +101,7 @@ const CartPage = () => {
                             <ShoppingCart className="w-16 h-16 mb-4 text-gray-200" />
                             <h3 className="text-xl font-semibold text-gray-900">Your Cart is Empty</h3>
                             <p className="text-muted-foreground mt-2 max-w-sm">
-                                You don&apos;t have any pending appointments. Head over to &quot;Find Doctors&quot; or &quot;My Appointments&quot; to book a new one!
+                                You don&apos;t have any appointments in your cart. Head over to &quot;Find Doctors&quot; or &quot;My Appointments&quot; to book a new one!
                             </p>
                         </div>
                     ) : (

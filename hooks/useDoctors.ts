@@ -1,4 +1,6 @@
 "use client";
+
+import { apiUrl } from "@/lib/api";
 import { useCallback, useEffect, useState } from "react";
 import { Staff } from "../lib/staff-types";
 
@@ -12,8 +14,8 @@ export interface DoctorOption {
   bio?: string;
 }
 
-const STAFF_API = "http://localhost:3001/api/staff?limit=100";
-const PUBLIC_DOCTORS_API = "http://localhost:3001/api/staff/public-doctors";
+const STAFF_API = apiUrl("/api/staff?limit=100");
+const PUBLIC_DOCTORS_API = apiUrl("/api/staff/public-doctors");
 
 export function useDoctors(refreshKey?: number, options?: { publicBooking?: boolean }) {
   const [doctors, setDoctors] = useState<DoctorOption[]>([]);

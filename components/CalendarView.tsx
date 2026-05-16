@@ -37,6 +37,7 @@ import CalendarPopover from "./CalendarPopover";
 
 import ViewMode from "./viewMode";
 import { useRouter, useSearchParams } from 'next/navigation';
+import { isReservedAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
 
 // Map numeric keys to readable UI labels using APPOINTMENT_STATUSES
 // This will be moved inside the component since we need the hook
@@ -48,8 +49,27 @@ const getStatusLabelHelper = (key: number, statuses: any[]): string => {
 // Status filter defaults - will be supplemented by backend statuses
 const DEFAULT_STATUS_FILTERS = ["all", "scheduled", "completed"];
 
+type CalendarPortal = 'admin' | 'doctor' | 'patient' | 'public';
 
-export function CalendarView({ portal = 'admin', defaultStatusFilter, defaultDoctorFilter }: { portal?: 'admin' | 'doctor' | 'patient', defaultStatusFilter?: string[], defaultDoctorFilter?: string }) {
+interface CalendarViewProps {
+  portal?: CalendarPortal;
+  defaultStatusFilter?: string[];
+  defaultDoctorFilter?: string;
+  appointmentsOverride?: Appointment[];
+  isLoadingOverride?: boolean;
+  onCreateAppointment?: (date?: Date, time?: string, doctorName?: string) => void;
+  onOpenAppointment?: (appointment: Appointment) => void;
+}
+
+export function CalendarView({
+  portal = 'admin',
+  defaultStatusFilter,
+  defaultDoctorFilter,
+  appointmentsOverride,
+  isLoadingOverride,
+  onCreateAppointment,
+  onOpenAppointment,
+}: CalendarViewProps) {
   const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [searchTerm, setSearchTerm] = useState("");
@@ -74,11 +94,37 @@ export function CalendarView({ portal = 'admin', defaultStatusFilter, defaultDoc
     refreshAppointments, 
     openEditModal
   } = useAppointmentModal();
+  const displayedAppointments = appointmentsOverride ?? appointments;
+  const usesExternalAppointments = appointmentsOverride !== undefined;
   
 
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [appointmentToDelete, setAppointmentToDelete] = useState<string | null>(null);
-  const { doctors, isLoadingDoctors } = useDoctors();
+  const { doctors, isLoadingDoctors } = useDoctors(undefined, { publicBooking: portal === 'public' && !user?.role });
+
+  const handleCreateAppointment = useCallback(
+    (date?: Date, time?: string, doctorName?: string) => {
+      if (onCreateAppointment) {
+        onCreateAppointment(date, time, doctorName);
+        return;
+      }
+
+      openCreateModal(date, time, doctorName);
+    },
+    [onCreateAppointment, openCreateModal]
+  );
+
+  const handleOpenAppointment = useCallback(
+    (appointment: Appointment) => {
+      if (onOpenAppointment) {
+        onOpenAppointment(appointment);
+        return;
+      }
+
+      openEditModal(appointment);
+    },
+    [onOpenAppointment, openEditModal]
+  );
   
   // For doctor portal, automatically filter to logged-in doctor
   useEffect(() => {
@@ -105,10 +151,10 @@ export function CalendarView({ portal = 'admin', defaultStatusFilter, defaultDoc
       statusesToFilter = ["scheduled", "reserved"];
     }
     
-    let filtered = appointments
-      .map((a) => ({ ...a, status: (a.status as string) === 'confirmed' ? 'scheduled' : a.status }))
+    let filtered = displayedAppointments
+      .map((a) => ({ ...a, status: normalizeAppointmentStatus(a.status) }))
       .filter((a) => a.status !== 'cancelled')
-      .filter((a) => statusesToFilter.includes(a.status));
+      .filter((a) => statusesToFilter.map(normalizeAppointmentStatus).includes(a.status));
     
     // For patient portal, only show appointments for the logged-in patient
     if (portal === 'patient' && user && (user as any).patientId) {
@@ -116,7 +162,7 @@ export function CalendarView({ portal = 'admin', defaultStatusFilter, defaultDoc
     }
     
     return filtered;
-  }, [appointments, selectedStatus, statusFilterList, portal, user]);
+  }, [displayedAppointments, selectedStatus, statusFilterList, portal, user]);
 
   const getViewRange = useCallback((date: Date) => {
     const start = new Date(date);
@@ -158,6 +204,11 @@ export function CalendarView({ portal = 'admin', defaultStatusFilter, defaultDoc
   }, [viewMode, dateRange]);
 
   useEffect(() => {
+    if (usesExternalAppointments) {
+      setIsLoadingView(false);
+      return;
+    }
+
     // If we're in the custom view but the user hasn't selected both a start and end date,
     // don't fetch yet. This prevents an immediate refresh when the custom picker is opened
     // or when only the start date has been picked.
@@ -194,8 +245,8 @@ export function CalendarView({ portal = 'admin', defaultStatusFilter, defaultDoc
     filters.type = selectedType;
     // Don't send status to backend - we'll filter on the client side
     // Only send a single status for admin/doctor portals
-    if (portal === 'patient' || statusFilterList.length === 0) {
-      // For patient or when no specific status filter, fetch all and filter client-side
+    if (portal === 'patient' || portal === 'public' || statusFilterList.length === 0) {
+      // For patient/public or when no specific status filter, fetch all and filter client-side
       filters.status = 'all';
     } else {
       // For admin/doctor with single status filter
@@ -208,7 +259,7 @@ export function CalendarView({ portal = 'admin', defaultStatusFilter, defaultDoc
     return () => clearTimeout(timer);
   // Only re-run when relevant values change. For custom view we only care about
   // changes to the actual start/end dates (not the whole range object reference).
-  }, [viewMode, selectedDate, searchTerm, dateRange?.from, dateRange?.to, selectedDoctor, selectedType, selectedStatus, defaultStatusFilter, getViewRange, refreshAppointments]);
+  }, [viewMode, selectedDate, searchTerm, dateRange?.from, dateRange?.to, selectedDoctor, selectedType, selectedStatus, defaultStatusFilter, getViewRange, refreshAppointments, portal, usesExternalAppointments]);
 
   const timeSlots = TIME_SLOTS;
 
@@ -284,7 +335,7 @@ export function CalendarView({ portal = 'admin', defaultStatusFilter, defaultDoc
 
   const getColorForType = (type: string) => {
     // Map string status to colors using APPOINTMENT_STATUSES
-    const status = APPOINTMENT_STATUSES.find(s => s.value === type);
+    const status = APPOINTMENT_STATUSES.find(s => normalizeAppointmentStatus(s.value) === normalizeAppointmentStatus(type));
     
     // Return colors from status object if available, with fallback
     if (status?.bgColor && status?.textColor) {
@@ -427,7 +478,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                 /* Wide position for empty slots: centered in the main area */
                 <div
                   className="absolute inset-y-2 left-32 right-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-10 hover:bg-violet-50/50 rounded-xl border-2 border-dashed border-transparent hover:border-violet-200/50 group/plus"
-                  onClick={() => openCreateModal(selectedDate, timeSlot, selectedDoctor !== 'all' ? selectedDoctor : undefined)}
+                  onClick={() => handleCreateAppointment(selectedDate, timeSlot, selectedDoctor !== 'all' ? selectedDoctor : undefined)}
                 >
                   <Plus className="h-6 w-6 text-violet-300 transition-colors group-hover/plus:text-violet-600" />
                 </div>
@@ -443,7 +494,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                       className="bg-white p-1 rounded-md shadow-sm hover:bg-violet-50/50 hover:border-violet-200 border border-transparent cursor-pointer flex items-center justify-center"
                       onClick={(e) => {
                         e.stopPropagation();
-                        openCreateModal(selectedDate, timeSlot);
+                        handleCreateAppointment(selectedDate, timeSlot);
                       }}
                       aria-label={`Add appointment at ${timeSlot}`}
                     >
@@ -469,8 +520,8 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                     <div
                       key={appointment.id}
                       className={`absolute top-0 ${colors?.bg} ${colors?.text} ${colors?.border} border-l-4 rounded-lg p-3 shadow-sm hover:shadow-md transition-all cursor-pointer z-20 overflow-hidden ${
-                        appointment.status === "tentative" ? "border-dashed opacity-90" : 
-                        appointment.status === "To Pay" ? "border-double border-orange-400" : ""
+                        isReservedAppointmentStatus(appointment.status) ? "border-dashed opacity-90" : 
+                        normalizeAppointmentStatus(appointment.status) === "to-pay" ? "border-double border-orange-400" : ""
                       }`}
                       style={{
                         ...calculateAppointmentStyle(appointment.duration),
@@ -479,7 +530,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                       }}
                       onClick={(e) => {
                         e.stopPropagation();
-                        openEditModal(appointment);
+                        handleOpenAppointment(appointment);
                       }}
                     >
                       <div className="flex flex-col h-full">
@@ -606,7 +657,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                                     className=" "
                                     onClick={(e) => {
                                         e.stopPropagation();
-                                        openCreateModal(day, timeSlot);
+                                        handleCreateAppointment(day, timeSlot);
                                     }}
                                     aria-label={`Add appointment at ${timeSlot}`}
                                 >
@@ -619,7 +670,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                         {!currentSlotIsCovered && (
                             <div
                                 className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-10 hover:bg-violet-50/50 flex items-center justify-center"
-                                onClick={() => openCreateModal(day, timeSlot)}
+                                onClick={() => handleCreateAppointment(day, timeSlot)}
                             >
                                 <Plus className="h-5 w-5 text-violet-300" />
                             </div>
@@ -641,8 +692,8 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                             <div 
                               key={appointment.id}
                               className={`absolute top-0 ${colors?.bg} ${colors?.text} ${colors?.border} border-l-4 rounded-lg p-2 shadow-sm hover:shadow-md transition-all cursor-pointer z-20 overflow-hidden text-xs ${
-                                appointment.status === "tentative" ? "border-dashed opacity-90" : 
-                                appointment.status === "To Pay" ? "border-double border-orange-400" : ""
+                                isReservedAppointmentStatus(appointment.status) ? "border-dashed opacity-90" : 
+                                normalizeAppointmentStatus(appointment.status) === "to-pay" ? "border-double border-orange-400" : ""
                               }`}
                               style={{
                                 ...calculateAppointmentStyle(appointment.duration),
@@ -651,7 +702,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                               }}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                openEditModal(appointment);
+                                handleOpenAppointment(appointment);
                               }}
                             >
                               <div className="flex justify-between items-start">
@@ -672,10 +723,10 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                                   </div>
                                   <div className="font-semibold truncate flex items-center gap-1">
                                     {showPatient ? appointment.patientName : `Dr. ${appointment.doctor}`}
-                                    {appointment.status === "tentative" && (
+                                    {isReservedAppointmentStatus(appointment.status) && (
                                       <Badge variant="outline" className="text-[7px] h-2.5 px-0.5 bg-yellow-100 border-yellow-300 text-yellow-700 leading-none">R</Badge>
                                     )}
-                                    {appointment.status === "To Pay" && (
+                                    {normalizeAppointmentStatus(appointment.status) === "to-pay" && (
                                       <Badge variant="outline" className="text-[7px] h-2.5 px-0.5 bg-orange-100 border-orange-300 text-orange-700 leading-none">P</Badge>
                                     )}
                                   </div>
@@ -777,10 +828,10 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                   return (
                     <div
                       key={apt.id}
-                      className={`text-[10px] p-1 rounded truncate border-l-2 ${colors.bg} ${colors.text} ${colors.border} ${apt.status === "tentative" ? "border-dashed opacity-80" : apt.status === "To Pay" ? "border-orange-400" : ""} flex items-center gap-2 cursor-pointer hover:shadow-sm transition-all`}
+                      className={`text-[10px] p-1 rounded truncate border-l-2 ${colors.bg} ${colors.text} ${colors.border} ${isReservedAppointmentStatus(apt.status) ? "border-dashed opacity-80" : normalizeAppointmentStatus(apt.status) === "to-pay" ? "border-orange-400" : ""} flex items-center gap-2 cursor-pointer hover:shadow-sm transition-all`}
                       onClick={(e) => {
                         e.stopPropagation();
-                        openEditModal(apt);
+                        handleOpenAppointment(apt);
                       }}
                     >
                       <Avatar className="h-5 w-5 border border-gray-100 flex-shrink-0">
@@ -789,8 +840,8 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                       </Avatar>
                       <div className="truncate">
                         {showPatient ? apt.patientName : `${apt.time} • Dr. ${apt.doctor}`}
-                        {apt.status === "tentative" && " (R)"}
-                        {apt.status === "To Pay" && " (P)"}
+                        {isReservedAppointmentStatus(apt.status) && " (R)"}
+                        {normalizeAppointmentStatus(apt.status) === "to-pay" && " (P)"}
                       </div>
                     </div>
                   )
@@ -841,7 +892,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
               const colors = getColorForType(apt.status);
               return (
                 <Card key={apt.id} className="overflow-hidden hover:shadow-md transition-shadow cursor-pointer" onClick={() => { 
-                  openEditModal(apt);
+                  handleOpenAppointment(apt);
                 }}>
                   <div className={`h-1 ${colors.bg.replace('bg-', 'bg-').split(' ')[0]}`} />
                   <CardContent className="p-4">
@@ -982,7 +1033,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
               {/* View Mode Buttons and Status Badge - always on right */}
               <div className="flex items-center gap-3">
                 {/* View Mode Buttons - only for patient */}
-                {portal === 'patient' && (
+                {(portal === 'patient' || portal === 'public') && (
                   <div className="flex items-center gap-2">
                     {(['month','week','day'] as const).map(mode => (
                       <button
@@ -1032,7 +1083,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
         </CardHeader>
         <CardContent className="p-0">
           <div className="max-h-[700px] overflow-y-auto">
-            {isLoadingView ? (
+            {(isLoadingOverride ?? isLoadingView) ? (
               <div className="flex flex-col items-center justify-center py-24 space-y-4">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-violet-600"></div>
                 <p className="text-sm font-medium text-muted-foreground animate-pulse">Loading schedule...</p>

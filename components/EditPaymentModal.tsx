@@ -1,5 +1,7 @@
 "use client";
 
+import { apiUrl } from "@/lib/api";
+
 import React, { useState, useEffect } from "react";
 import {
   Dialog,
@@ -96,7 +98,7 @@ export function EditPaymentModal() {
         // Fetch appointments if not provided by context
         const fetchAppointments = async () => {
           try {
-            const res = await fetch(`http://localhost:3001/api/appointments?patientId=${targetPatientId}`, {
+            const res = await fetch(apiUrl(`/api/appointments?patientId=${targetPatientId}`), {
               headers: getAuthHeaders({ "Content-Type": "application/json" }),
               credentials: "include",
             });
@@ -119,7 +121,7 @@ export function EditPaymentModal() {
       const fetchPaymentMethods = async () => {
         try {
           setIsFetchingPaymentMethods(true);
-          const res = await fetch(`http://localhost:3001/api/payment-methods`, {
+          const res = await fetch(apiUrl(`/api/payment-methods`), {
             headers: getAuthHeaders({ "Content-Type": "application/json" }),
             credentials: "include",
           });
@@ -166,7 +168,7 @@ export function EditPaymentModal() {
         appointmentId: selectedAppointment,
       };
 
-      const res = await fetch(`http://localhost:3001/api/payments/${paymentId}`, {
+      const res = await fetch(apiUrl(`/api/payments/${paymentId}`), {
         method: "PUT",
         headers: getAuthHeaders({ "Content-Type": "application/json" }),
         credentials: "include",

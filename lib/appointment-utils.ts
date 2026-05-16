@@ -1,4 +1,5 @@
 import { Appointment } from "../hooks/useAppointments";
+import { isCartAppointmentStatus } from "@/lib/appointment-status";
 
 /**
  * Find next available appointment slot for a given doctor or across all doctors.
@@ -30,9 +31,9 @@ export const getNextAvailableSlot = (appointments: Appointment[], doctorFilter?:
           // Check if this slot conflicts with any appointment
           let hasConflict = false;
           for (const apt of appointmentsToCheck) {
-            // Skip cancelled/pending as they don't block
+            // Skip cancelled/cart appointments as they don't block
             const status = (apt.status || "").toLowerCase();
-            if (status === "cancelled" || status === "pending") continue;
+            if (status === "cancelled" || isCartAppointmentStatus(status)) continue;
             
             let aptStart: Date;
             if (typeof apt.date === 'string' && apt.date.includes('-') && !apt.date.includes(':')) {

@@ -1,5 +1,7 @@
 "use client";
 
+import { apiUrl } from "@/lib/api";
+
 import React, { useState } from "react";
 import { useAuth } from "@/hooks/useAuth.tsx";
 import { useRouter } from "next/navigation";
@@ -35,7 +37,7 @@ export default function PatientLoginPage() {
       await login(username, password);
       
       // The user is now logged in, but we must verify their role for this portal
-      const response = await fetch("http://localhost:3001/api/auth/verify", {
+      const response = await fetch(apiUrl("/api/auth/verify"), {
         method: "GET",
         credentials: "include",
       });
