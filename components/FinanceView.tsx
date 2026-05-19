@@ -1,9 +1,13 @@
 "use client";
 
 import { apiUrl } from "@/lib/api";
+import { getAuthHeaders } from "@/lib/auth-headers";
+import AppointmentHistoryView from "./AppointmentHistoryView";
+import { fetchSnapshotFromLogs } from "@/lib/appointmentSnapshots";
+import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 
 import { toast } from "sonner";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -24,10 +28,164 @@ import {
   FileText,
   ArrowUpRight,
   ArrowDownRight,
+  Eye,
   Plus,
   Receipt,
   Filter
 } from "lucide-react";
+
+type ApiResponse<T> = {
+  success: boolean;
+  message?: string;
+  data?: T;
+  error?: string;
+};
+
+const todayDate = () => new Date().toISOString().slice(0, 10);
+
+const createEmptyExpense = () => ({
+  category: "",
+  description: "",
+  amount: 0,
+  vendor: "",
+  date: todayDate(),
+  paymentMethod: "",
+  notes: "",
+});
+
+const currencyFormatter = new Intl.NumberFormat("en-PH", {
+  style: "currency",
+  currency: "PHP",
+  maximumFractionDigits: 0,
+});
+
+const formatCurrency = (amount?: number) => currencyFormatter.format(Number(amount) || 0);
+
+const normalizeFilterValue = (value?: string) =>
+  String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+const downloadCsv = (filename: string, rows: Record<string, string | number>[]) => {
+  if (!rows.length) {
+    toast.error("No records to export");
+    return;
+  }
+
+  const headers = Object.keys(rows[0]);
+  const escapeValue = (value: string | number) => {
+    const text = String(value ?? "");
+    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+  const csv = [
+    headers.join(","),
+    ...rows.map((row) => headers.map((header) => escapeValue(row[header])).join(",")),
+  ].join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+};
+
+const dateKey = (date: Date) => {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+};
+
+const getPeriodRange = (period: string) => {
+  const now = new Date();
+  const start = new Date(now);
+  const end = new Date(now);
+
+  switch (period) {
+    case "today":
+      return { start: dateKey(now), end: dateKey(now) };
+    case "yesterday": {
+      start.setDate(now.getDate() - 1);
+      return { start: dateKey(start), end: dateKey(start) };
+    }
+    case "this_week": {
+      const day = now.getDay();
+      start.setDate(now.getDate() - day);
+      return { start: dateKey(start), end: dateKey(end) };
+    }
+    case "last_week": {
+      const day = now.getDay();
+      start.setDate(now.getDate() - day - 7);
+      end.setDate(now.getDate() - day - 1);
+      return { start: dateKey(start), end: dateKey(end) };
+    }
+    case "this_month":
+      return {
+        start: dateKey(new Date(now.getFullYear(), now.getMonth(), 1)),
+        end: dateKey(end),
+      };
+    case "last_month":
+      return {
+        start: dateKey(new Date(now.getFullYear(), now.getMonth() - 1, 1)),
+        end: dateKey(new Date(now.getFullYear(), now.getMonth(), 0)),
+      };
+    default:
+      return null;
+  }
+};
+
+const buildAuthRequest = (init: RequestInit = {}): RequestInit => ({
+  ...init,
+  credentials: "include",
+  headers: getAuthHeaders({
+    ...(init.body ? { "Content-Type": "application/json" } : {}),
+    ...((init.headers as Record<string, string> | undefined) || {}),
+  }),
+});
+
+const fetchApiData = async <T,>(path: string, label: string, init: RequestInit = {}) => {
+  const response = await fetch(apiUrl(path), buildAuthRequest(init));
+  const payload = (await response.json().catch(() => ({}))) as ApiResponse<T>;
+
+  if (!response.ok) {
+    throw new Error(payload.message || `HTTP error! status: ${response.status} for ${label}`);
+  }
+
+  return payload.data as T;
+};
+
+const getAppointmentIdFromDescription = (description?: string) => {
+  const text = String(description || "");
+  const appointmentMatch = text.match(/\bappointment\s+([A-Za-z0-9_-]+)/i);
+  if (appointmentMatch?.[1]) return appointmentMatch[1];
+
+  const idMatch = text.match(/\bapt_[A-Za-z0-9_-]+/i);
+  return idMatch?.[0] || "";
+};
+
+const getAppointmentIdFromSnapshot = (snapshot?: any) =>
+  String(snapshot?.id || snapshot?.appointmentId || snapshot?._id || "");
+
+const formatTransactionTimestamp = (value?: string) => {
+  if (!value) return "";
+
+  const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value);
+  const parsed = new Date(isDateOnly ? `${value}T00:00:00` : value);
+  if (Number.isNaN(parsed.getTime())) return value;
+
+  return isDateOnly
+    ? parsed.toLocaleDateString("en-PH")
+    : parsed.toLocaleString("en-PH", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
+};
+
+const hasTimeComponent = (value?: string) =>
+  Boolean(value && !/^\d{4}-\d{2}-\d{2}$/.test(value));
 
 
 // Define interfaces for fetched data
@@ -95,24 +253,23 @@ export interface RecentTransaction {
   amount: number;
   type: string;
   method: string;
+  appointmentId?: string;
+  appointmentSnapshot?: any;
+  logDate?: string;
+  changedByName?: string;
+  source?: string;
 }
 
 export function FinanceView() {
+  const { openEditModalById, isEditModalOpen, selectedAppointment } = useAppointmentModal();
   const [isAddExpenseDialogOpen, setIsAddExpenseDialogOpen] = useState(false);
-  const [newExpense, setNewExpense] = useState({
-    category: "",
-    description: "",
-    amount: 0,
-    vendor: "",
-    date: "",
-    paymentMethod: "",
-    notes: "",
-  });
+  const [newExpense, setNewExpense] = useState(createEmptyExpense);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [paymentMethodFilter, setPaymentMethodFilter] = useState("all");
   const [timePeriodFilter, setTimePeriodFilter] = useState("all");
+  const [transactionTypeFilter, setTransactionTypeFilter] = useState("all");
   
   // State for fetched data
   const [revenueData, setRevenueData] = useState<RevenueEntry[]>([]);
@@ -124,55 +281,53 @@ export function FinanceView() {
   const [recentTransactions, setRecentTransactions] = useState<RecentTransaction[]>([]);
 
   const [isLoading, setIsLoading] = useState(true);
+  const [isSavingExpense, setIsSavingExpense] = useState(false);
+  const [isAppointmentHistoryOpen, setIsAppointmentHistoryOpen] = useState(false);
+  const [appointmentSnapshot, setAppointmentSnapshot] = useState<any | null>(null);
+  const [appointmentSnapshotLogDate, setAppointmentSnapshotLogDate] = useState("");
+  const [appointmentSnapshotIsHistorical, setAppointmentSnapshotIsHistorical] = useState(false);
+  const [loadingAppointmentId, setLoadingAppointmentId] = useState<string | null>(null);
+  const isSnapshotAppointmentOpen = Boolean(
+    isEditModalOpen &&
+    selectedAppointment?.id &&
+    getAppointmentIdFromSnapshot(appointmentSnapshot) &&
+    String(selectedAppointment.id) === getAppointmentIdFromSnapshot(appointmentSnapshot)
+  );
 
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      // Fetch Revenue Data
-      const revenueRes = await fetch(apiUrl("/api/finance/revenue"));
-      if (!revenueRes.ok) throw new Error(`HTTP error! status: ${revenueRes.status} for revenue data`);
-      const revenueData = (await revenueRes.json()).data || [];
-      setRevenueData(revenueData);
+      const [
+        revenueData,
+        expenseBreakdownData,
+        detailedExpensesData,
+        recurringExpensesData,
+        inventoryData,
+        payrollData,
+        transactionsData,
+      ] = await Promise.all([
+        fetchApiData<RevenueEntry[]>("/api/finance/revenue", "revenue data"),
+        fetchApiData<ExpenseBreakdownEntry[]>("/api/finance/expense-breakdown", "expense breakdown"),
+        fetchApiData<DetailedExpense[]>("/api/finance/detailed-expenses", "detailed expenses"),
+        fetchApiData<RecurringExpense[]>("/api/finance/recurring-expenses", "recurring expenses"),
+        fetchApiData<InventoryItem[]>("/api/inventory?limit=100", "inventory data"),
+        fetchApiData<PayrollEntry[]>("/api/finance/payroll", "payroll data"),
+        fetchApiData<RecentTransaction[]>("/api/finance/recent-transactions", "recent transactions"),
+      ]);
 
-      // Fetch Expense Breakdown
-      const expenseBreakdownRes = await fetch(apiUrl("/api/finance/expense-breakdown"));
-      if (!expenseBreakdownRes.ok) throw new Error(`HTTP error! status: ${expenseBreakdownRes.status} for expense breakdown`);
-      const expenseBreakdownData = (await expenseBreakdownRes.json()).data || [];
-      setExpenseBreakdown(expenseBreakdownData);
-
-      // Fetch Detailed Expenses
-      const detailedExpensesRes = await fetch(apiUrl("/api/finance/detailed-expenses"));
-      if (!detailedExpensesRes.ok) throw new Error(`HTTP error! status: ${detailedExpensesRes.status} for detailed expenses`);
-      const detailedExpensesData = (await detailedExpensesRes.json()).data || [];
-      setDetailedExpenses(detailedExpensesData);
-
-      // Fetch Recurring Expenses
-      const recurringExpensesRes = await fetch(apiUrl("/api/finance/recurring-expenses"));
-      if (!recurringExpensesRes.ok) throw new Error(`HTTP error! status: ${recurringExpensesRes.status} for recurring expenses`);
-      const recurringExpensesData = (await recurringExpensesRes.json()).data || [];
-      setRecurringExpenses(recurringExpensesData);
-
-      // Fetch Inventory Data
-      const inventoryRes = await fetch(apiUrl("/api/inventory")); // Assuming /api/inventory route
-      if (!inventoryRes.ok) throw new Error(`HTTP error! status: ${inventoryRes.status} for inventory data`);
-      const inventoryData = (await inventoryRes.json()).data || [];
-      setInventoryData(inventoryData);
-
-      // Fetch Payroll Data
-      const payrollRes = await fetch(apiUrl("/api/finance/payroll")); // Assuming /api/finance/payroll route
-      if (!payrollRes.ok) throw new Error(`HTTP error! status: ${payrollRes.status} for payroll data`);
-      const payrollData = (await payrollRes.json()).data || [];
-      setPayrollData(payrollData);
-
-      // Fetch Recent Transactions
-      const transactionsRes = await fetch(apiUrl("/api/finance/recent-transactions"));
-      if (!transactionsRes.ok) throw new Error(`HTTP error! status: ${transactionsRes.status} for recent transactions`);
-      const transactionsData = (await transactionsRes.json()).data || [];
-      setRecentTransactions(transactionsData);
-
+      setRevenueData(revenueData || []);
+      setExpenseBreakdown(expenseBreakdownData || []);
+      setDetailedExpenses(detailedExpensesData || []);
+      setRecurringExpenses(recurringExpensesData || []);
+      setInventoryData(inventoryData || []);
+      setPayrollData(payrollData || []);
+      setRecentTransactions(transactionsData || []);
     } catch (err) {
       console.error("Error fetching finance data:", err);
-      toast.error("Failed to fetch financial data. Please ensure the backend server is running on port 3001.");
+      const message = err instanceof Error && err.message.includes("401")
+        ? "Your admin session expired. Please sign in again."
+        : "Failed to fetch financial data. Please ensure the backend server is running on port 3001.";
+      toast.error(message);
       // Ensure all data arrays are empty on error
       setRevenueData([]);
       setExpenseBreakdown([]);
@@ -190,6 +345,214 @@ export function FinanceView() {
     fetchData();
   }, []); // Empty dependency array means this effect runs once on mount
 
+  const filteredDetailedExpenses = useMemo(() => {
+    const periodRange = getPeriodRange(timePeriodFilter);
+    return detailedExpenses.filter((expense) => {
+      const status = normalizeFilterValue(expense.status);
+      const method = normalizeFilterValue(expense.paymentMethod);
+      const selectedMethod = normalizeFilterValue(paymentMethodFilter);
+
+      if (statusFilter !== "all" && status !== statusFilter) return false;
+      if (paymentMethodFilter !== "all" && method !== selectedMethod) return false;
+
+      const rangeStart = timePeriodFilter === "custom" ? startDate : periodRange?.start || startDate;
+      const rangeEnd = timePeriodFilter === "custom" ? endDate : periodRange?.end || endDate;
+
+      if (rangeStart && expense.date < rangeStart) return false;
+      if (rangeEnd && expense.date > rangeEnd) return false;
+
+      return true;
+    });
+  }, [detailedExpenses, endDate, paymentMethodFilter, startDate, statusFilter, timePeriodFilter]);
+
+  const filteredRecentTransactions = useMemo(() => (
+    recentTransactions.filter((transaction) => {
+      if (transactionTypeFilter !== "all" && transaction.type !== transactionTypeFilter) return false;
+      if (startDate && transaction.date < startDate) return false;
+      if (endDate && transaction.date > endDate) return false;
+      return true;
+    })
+  ), [endDate, recentTransactions, startDate, transactionTypeFilter]);
+
+  const handleAddExpense = async () => {
+    if (!newExpense.category || !newExpense.description || !newExpense.date || Number(newExpense.amount) <= 0) {
+      toast.error("Please complete the required expense fields");
+      return;
+    }
+
+    setIsSavingExpense(true);
+    try {
+      await fetchApiData<DetailedExpense>("/api/finance/detailed-expenses", "new expense", {
+        method: "POST",
+        body: JSON.stringify({
+          ...newExpense,
+          amount: Number(newExpense.amount),
+        }),
+      });
+
+      toast.success("Expense added");
+      setNewExpense(createEmptyExpense());
+      setIsAddExpenseDialogOpen(false);
+      await fetchData();
+    } catch (error) {
+      console.error("Error adding expense:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to add expense");
+    } finally {
+      setIsSavingExpense(false);
+    }
+  };
+
+  const handleExportReport = () => {
+    downloadCsv(
+      `finance-report-${dateKey(new Date())}.csv`,
+      [
+        ...revenueData.map((row) => ({
+          Section: "Revenue",
+          Date: row.month,
+          Description: "Monthly totals",
+          Amount: row.revenue,
+          Expenses: row.expenses,
+          Profit: row.profit,
+        })),
+        ...detailedExpenses.map((expense) => ({
+          Section: "Expense",
+          Date: expense.date,
+          Description: expense.description,
+          Amount: expense.amount,
+          Expenses: expense.amount,
+          Profit: "",
+        })),
+        ...payrollData.map((employee) => ({
+          Section: "Payroll",
+          Date: currentMonth.month,
+          Description: `${employee.name} - ${employee.role}`,
+          Amount: employee.total,
+          Expenses: employee.total,
+          Profit: "",
+        })),
+      ]
+    );
+  };
+
+  const handleGenerateInvoices = () => {
+    const invoiceRows = recentTransactions
+      .filter((transaction) => transaction.type === "income")
+      .map((transaction) => ({
+        Date: transaction.date,
+        Description: transaction.description,
+        Method: transaction.method,
+        Amount: transaction.amount,
+      }));
+
+    downloadCsv(`invoice-summary-${dateKey(new Date())}.csv`, invoiceRows);
+  };
+
+  const getTransactionAppointmentId = (transaction: RecentTransaction) =>
+    transaction.appointmentId ||
+    getAppointmentIdFromSnapshot(transaction.appointmentSnapshot) ||
+    getAppointmentIdFromDescription(transaction.description);
+
+  const handleOpenAppointment = async (appointmentId: string) => {
+    if (!appointmentId) {
+      toast.error("No appointment is linked to this snapshot");
+      return;
+    }
+
+    setLoadingAppointmentId(appointmentId);
+    try {
+      setIsAppointmentHistoryOpen(false);
+      await openEditModalById(appointmentId);
+    } catch (error) {
+      console.error("Failed to open appointment:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to open appointment");
+    } finally {
+      setLoadingAppointmentId(null);
+    }
+  };
+
+  const viewCurrentAppointment = async (appointmentId: string) => {
+    if (!appointmentId) return;
+    setLoadingAppointmentId(appointmentId);
+    try {
+      const live = await fetchApiData<any>(`/api/appointments/${encodeURIComponent(appointmentId)}`, "current appointment");
+      setAppointmentSnapshot(live);
+      setAppointmentSnapshotLogDate(live?.updatedAt || live?.createdAt || "");
+      setAppointmentSnapshotIsHistorical(false);
+      setIsAppointmentHistoryOpen(true);
+    } catch (err) {
+      console.error("Failed to load current appointment:", err);
+      toast.error(err instanceof Error ? err.message : "Failed to load appointment");
+    } finally {
+      setLoadingAppointmentId(null);
+    }
+  };
+
+  const handleViewAppointmentSnapshot = async (transaction: RecentTransaction) => {
+    let transactionToView = transaction;
+    let appointmentId = getTransactionAppointmentId(transactionToView);
+    const loadingKey = appointmentId || transaction.id;
+
+    setLoadingAppointmentId(loadingKey);
+    try {
+      if (!appointmentId && !transactionToView.appointmentSnapshot) {
+        const refreshedTransactions = await fetchApiData<RecentTransaction[]>("/api/finance/recent-transactions", "recent transactions");
+        setRecentTransactions(refreshedTransactions || []);
+
+        transactionToView =
+          (refreshedTransactions || []).find((item) => String(item.id) === String(transaction.id)) ||
+          transactionToView;
+        appointmentId = getTransactionAppointmentId(transactionToView);
+      }
+
+      if (!appointmentId && !transactionToView.appointmentSnapshot) {
+        toast.error("No appointment is linked to this transaction");
+        return;
+      }
+
+      // Prefer any snapshot attached to the transaction
+      let snapshot = transactionToView.appointmentSnapshot || null;
+      const resolvedAppointmentId = appointmentId || getAppointmentIdFromSnapshot(snapshot);
+      // Consider snapshot historical if transaction has an explicit logDate or the attached snapshot has log metadata
+      let isHistorical = Boolean(transactionToView.logDate || (snapshot && (snapshot.changedAt || snapshot.changedByName || snapshot._isHistorical)));
+
+      // If no snapshot and we have a logDate, try reconstructing from logs
+      if (!snapshot && resolvedAppointmentId && transactionToView.logDate) {
+        try {
+          const fromLogs = await fetchSnapshotFromLogs(resolvedAppointmentId, transactionToView.logDate);
+          if (fromLogs) {
+            snapshot = fromLogs;
+            isHistorical = true;
+          }
+        } catch (e) {
+          console.warn("Failed to build snapshot from logs:", e);
+        }
+      }
+
+      // Fallback: fetch current appointment
+      if (!snapshot && resolvedAppointmentId) {
+        snapshot = await fetchApiData<any>(`/api/appointments/${encodeURIComponent(resolvedAppointmentId)}`, "appointment snapshot");
+      }
+
+      if (!snapshot) {
+        throw new Error("No appointment snapshot is available for this transaction");
+      }
+
+      if (resolvedAppointmentId && !getAppointmentIdFromSnapshot(snapshot)) {
+        snapshot = { ...snapshot, id: resolvedAppointmentId };
+      }
+
+      setAppointmentSnapshot(snapshot);
+      setAppointmentSnapshotLogDate(transactionToView.logDate || transactionToView.date || snapshot?.changedAt || snapshot?.updatedAt || "");
+      setAppointmentSnapshotIsHistorical(isHistorical);
+      setIsAppointmentHistoryOpen(true);
+    } catch (error) {
+      console.error("Error loading appointment snapshot:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to load appointment snapshot");
+    } finally {
+      setLoadingAppointmentId(null);
+    }
+  };
+
   // Handle case where revenueData might be empty after fetching
   const currentMonth = revenueData.length > 0 ? revenueData[revenueData.length - 1] : { month: "N/A", revenue: 0, expenses: 0, profit: 0 };
   const previousMonth = revenueData.length > 1 ? revenueData[revenueData.length - 2] : { month: "N/A", revenue: 0, expenses: 0, profit: 0 };
@@ -205,11 +568,11 @@ export function FinanceView() {
           <p className="text-muted-foreground">Track revenue, expenses, and clinic profitability</p>
         </div>
         <div className="flex space-x-2">
-          <Button variant="outline">
+          <Button variant="outline" onClick={handleExportReport}>
             <Download className="h-4 w-4 mr-2" />
             Export Report
           </Button>
-          <Button variant="brand" >
+          <Button variant="brand" onClick={handleGenerateInvoices}>
             <FileText className="h-4 w-4 mr-2" />
             Generate Invoices
           </Button>
@@ -224,7 +587,7 @@ export function FinanceView() {
             <DollarSign className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${currentMonth.revenue.toLocaleString()}</div>
+            <div className="text-2xl font-bold">{formatCurrency(currentMonth.revenue)}</div>
             <div className="flex items-center space-x-1 text-xs text-muted-foreground">
               {Number(revenueChange) > 0 ? (
                 <ArrowUpRight className="h-3 w-3 text-green-600" />
@@ -245,7 +608,7 @@ export function FinanceView() {
             <TrendingDown className="h-4 w-4 text-red-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${currentMonth.expenses.toLocaleString()}</div>
+            <div className="text-2xl font-bold">{formatCurrency(currentMonth.expenses)}</div>
             <div className="text-xs text-muted-foreground">
               <span className="text-green-600">-2.3%</span> from last month
             </div>
@@ -258,7 +621,7 @@ export function FinanceView() {
             <TrendingUp className="h-4 w-4 text-blue-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${currentMonth.profit.toLocaleString()}</div>
+            <div className="text-2xl font-bold">{formatCurrency(currentMonth.profit)}</div>
             <div className="flex items-center space-x-1 text-xs text-muted-foreground">
               <ArrowUpRight className="h-3 w-3 text-green-600" />
               <span className="text-green-600">{profitChange}%</span>
@@ -313,7 +676,7 @@ export function FinanceView() {
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="month" />
                       <YAxis />
-                      <Tooltip formatter={(value) => [`$${value.toLocaleString()}`, '']} />
+                      <Tooltip formatter={(value) => [formatCurrency(Number(value)), ""]} />
                       <Area type="monotone" dataKey="revenue" stackId="1" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.8} />
                       <Area type="monotone" dataKey="expenses" stackId="2" stroke="#ef4444" fill="#ef4444" fillOpacity={0.8} />
                     </AreaChart>
@@ -355,7 +718,7 @@ export function FinanceView() {
                               <Cell key={`cell-${index}`} fill={entry.color} />
                             ))}
                           </Pie>
-                          <Tooltip formatter={(value) => [`$${value.toLocaleString()}`, 'Amount']} />
+                          <Tooltip formatter={(value) => [formatCurrency(Number(value)), "Amount"]} />
                         </PieChart>
                       )}
                     </ResponsiveContainer>
@@ -368,7 +731,7 @@ export function FinanceView() {
                               <span>{expense.category}</span>
                             </div>
                             <div className="text-right">
-                              <div className="font-medium">${expense.amount.toLocaleString()}</div>
+                              <div className="font-medium">{formatCurrency(expense.amount)}</div>
                               <div className="text-xs text-muted-foreground">{expense.percentage}%</div>
                             </div>
                           </div>
@@ -430,10 +793,16 @@ export function FinanceView() {
                       <SelectItem value="cash">Cash</SelectItem>
                     </SelectContent>
                   </Select>
-                  <Button variant="outline" size="icon">
+                  <Button variant="outline" size="icon" onClick={() => fetchData()} title="Refresh finance data">
                     <Filter className="h-4 w-4" />
                   </Button>
-                  <Dialog open={isAddExpenseDialogOpen} onOpenChange={setIsAddExpenseDialogOpen}>
+                  <Dialog
+                    open={isAddExpenseDialogOpen}
+                    onOpenChange={(open) => {
+                      setIsAddExpenseDialogOpen(open);
+                      if (open && !newExpense.date) setNewExpense((prev) => ({ ...prev, date: todayDate() }));
+                    }}
+                  >
                     <DialogTrigger asChild>
                       <Button>
                         <Plus className="h-4 w-4 mr-2" />
@@ -447,7 +816,7 @@ export function FinanceView() {
                       <div className="space-y-4 py-4">
                         <div className="space-y-2">
                           <Label htmlFor="expenseCategory">Category</Label>
-                          <Select onValueChange={(value) => setNewExpense({ ...newExpense, category: value })}>
+                          <Select value={newExpense.category} onValueChange={(value) => setNewExpense({ ...newExpense, category: value })}>
                             <SelectTrigger id="expenseCategory">
                               <SelectValue placeholder="Select category" />
                             </SelectTrigger>
@@ -465,7 +834,7 @@ export function FinanceView() {
                           <Input id="description" placeholder="e.g., Dental supplies order" value={newExpense.description} onChange={(e) => setNewExpense({ ...newExpense, description: e.target.value })} />
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="expenseAmount">Amount ($)</Label>
+                          <Label htmlFor="expenseAmount">Amount (PHP)</Label>
                           <Input id="expenseAmount" type="number" placeholder="500.00" value={newExpense.amount} onChange={(e) => setNewExpense({ ...newExpense, amount: Number(e.target.value) })} />
                         </div>
                         <div className="space-y-2">
@@ -478,7 +847,7 @@ export function FinanceView() {
                         </div>
                         <div className="space-y-2">
                           <Label htmlFor="paymentMethod">Payment Method</Label>
-                          <Select onValueChange={(value) => setNewExpense({ ...newExpense, paymentMethod: value })}>
+                          <Select value={newExpense.paymentMethod} onValueChange={(value) => setNewExpense({ ...newExpense, paymentMethod: value })}>
                             <SelectTrigger id="paymentMethod">
                               <SelectValue placeholder="Select payment method" />
                             </SelectTrigger>
@@ -499,11 +868,8 @@ export function FinanceView() {
                         <Button variant="outline" onClick={() => setIsAddExpenseDialogOpen(false)}>
                           Cancel
                         </Button>
-                        <Button onClick={() => {
-                          console.log(newExpense);
-                          setIsAddExpenseDialogOpen(false);
-                        }}>
-                          Add Expense
+                        <Button onClick={handleAddExpense} disabled={isSavingExpense}>
+                          {isSavingExpense ? "Adding..." : "Add Expense"}
                         </Button>
                       </DialogFooter>
                     </DialogContent>
@@ -536,14 +902,14 @@ export function FinanceView() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {detailedExpenses.length === 0 ? (
+                      {filteredDetailedExpenses.length === 0 ? (
                         <TableRow>
                           <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
-                            No detailed expenses found. Click &apos;Add Expense&apos; to add one!
+                            No detailed expenses found.
                           </TableCell>
                         </TableRow>
                       ) : (
-                        detailedExpenses.map((expense) => (
+                        filteredDetailedExpenses.map((expense) => (
                           <TableRow key={expense.id}>
                             <TableCell>{expense.date}</TableCell>
                             <TableCell>
@@ -551,7 +917,7 @@ export function FinanceView() {
                             </TableCell>
                             <TableCell className="font-medium max-w-xs truncate">{expense.description}</TableCell>
                             <TableCell>{expense.vendor}</TableCell>
-                            <TableCell className="font-medium">${expense.amount.toLocaleString()}</TableCell>
+                            <TableCell className="font-medium">{formatCurrency(expense.amount)}</TableCell>
                             <TableCell className="text-sm text-muted-foreground">{expense.paymentMethod}</TableCell>
                             <TableCell>
                               <Badge className={expense.status === 'paid' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}>
@@ -597,7 +963,7 @@ export function FinanceView() {
                             </div>
                             <div className="font-medium text-sm mb-1">{expense.description}</div>
                             <div className="flex items-center justify-between">
-                              <span className="text-lg font-bold">${expense.amount.toLocaleString()}</span>
+                              <span className="text-lg font-bold">{formatCurrency(expense.amount)}</span>
                               <span className="text-xs text-muted-foreground">Due: {expense.nextDue}</span>
                             </div>
                           </div>
@@ -607,7 +973,7 @@ export function FinanceView() {
                     <div className="mt-4 pt-4 border-t flex justify-between items-center">
                       <span className="font-medium">Total Monthly Recurring Expenses</span>
                       <span className="text-xl font-bold">
-                        ${recurringExpenses.reduce((sum, e) => sum + e.amount, 0).toLocaleString()}
+                        {formatCurrency(recurringExpenses.reduce((sum, e) => sum + e.amount, 0))}
                       </span>
                     </div>
                   </div>
@@ -675,8 +1041,8 @@ export function FinanceView() {
                               {item.quantity} {item.unit}
                             </Badge>
                           </TableCell>
-                          <TableCell>${item.costPerUnit}</TableCell>
-                          <TableCell className="font-medium">${item.totalValue.toLocaleString()}</TableCell>
+                          <TableCell>{formatCurrency(item.costPerUnit)}</TableCell>
+                          <TableCell className="font-medium">{formatCurrency(item.totalValue)}</TableCell>
                           <TableCell>{item.supplier}</TableCell>
                           <TableCell>{item.lastOrdered}</TableCell>
                           <TableCell>
@@ -749,10 +1115,10 @@ export function FinanceView() {
                           <TableRow key={employee.id}>
                             <TableCell className="font-medium">{employee.name}</TableCell>
                             <TableCell>{employee.role}</TableCell>
-                            <TableCell>${employee.baseSalary ? employee.baseSalary.toLocaleString() : 0}</TableCell> 
-                            <TableCell>${employee.bonus ? employee.bonus.toLocaleString() : 0}</TableCell>
+                            <TableCell>{formatCurrency(employee.baseSalary)}</TableCell>
+                            <TableCell>{formatCurrency(employee.bonus)}</TableCell>
                             <TableCell className="font-medium">
-                              ${employee.total ? employee.total.toLocaleString() : 0}
+                              {formatCurrency(employee.total)}
                             </TableCell>
                             <TableCell>
                               <Badge className={employee.status === 'paid' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}>
@@ -780,7 +1146,7 @@ export function FinanceView() {
                         <p className="text-sm text-muted-foreground">January 2024</p>
                       </div>
                       <div className="text-right">
-                        <div className="text-2xl font-bold">${payrollData.reduce((sum, emp) => sum + emp.total, 0).toLocaleString()}</div>
+                        <div className="text-2xl font-bold">{formatCurrency(payrollData.reduce((sum, emp) => sum + emp.total, 0))}</div>
                         <p className="text-sm text-muted-foreground">
                           {payrollData.filter(emp => emp.status === 'paid').length} of {payrollData.length} employees paid
                         </p>
@@ -799,7 +1165,7 @@ export function FinanceView() {
               <div className="flex items-center justify-between">
                 <CardTitle>Recent Transactions</CardTitle>
                 <div className="flex space-x-2">
-                  <Select>
+                  <Select value={transactionTypeFilter} onValueChange={setTransactionTypeFilter}>
                     <SelectTrigger className="w-[140px]">
                       <SelectValue placeholder="Filter" />
                     </SelectTrigger>
@@ -835,49 +1201,76 @@ export function FinanceView() {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {recentTransactions.length === 0 ? (
+                  {filteredRecentTransactions.length === 0 ? (
                     <div className="text-center py-8 text-muted-foreground">
                       No recent transactions found.
                     </div>
                   ) : (
-                    recentTransactions.map((transaction) => (
-                      <div
-                        key={transaction.id}
-                        className="flex items-center justify-between p-4 border rounded-lg"
-                      >
-                        <div className="flex items-center space-x-4">
-                          <div
-                            className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                              transaction.type === "income"
-                                ? "bg-green-100"
-                                : "bg-red-100"
-                            }`}
-                          >
-                            {transaction.type === "income" ? (
-                              <ArrowUpRight className="h-5 w-5 text-green-600" />
-                            ) : (
-                              <ArrowDownRight className="h-5 w-5 text-red-600" />
-                            )}
+                    filteredRecentTransactions.map((transaction) => {
+                      const appointmentId = getTransactionAppointmentId(transaction);
+                      const transactionLoadingKey = appointmentId || transaction.id;
+                      const isLoadingThisAppointment = loadingAppointmentId === transactionLoadingKey;
+                      const savedAtLabel = hasTimeComponent(transaction.logDate)
+                        ? formatTransactionTimestamp(transaction.logDate)
+                        : "";
+
+                      return (
+                        <div
+                          key={transaction.id}
+                          className="flex items-center justify-between gap-4 p-4 border rounded-lg"
+                        >
+                          <div className="flex min-w-0 items-center space-x-4">
+                            <div
+                              className={`w-10 h-10 rounded-full flex flex-shrink-0 items-center justify-center ${
+                                transaction.type === "income"
+                                  ? "bg-green-100"
+                                  : "bg-red-100"
+                              }`}
+                            >
+                              {transaction.type === "income" ? (
+                                <ArrowUpRight className="h-5 w-5 text-green-600" />
+                              ) : (
+                                <ArrowDownRight className="h-5 w-5 text-red-600" />
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-medium truncate">{transaction.description}</div>
+                              <div className="text-sm text-muted-foreground">
+                                {transaction.date} | {transaction.method}
+                              </div>
+                              {savedAtLabel ? (
+                                <div className="text-xs text-muted-foreground">
+                                  Saved {savedAtLabel}
+                                  {transaction.changedByName ? ` by ${transaction.changedByName}` : ""}
+                                </div>
+                              ) : null}
+                            </div>
                           </div>
-                          <div>
-                            <div className="font-medium">{transaction.description}</div>
-                            <div className="text-sm text-muted-foreground">
-                              {transaction.date} • {transaction.method}
+                          <div className="flex flex-shrink-0 items-center gap-3">
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-8 w-8"
+                              disabled={isLoadingThisAppointment}
+                              title={appointmentId || transaction.appointmentSnapshot ? "View appointment snapshot" : "No appointment linked"}
+                              onClick={() => handleViewAppointmentSnapshot(transaction)}
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <div
+                              className={`min-w-[110px] text-right text-lg font-medium ${
+                                transaction.type === "income"
+                                  ? "text-green-600"
+                                  : "text-red-600"
+                              }`}
+                            >
+                              {transaction.type === "income" ? "+" : ""}
+                              {formatCurrency(Math.abs(transaction.amount))}
                             </div>
                           </div>
                         </div>
-                        <div
-                          className={`text-lg font-medium ${
-                            transaction.type === "income"
-                              ? "text-green-600"
-                              : "text-red-600"
-                          }`}
-                        >
-                          {transaction.type === "income" ? "+" : ""}$
-                          {Math.abs(transaction.amount).toLocaleString()}
-                        </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               )}
@@ -886,6 +1279,23 @@ export function FinanceView() {
 
         </TabsContent>
       </Tabs>
+      <AppointmentHistoryView
+        open={isAppointmentHistoryOpen}
+        onOpenChange={(open) => {
+          setIsAppointmentHistoryOpen(open);
+          if (!open) {
+            setAppointmentSnapshot(null);
+            setAppointmentSnapshotLogDate("");
+            setAppointmentSnapshotIsHistorical(false);
+          }
+        }}
+        appointmentSnapshot={appointmentSnapshot}
+        logDate={appointmentSnapshotLogDate}
+        onViewCurrent={viewCurrentAppointment}
+        onOpenAppointment={handleOpenAppointment}
+        isAppointmentOpen={isSnapshotAppointmentOpen}
+        isHistorical={appointmentSnapshotIsHistorical}
+      />
     </div>
   );
 }

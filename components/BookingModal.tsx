@@ -1,4 +1,6 @@
 import { apiUrl } from "@/lib/api";
+import { getAuthHeaders } from "@/lib/auth-headers";
+import { fetchSnapshotFromLogs } from "@/lib/appointmentSnapshots";
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
@@ -102,6 +104,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [isConfirmSummaryOpen, setIsConfirmSummaryOpen] = useState(false);
   const [snapshotToView, setSnapshotToView] = useState<any>(null);
   const [isSnapshotModalOpen, setIsSnapshotModalOpen] = useState(false);
+  const [snapshotIsHistorical, setSnapshotIsHistorical] = useState(false);
   const [isRescheduling, setIsRescheduling] = useState(false);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [isTimePickerOpen, setIsTimePickerOpen] = useState(false);
@@ -1676,6 +1679,32 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     onOpenChange(false);
   };
 
+  const viewCurrentAppointment = async (appointmentId?: string) => {
+    if (!appointmentId) return;
+    setIsSnapshotModalOpen(true);
+    setSnapshotToView(null);
+    setSnapshotIsHistorical(false);
+    setSnapshotIsHistorical(false);
+    try {
+      // Try to fetch the current live appointment
+      const res = await fetch(apiUrl(`/api/appointments/${encodeURIComponent(appointmentId)}`), {
+        credentials: "include",
+        headers: getAuthHeaders(),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(payload?.message || "Failed to fetch current appointment");
+        return;
+      }
+
+      const live = payload?.data ?? null;
+      setSnapshotToView(live);
+    } catch (err) {
+      console.error("Failed to load current appointment", err);
+      toast.error("Failed to load current appointment");
+    }
+  };
+
   return (
     <>
       <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); else onOpenChange(true); }}>
@@ -2121,7 +2150,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                           filteredLogs.push(current);
                         }
 
-                        return filteredLogs.map((log) => {
+                        return filteredLogs.map((log, index) => {
                           const paidAmount = (log as any).amount || 0;
                           const hasPaymentInfo = (log as any).amount !== undefined;
                           const isInitialCreation = !log.previousState?.id || log.previousState?.status === 'none';
@@ -2173,6 +2202,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                       
                                       console.log('[HistoryLog] Opening historical snapshot:', historicalData.id);
                                       setSnapshotToView(historicalData);
+                                      setSnapshotIsHistorical(index !== 0);
                                       setIsSnapshotModalOpen(true);
                                     }}
                                     className="p-1 hover:bg-white rounded-md border border-transparent hover:border-gray-200 transition-colors text-gray-400 hover:text-blue-600"
@@ -2679,10 +2709,15 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         open={isSnapshotModalOpen}
         onOpenChange={(val) => {
           setIsSnapshotModalOpen(val);
-          if (!val) setSnapshotToView(null);
+          if (!val) {
+            setSnapshotToView(null);
+            setSnapshotIsHistorical(false);
+          }
         }}
         appointmentSnapshot={snapshotToView}
         logDate={snapshotToView?.changedAt || new Date().toISOString()}
+        onViewCurrent={viewCurrentAppointment}
+        isHistorical={snapshotIsHistorical}
       />
 
       {/* Date Picker Modal */}

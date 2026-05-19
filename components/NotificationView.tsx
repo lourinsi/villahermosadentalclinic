@@ -26,6 +26,7 @@ interface NotificationViewProps {
   onReschedule?: (appointmentId: string) => void;
   onCancelAppointment?: (appointmentId: string) => void;
   onEditAppointment?: (appointmentId: string) => void;
+  onViewAppointmentSnapshot?: (appointmentId: string, notification: Notification) => void | Promise<void>;
   onRestore?: (id: string) => void;
   portal?: 'admin' | 'doctor' | 'patient';
   isLoading?: boolean;
@@ -45,6 +46,7 @@ export function NotificationView({
   onReschedule,
   onCancelAppointment,
   onEditAppointment,
+  onViewAppointmentSnapshot,
   onRestore,
   portal = 'admin',
   isLoading = false,
@@ -170,6 +172,7 @@ export function NotificationView({
       onRestore={onRestore}
       onUpdateAppointmentStatus={onUpdateAppointmentStatus}
       onEditAppointment={onEditAppointment}
+      onViewAppointmentSnapshot={onViewAppointmentSnapshot}
       onReschedule={onReschedule}
       onCancelAppointment={onCancelAppointment}
       portal={portal}

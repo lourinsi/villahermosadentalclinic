@@ -17,6 +17,7 @@ import { Calendar as CalendarIcon, Clock, Award, Loader2, CreditCard, Banknote, 
 import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { formatTimeTo12h, TIME_SLOTS } from "@/lib/time-slots";
 import { APPOINTMENT_PRICES, getAppointmentTypeName } from "@/lib/appointmentTypes";
+import { getAuthHeaders } from "@/lib/auth-headers";
 import { toast } from 'sonner';
 import useSharedBookingLogic, {
   DEFAULT_APPOINTMENT_TYPE_DURATIONS as appointmentTypeDurations,
@@ -229,6 +230,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isConfirmSummaryOpen, setIsConfirmSummaryOpen] = useState(false);
   const [snapshotToView, setSnapshotToView] = useState<any>(null);
+  const [snapshotIsHistorical, setSnapshotIsHistorical] = useState(false);
   const [isSnapshotModalOpen, setIsSnapshotModalOpen] = useState(false);
   const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false);
   const [isRescheduling, setIsRescheduling] = useState(false);
@@ -1878,6 +1880,38 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     onOpenChange(false);
   };
 
+  const viewCurrentAppointment = async (appointmentId?: string) => {
+    if (!appointmentId) return;
+
+    setIsSnapshotModalOpen(true);
+    setSnapshotIsHistorical(false);
+
+    if (isPublicCachedAppointment) {
+      setSnapshotToView(appointmentToEdit || null);
+      return;
+    }
+
+    setSnapshotToView(null);
+    try {
+      const res = await fetch(apiUrl(`/api/appointments/${encodeURIComponent(appointmentId)}`), {
+        credentials: "include",
+        headers: getAuthHeaders(),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(payload?.message || "Failed to fetch current appointment");
+        setSnapshotToView(appointmentToEdit || null);
+        return;
+      }
+
+      setSnapshotToView(payload?.data || appointmentToEdit || null);
+    } catch (err) {
+      console.error("Failed to load current appointment:", err);
+      toast.error("Failed to load current appointment");
+      setSnapshotToView(appointmentToEdit || null);
+    }
+  };
+
 return (
     <>
       <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); else onOpenChange(true); }}>
@@ -2608,6 +2642,7 @@ return (
 
                           setIsHistoryDialogOpen(false);
                           setSnapshotToView(historicalData);
+                          setSnapshotIsHistorical(index !== 0);
                           setIsSnapshotModalOpen(true);
                         }}
                         className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-transparent text-gray-400 transition-colors hover:border-blue-100 hover:bg-white hover:text-blue-600"
@@ -2807,10 +2842,15 @@ return (
         open={isSnapshotModalOpen}
         onOpenChange={(val) => {
           setIsSnapshotModalOpen(val);
-          if (!val) setSnapshotToView(null);
+          if (!val) {
+            setSnapshotToView(null);
+            setSnapshotIsHistorical(false);
+          }
         }}
         appointmentSnapshot={snapshotToView}
         logDate={snapshotToView?.changedAt || new Date().toISOString()}
+        onViewCurrent={viewCurrentAppointment}
+        isHistorical={snapshotIsHistorical}
       />
 
       <DatePickerModal open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen} selectedDate={selectedDate} onDateSelect={setSelectedDate} doctorName={selectedDoctor} selectedTime={selectedTime} duration={duration} dateSelectionMode={isPastAppointmentMode ? "past" : "standard"} appointmentSource={isPublicBookingMode ? "cache" : "server"} cachedAppointments={publicBlockingAppointments as any} />

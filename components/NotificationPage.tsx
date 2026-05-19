@@ -1,9 +1,11 @@
 import React from "react";
 import { NotificationView } from "@/components/NotificationView";
+import AppointmentHistoryView from "@/components/AppointmentHistoryView";
 import { useNotifications } from "@/hooks/useNotifications";
 import { toast } from "sonner";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { Appointment } from '@/hooks/useAppointments';
+import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 
 type Portal = "patient" | "doctor" | "admin";
 
@@ -18,8 +20,8 @@ export function NotificationPage({ portal }: NotificationPageProps) {
     error,
     markAsRead,
     markAsUnread,
-  deleteNotification, 
-  deleteNotificationWithResult,
+    deleteNotification, 
+    deleteNotificationWithResult,
     markAllAsRead,
     deleteAllNotifications,
     refreshNotifications,
@@ -31,8 +33,22 @@ export function NotificationPage({ portal }: NotificationPageProps) {
     refreshAppointments, 
     openEditModalById,
     appointments,
+    isEditModalOpen,
+    selectedAppointment,
     isLoading: appointmentsLoading
   } = useAppointmentModal();
+
+  const {
+    isAppointmentHistoryOpen,
+    setIsAppointmentHistoryOpen,
+    appointmentSnapshot,
+    appointmentSnapshotId,
+    appointmentSnapshotLogDate,
+    appointmentSnapshotIsHistorical,
+    handleViewCurrentSnapshot,
+    handleViewAppointmentSnapshot,
+    resetAppointmentSnapshot,
+  } = useNotificationAppointmentSnapshot(appointments);
 
   const isLoading = notificationsLoading || appointmentsLoading;
 
@@ -62,6 +78,19 @@ export function NotificationPage({ portal }: NotificationPageProps) {
       toast.error("Appointment not found or could not be loaded");
     }
   };
+
+  const handleOpenSnapshotAppointment = async (appointmentId: string) => {
+    setIsAppointmentHistoryOpen(false);
+    resetAppointmentSnapshot();
+    await handleReschedule(appointmentId);
+  };
+
+  const isSnapshotAppointmentOpen = Boolean(
+    isEditModalOpen &&
+    appointmentSnapshotId &&
+    selectedAppointment?.id &&
+    String(selectedAppointment.id) === String(appointmentSnapshotId)
+  );
 
   const handleCancelAppointment = async (appointmentId: string) => {
     const confirmed = window.confirm("This appointment is unrefundable. Are you sure you want to cancel?");
@@ -101,17 +130,17 @@ export function NotificationPage({ portal }: NotificationPageProps) {
   const portalProps: Record<Portal, any> = {
     patient: {
       onUpdateAppointmentStatus: handleUpdateAppointmentStatus,
+      onViewAppointmentSnapshot: handleViewAppointmentSnapshot,
       onReschedule: handleReschedule,
       onCancelAppointment: handleCancelAppointment,
-      onEditAppointment: handleReschedule, // Reuse handleReschedule as it opens the modal
     },
     doctor: {
       onUpdateAppointmentStatus: handleUpdateAppointmentStatus,
-      onEditAppointment: handleReschedule,
+      onViewAppointmentSnapshot: handleViewAppointmentSnapshot,
     },
     admin: {
       onUpdateAppointmentStatus: handleUpdateAppointmentStatus,
-      onEditAppointment: handleReschedule,
+      onViewAppointmentSnapshot: handleViewAppointmentSnapshot,
     },
   };
 
@@ -123,13 +152,28 @@ export function NotificationPage({ portal }: NotificationPageProps) {
         error={error}
         onMarkAsRead={markAsRead}
         onMarkAsUnread={markAsUnread}
-  onDelete={deleteNotification}
-  onDeleteWithResult={deleteNotificationWithResult}
+        onDelete={deleteNotification}
+        onDeleteWithResult={deleteNotificationWithResult}
         onRestore={handleRestoreNotification}
         onMarkAllAsRead={markAllAsRead}
         onDeleteAll={deleteAllNotifications}
         portal={portal}
         {...portalProps[portal]}
+      />
+      <AppointmentHistoryView
+        open={isAppointmentHistoryOpen}
+        onOpenChange={(open) => {
+          setIsAppointmentHistoryOpen(open);
+          if (!open) {
+            resetAppointmentSnapshot();
+          }
+        }}
+        appointmentSnapshot={appointmentSnapshot}
+        logDate={appointmentSnapshotLogDate}
+        onViewCurrent={handleViewCurrentSnapshot}
+        onOpenAppointment={handleOpenSnapshotAppointment}
+        isAppointmentOpen={isSnapshotAppointmentOpen}
+        isHistorical={appointmentSnapshotIsHistorical}
       />
     </div>
   );

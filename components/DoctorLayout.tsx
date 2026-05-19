@@ -8,9 +8,11 @@ import { LogOut, User, LayoutDashboard, Calendar, Users, Bell, ClipboardList } f
 import { toast } from "sonner";
 import NotificationsOpened from "./notificationsOpened";
 import BookingModalWrapper from "./BookingModalWrapper";
+import AppointmentHistoryView from "./AppointmentHistoryView";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { Appointment } from "@/hooks/useAppointments";
+import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 
 const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
   const pathname = usePathname();
@@ -33,6 +35,17 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
     newAppointmentTime,
     newAppointmentDoctorName
   } = useAppointmentModal();
+  const {
+    isAppointmentHistoryOpen,
+    setIsAppointmentHistoryOpen,
+    appointmentSnapshot,
+    appointmentSnapshotId,
+    appointmentSnapshotLogDate,
+    appointmentSnapshotIsHistorical,
+    handleViewCurrentSnapshot,
+    handleViewAppointmentSnapshot,
+    resetAppointmentSnapshot,
+  } = useNotificationAppointmentSnapshot(appointments);
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
@@ -58,6 +71,19 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
       toast.error("Appointment not found or could not be loaded");
     }
   };
+
+  const handleOpenSnapshotAppointment = async (appointmentId: string) => {
+    setIsAppointmentHistoryOpen(false);
+    resetAppointmentSnapshot();
+    await handleEditAppointment(appointmentId);
+  };
+
+  const isSnapshotAppointmentOpen = Boolean(
+    isEditModalOpen &&
+    appointmentSnapshotId &&
+    selectedAppointment?.id &&
+    String(selectedAppointment.id) === String(appointmentSnapshotId)
+  );
 
   const handleLogout = async () => {
     try {
@@ -151,9 +177,23 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
             onDeleteAll={deleteAllNotifications}
             onRefresh={refreshNotifications}
             onEditAppointment={handleEditAppointment}
+            onViewAppointmentSnapshot={handleViewAppointmentSnapshot}
           />
         </header>
         <main className="flex-1 p-6 overflow-auto bg-gray-50">{children}</main>
+        <AppointmentHistoryView
+          open={isAppointmentHistoryOpen}
+          onOpenChange={(open) => {
+            setIsAppointmentHistoryOpen(open);
+            if (!open) resetAppointmentSnapshot();
+          }}
+          appointmentSnapshot={appointmentSnapshot}
+          logDate={appointmentSnapshotLogDate}
+          onViewCurrent={handleViewCurrentSnapshot}
+          onOpenAppointment={handleOpenSnapshotAppointment}
+          isAppointmentOpen={isSnapshotAppointmentOpen}
+          isHistorical={appointmentSnapshotIsHistorical}
+        />
         
         {/* Support editing appointments from notifications */}
         <BookingModalWrapper 

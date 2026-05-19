@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:log": "node ./scripts/run-dev-logger.js",
+    "dev:clean": "npx rimraf .next && npm run dev",
     "build": "next build --turbopack",
     "start": "next start",
     "lint": "eslint"

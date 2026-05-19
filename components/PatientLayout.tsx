@@ -8,8 +8,10 @@ import { LogOut, User, Home, Users, Calendar, Search, ShoppingBag, ShoppingCart,
 import { toast } from "sonner";
 import NotificationsOpened from "./notificationsOpened";
 import BookingModalWrapper from "./BookingModalWrapper";
+import AppointmentHistoryView from "./AppointmentHistoryView";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 
 const PatientLayout = ({ children }: { children: React.ReactNode }) => {
   const pathname = usePathname();
@@ -32,6 +34,17 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
     newAppointmentDate,
     newAppointmentTime
   } = useAppointmentModal();
+  const {
+    isAppointmentHistoryOpen,
+    setIsAppointmentHistoryOpen,
+    appointmentSnapshot,
+    appointmentSnapshotId,
+    appointmentSnapshotLogDate,
+    appointmentSnapshotIsHistorical,
+    handleViewCurrentSnapshot,
+    handleViewAppointmentSnapshot,
+    resetAppointmentSnapshot,
+  } = useNotificationAppointmentSnapshot(appointments);
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
@@ -44,6 +57,19 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
       toast.error("Appointment not found or could not be loaded");
     }
   };
+
+  const handleOpenSnapshotAppointment = async (appointmentId: string) => {
+    setIsAppointmentHistoryOpen(false);
+    resetAppointmentSnapshot();
+    await handleReschedule(appointmentId);
+  };
+
+  const isSnapshotAppointmentOpen = Boolean(
+    isEditModalOpen &&
+    appointmentSnapshotId &&
+    selectedAppointment?.id &&
+    String(selectedAppointment.id) === String(appointmentSnapshotId)
+  );
 
   const handleCancelAppointment = async (appointmentId: string) => {
     const confirmed = window.confirm("This appointment is unrefundable. Are you sure you want to cancel?");
@@ -151,9 +177,23 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
             onReschedule={handleReschedule}
             onCancelAppointment={handleCancelAppointment}
             onEditAppointment={handleReschedule}
+            onViewAppointmentSnapshot={handleViewAppointmentSnapshot}
           />
         </header>
         <main className="flex-1 p-6 overflow-auto bg-gray-50">{children}</main>
+        <AppointmentHistoryView
+          open={isAppointmentHistoryOpen}
+          onOpenChange={(open) => {
+            setIsAppointmentHistoryOpen(open);
+            if (!open) resetAppointmentSnapshot();
+          }}
+          appointmentSnapshot={appointmentSnapshot}
+          logDate={appointmentSnapshotLogDate}
+          onViewCurrent={handleViewCurrentSnapshot}
+          onOpenAppointment={handleOpenSnapshotAppointment}
+          isAppointmentOpen={isSnapshotAppointmentOpen}
+          isHistorical={appointmentSnapshotIsHistorical}
+        />
         
         {/* Support editing/viewing appointments from notifications */}
         <BookingModalWrapper 

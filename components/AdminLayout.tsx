@@ -5,13 +5,15 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth.tsx";
 import { useBookingModalMode } from "@/hooks/useBookingModalMode";
 import { Button } from "@/components/ui/button";
-import { LogOut, User, LayoutDashboard, Users, Calendar, Shield, Bell, ClipboardList, Stethoscope } from "lucide-react";
+import { LogOut, User, LayoutDashboard, Users, Calendar, Shield, Bell, ClipboardList, Stethoscope, DollarSign } from "lucide-react";
 import { toast } from "sonner";
 import NotificationsOpened from "./notificationsOpened";
 import BookingModalWrapper from "./BookingModalWrapper";
+import AppointmentHistoryView from "./AppointmentHistoryView";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { Appointment } from "@/hooks/useAppointments";
+import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 
 const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   const pathname = usePathname();
@@ -33,6 +35,17 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
     newAppointmentDate,
     newAppointmentTime
   } = useAppointmentModal();
+  const {
+    isAppointmentHistoryOpen,
+    setIsAppointmentHistoryOpen,
+    appointmentSnapshot,
+    appointmentSnapshotId,
+    appointmentSnapshotLogDate,
+    appointmentSnapshotIsHistorical,
+    handleViewCurrentSnapshot,
+    handleViewAppointmentSnapshot,
+    resetAppointmentSnapshot,
+  } = useNotificationAppointmentSnapshot(appointments);
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
@@ -59,6 +72,19 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  const handleOpenSnapshotAppointment = async (appointmentId: string) => {
+    setIsAppointmentHistoryOpen(false);
+    resetAppointmentSnapshot();
+    await handleEditAppointment(appointmentId);
+  };
+
+  const isSnapshotAppointmentOpen = Boolean(
+    isEditModalOpen &&
+    appointmentSnapshotId &&
+    selectedAppointment?.id &&
+    String(selectedAppointment.id) === String(appointmentSnapshotId)
+  );
+
   const handleLogout = async () => {
     try {
       await logout();
@@ -76,6 +102,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
     { href: "/admin/patients", label: "Patients", icon: Users },
     { href: "/admin/doctors", label: "Find Doctors", icon: Stethoscope },
     { href: "/admin/calendar", label: "Calendar", icon: Calendar },
+    { href: "/admin/finance", label: "Finance", icon: DollarSign },
     { href: "/admin/staff", label: "Staff", icon: Shield },
     { href: "/admin/notifications", label: "Notifications", icon: Bell },
   ];
@@ -148,9 +175,23 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
             onDeleteAll={deleteAllNotifications}
             onRefresh={refreshNotifications}
             onEditAppointment={handleEditAppointment}
+            onViewAppointmentSnapshot={handleViewAppointmentSnapshot}
           />
         </header>
         <main className="flex-1 p-6 overflow-auto bg-gray-50">{children}</main>
+        <AppointmentHistoryView
+          open={isAppointmentHistoryOpen}
+          onOpenChange={(open) => {
+            setIsAppointmentHistoryOpen(open);
+            if (!open) resetAppointmentSnapshot();
+          }}
+          appointmentSnapshot={appointmentSnapshot}
+          logDate={appointmentSnapshotLogDate}
+          onViewCurrent={handleViewCurrentSnapshot}
+          onOpenAppointment={handleOpenSnapshotAppointment}
+          isAppointmentOpen={isSnapshotAppointmentOpen}
+          isHistorical={appointmentSnapshotIsHistorical}
+        />
         
         {/* Support editing appointments from notifications */}
         <BookingModalWrapper 

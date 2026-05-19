@@ -30,6 +30,7 @@ interface NotificationsOpenedProps {
 	onReschedule?: (appointmentId: string) => void;
 	onCancelAppointment?: (appointmentId: string) => void;
 	onEditAppointment?: (appointmentId: string) => void;
+	onViewAppointmentSnapshot?: (appointmentId: string, notification: Notification) => void | Promise<void>;
 }
 
 function NotificationsOpened({ 
@@ -47,7 +48,8 @@ function NotificationsOpened({
 	onRefresh,
 	onReschedule,
 	onCancelAppointment,
-	onEditAppointment
+	onEditAppointment,
+	onViewAppointmentSnapshot
 }: NotificationsOpenedProps) {
 	const [isPopoverOpen, setIsPopoverOpen] = useState(false);
 	const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -83,6 +85,10 @@ function NotificationsOpened({
 	// For compact view, we only show top 10
 	const recentNew = newNotifications.slice(0, 10);
 	const recentEarlier = earlierNotifications.slice(0, 10 - recentNew.length);
+	const handleViewAppointmentSnapshot = (appointmentId: string, notification: Notification) => {
+		setIsPopoverOpen(false);
+		onViewAppointmentSnapshot?.(appointmentId, notification);
+	};
 
 	const renderItem = (n: Notification) => (
 		<NotificationItem
@@ -95,6 +101,7 @@ function NotificationsOpened({
 			onRestore={onRestore}
 			onUpdateAppointmentStatus={onUpdateAppointmentStatus}
 			onEditAppointment={onEditAppointment}
+			onViewAppointmentSnapshot={handleViewAppointmentSnapshot}
 			onReschedule={onReschedule}
 			onCancelAppointment={onCancelAppointment}
 			portal={portal}
@@ -259,4 +266,3 @@ function NotificationsOpened({
 }
 
 export default NotificationsOpened;
-

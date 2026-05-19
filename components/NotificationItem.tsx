@@ -38,6 +38,7 @@ interface NotificationItemProps {
   onRestore?: (id: string) => void;
   onUpdateAppointmentStatus?: (appointmentId: string, status: string, notificationId: string) => void;
   onEditAppointment?: (appointmentId: string) => void;
+  onViewAppointmentSnapshot?: (appointmentId: string, notification: Notification) => void | Promise<void>;
   onReschedule?: (appointmentId: string) => void;
   onCancelAppointment?: (appointmentId: string) => void;
   portal: 'admin' | 'doctor' | 'patient';
@@ -53,6 +54,7 @@ export function NotificationItem({
   onRestore,
   onUpdateAppointmentStatus,
   onEditAppointment,
+  onViewAppointmentSnapshot,
   onReschedule,
   onCancelAppointment,
   portal,
@@ -65,6 +67,12 @@ export function NotificationItem({
   const status = statusRaw.replace(/[\s-]/g, '');
   const isActionTaken = ['cancelled', 'completed', 'scheduled'].includes(status);
   const isLog = notification.isLog;
+  const appointmentId = notification.metadata?.appointmentId;
+  const canOpenAppointment = Boolean(
+    appointmentId &&
+    (notification.type === 'appointment' || notification.type === 'payment') &&
+    (onViewAppointmentSnapshot || onEditAppointment)
+  );
 
   const avatarSrc = (() => {
     try {
@@ -102,7 +110,9 @@ export function NotificationItem({
     }
   };
 
-  const itemClasses = `group relative ${isCompact ? 'p-2' : 'p-4'} flex gap-3 transition-colors rounded-xl hover:bg-violet-100/50 cursor-pointer ${
+  const itemClasses = `group relative ${isCompact ? 'p-2' : 'p-4'} flex gap-3 transition-colors rounded-xl hover:bg-violet-100/50 ${
+    canOpenAppointment ? 'cursor-pointer' : 'cursor-default'
+  } ${
     isLog 
       ? 'bg-gray-50/60 border-l-2 border-gray-200 ml-2 opacity-75'
       : !notification.isRead ? 'bg-violet-50/40' : ''
@@ -111,13 +121,22 @@ export function NotificationItem({
   const acceptStatuses = new Set(['cancelled', 'topay', 'reserved', 'halfpaid', 'scheduled']);
   const cancelStatuses = new Set(['scheduled', 'topay', 'reserved', 'halfpaid']);
 
+  const openAppointmentDetails = () => {
+    if (!appointmentId || !canOpenAppointment) return;
+
+    if (onViewAppointmentSnapshot) {
+      onViewAppointmentSnapshot(appointmentId, notification);
+    } else {
+      onEditAppointment?.(appointmentId);
+    }
+
+    if (!notification.isRead && onMarkAsRead) onMarkAsRead(notification.id);
+  };
+
   const handleItemClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (onEditAppointment && notification.metadata?.appointmentId && (notification.type === 'appointment' || notification.type === 'payment')) {
-      onEditAppointment(notification.metadata.appointmentId);
-      if (!notification.isRead && onMarkAsRead) onMarkAsRead(notification.id);
-    }
+    openAppointmentDetails();
   };
 
   return (
@@ -194,17 +213,17 @@ export function NotificationItem({
                   </Button>
                 </>
               )}
-              {onEditAppointment && !isCompact && ['reserved','halfpaid','topay'].includes(status) && (
+              {canOpenAppointment && !isCompact && ['reserved','halfpaid','topay'].includes(status) && (
                 <Button
                   size="sm"
                   variant="ghost"
                   className="h-9 font-semibold rounded-lg border border-gray-200"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onEditAppointment(notification.metadata!.appointmentId!);
+                    openAppointmentDetails();
                   }}
                 >
-                  <Edit2 className="h-4 w-4 mr-2" /> Edit
+                  <Eye className="h-4 w-4 mr-2" /> View
                 </Button>
               )}
             </div>
@@ -231,13 +250,13 @@ export function NotificationItem({
             {/* Only show these options if notification is NOT deleted */}
             {!notification.deleted && (
               <>
-                {notification.metadata?.appointmentId && onEditAppointment && (notification.type === 'appointment' || notification.type === 'payment') && (
+                {canOpenAppointment && (
                   <DropdownMenuItem onClick={(e) => {
                     e.stopPropagation();
-                    onEditAppointment(notification.metadata!.appointmentId!);
+                    openAppointmentDetails();
                   }}>
                     <Eye className="h-4 w-4 mr-2" />
-                    <span className="text-sm">View Details</span>
+                    <span className="text-sm">View Snapshot</span>
                   </DropdownMenuItem>
                 )}
                 {!notification.isRead && onMarkAsRead && (
