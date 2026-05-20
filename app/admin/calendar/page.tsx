@@ -1,5 +1,5 @@
-import { CalendarView } from '@/components/CalendarView';
+import { CalendarPageLayout } from '@/components/CalendarPageLayout';
 
 export default function CalendarPage() {
-  return <CalendarView />;
+  return <CalendarPageLayout portal="admin" />;
 }

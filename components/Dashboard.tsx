@@ -1,46 +1,23 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { Button } from "./ui/button";
-import { Users, Calendar, DollarSign, TrendingUp, Clock, CheckCircle, AlertCircle } from "lucide-react";
-import { useAppointmentModal } from "@/hooks/useAppointmentModal";
-import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from "recharts";
-import { Badge } from "./ui/badge";
-import { Appointment } from "../hooks/useAppointments";
-import { getAppointmentTypeName, APPOINTMENT_TYPES } from "../lib/appointment-types";
-import { parseBackendDateToLocal } from "../lib/utils";
+import { apiUrl } from "@/lib/api";
 
-const statsData = [
-  {
-    title: "Total Patients",
-    value: "1,247",
-    change: "+12%",
-    icon: Users,
-    color: "text-blue-600"
-  },
-  {
-    title: "Today's Appointments",
-    value: "23",
-    change: "+2",
-    icon: Calendar,
-    color: "text-green-600"
-  },
-  {
-    title: "Monthly Revenue",
-    value: "$48,250",
-    change: "+8.2%",
-    icon: DollarSign,
-    color: "text-purple-600"
-  },
-  {
-    title: "Patient Satisfaction",
-    value: "4.9/5",
-    change: "+0.1",
-    icon: TrendingUp,
-    color: "text-orange-600"
-  }
-];
+import { useState, useEffect, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "./ui/button";
+import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { Appointment } from "../hooks/useAppointments";
+import { parseBackendDateToLocal } from "../lib/utils";
+import { useAuth } from "@/hooks/useAuth.tsx";
+import { NextAppointmentCard } from "./NextAppointmentCard";
+import { DashboardStats } from "./DashboardStats";
+import { RevenueOverview } from "./RevenueOverview";
+import { RecentSchedule } from "./RecentSchedule";
+import { VisitStatistics } from "./VisitStatistics";
+import { QuickActions } from "./QuickActions";
+import { isCartAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
+import AppointmentHistoryView from "./AppointmentHistoryView";
+import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 
 const revenueData = [
   { month: "Jan", revenue: 42000, appointments: 180 },
@@ -51,28 +28,44 @@ const revenueData = [
   { month: "Jun", revenue: 48250, appointments: 220 }
 ];
 
-// derive appointment types/counts from real appointments
 const colorPalette = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4", "#f97316"];
 
-const recentAppointments = [
-  { time: "09:00 AM", patient: "John Smith", type: "Cleaning", status: "confirmed" },
-  { time: "10:30 AM", patient: "Sarah Davis", type: "Checkup", status: "in-progress" },
-  { time: "11:45 AM", patient: "Mike Johnson", type: "Filling", status: "waiting" },
-  { time: "02:00 PM", patient: "Emily Brown", type: "Consultation", status: "confirmed" },
-  { time: "03:30 PM", patient: "David Wilson", type: "Cleaning", status: "confirmed" }
-];
+interface DashboardProps {
+  portal: "admin" | "doctor" | "patient";
+}
 
-export function Dashboard() {
-  const { openCreateModal, openAddPatientModal, appointments, refreshTrigger, openEditModal } = useAppointmentModal();
+export function Dashboard({ portal }: DashboardProps) {
+  const router = useRouter();
+  const { openCreateModal, openAddPatientModal, appointments, refreshTrigger, openEditModal, isEditModalOpen, selectedAppointment } = useAppointmentModal();
+  const { user } = useAuth();
   const [viewMode, setViewMode] = useState<"day" | "week" | "month">("day");
   const [totalPatients, setTotalPatients] = useState(0);
   const [isLoadingView, setIsLoadingView] = useState(false);
+  const {
+    isAppointmentHistoryOpen,
+    setIsAppointmentHistoryOpen,
+    appointmentSnapshot,
+    appointmentSnapshotId,
+    appointmentSnapshotLogDate,
+    appointmentSnapshotIsHistorical,
+    handleViewCurrentSnapshot,
+    handleViewAppointment,
+    resetAppointmentSnapshot,
+  } = useNotificationAppointmentSnapshot(appointments);
+
+  const handleViewAll = () => {
+    if (portal === "patient") {
+      router.push("/patient/appointments");
+    } else {
+      router.push(`/${portal}/calendar`);
+    }
+  };
 
   // Fetch total patients from backend
   useEffect(() => {
     const fetchPatientCount = async () => {
       try {
-        const response = await fetch("http://localhost:3001/api/patients?page=1&limit=1");
+        const response = await fetch(apiUrl("/api/patients?page=1&limit=1"), { credentials: 'include' });
         const result = await response.json();
         if (result.success) {
           const total = result.meta?.total ?? (Array.isArray(result.data) ? result.data.length : 0);
@@ -93,15 +86,34 @@ export function Dashboard() {
     return () => clearTimeout(t);
   }, [viewMode]);
 
+  // Filter appointments based on portal
   const filteredAppointments = useMemo(() => {
+    let filtered = appointments;
+
+    // For doctor portal, only show their appointments
+    if (portal === "doctor" && user?.username) {
+      filtered = filtered.filter((apt: Appointment) =>
+        apt.doctor.toLowerCase() === user.username.toLowerCase()
+      );
+    }
+
+    // For patient portal, only show their appointments
+    if (portal === "patient" && user?.username) {
+      const emailPrefix = user.username.split('@')[0];
+      filtered = filtered.filter((apt: Appointment) =>
+        apt.patientName.toLowerCase().includes(emailPrefix.toLowerCase()) ||
+        apt.patientName.toLowerCase() === user.username.toLowerCase()
+      );
+    }
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
     if (viewMode === "day") {
       const dayStr = today.toISOString().split("T")[0];
-      return appointments
+      return filtered
         .filter((apt: Appointment) => parseBackendDateToLocal(apt.date).toISOString().split("T")[0] === dayStr)
-        .filter((apt: Appointment) => apt.status !== "pending");
+        .filter((apt: Appointment) => !isCartAppointmentStatus(apt.status));
     } else if (viewMode === "week") {
       const weekStart = new Date(today);
       weekStart.setDate(today.getDate() - today.getDay());
@@ -111,68 +123,69 @@ export function Dashboard() {
       weekEnd.setDate(weekStart.getDate() + 6);
       weekEnd.setHours(23, 59, 59, 999);
 
-      return appointments
+      return filtered
         .filter((apt: Appointment) => {
           const aptDate = parseBackendDateToLocal(apt.date);
           return aptDate >= weekStart && aptDate <= weekEnd;
         })
-        .filter((apt: Appointment) => apt.status !== "pending");
+        .filter((apt: Appointment) => !isCartAppointmentStatus(apt.status));
     } else {
-      // month - today's month
       const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
       monthStart.setHours(0, 0, 0, 0);
 
       const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
       monthEnd.setHours(23, 59, 59, 999);
 
-      return appointments
+      return filtered
         .filter((apt: Appointment) => {
           const aptDate = parseBackendDateToLocal(apt.date);
           return aptDate >= monthStart && aptDate <= monthEnd;
-        })
-        .filter((apt: Appointment) => apt.status !== "pending");
+        });
     }
-  }, [appointments, viewMode]);
+  }, [appointments, viewMode, portal, user]);
+
+  // Get next upcoming appointment
+  const nextAppointment = useMemo(() => {
+    const now = new Date();
+    const filteredByPortal = appointments.filter((apt: Appointment) => {
+      if (portal === "doctor" && user?.username) {
+        return apt.doctor.toLowerCase() === user.username.toLowerCase();
+      }
+      if (portal === "patient" && user?.username) {
+        const emailPrefix = user.username.split('@')[0];
+        return apt.patientName.toLowerCase().includes(emailPrefix.toLowerCase()) ||
+               apt.patientName.toLowerCase() === user.username.toLowerCase();
+      }
+      return true;
+    });
+
+    const allFutureAppointments = filteredByPortal
+      .filter((apt: Appointment) => {
+        const aptDateTime = new Date(`${apt.date}T${apt.time}`);
+        return aptDateTime > now && apt.status !== "cancelled";
+      })
+      .sort((a, b) => {
+        const timeA = new Date(`${a.date}T${a.time}`).getTime();
+        const timeB = new Date(`${b.date}T${b.time}`).getTime();
+        return timeA - timeB;
+      });
+    return allFutureAppointments.length > 0 ? allFutureAppointments[0] : null;
+  }, [appointments, portal, user]);
 
   const pendingAppointmentsCount = useMemo(() => {
-    return appointments.filter(apt => apt.status === "pending").length;
-  }, [appointments]);
-
-  // Build dynamic stats based on backend data
-  const dynamicStats = [
-    {
-      title: "Total Patients",
-      value: totalPatients.toString(),
-      change: "+12%",
-      icon: Users,
-      color: "text-blue-600",
-      bgColor: "bg-blue-50"
-    },
-    {
-      title: viewMode === "day" ? "Today's Appointments" : viewMode === "week" ? "This Week's Appointments" : "This Month's Appointments",
-      value: filteredAppointments.length.toString(),
-      change: "+2",
-      icon: Calendar,
-      color: "text-green-600",
-      bgColor: "bg-green-50"
-    },
-    {
-      title: "Pending",
-      value: pendingAppointmentsCount.toString(),
-      change: "Action required",
-      icon: AlertCircle,
-      color: "text-amber-600",
-      bgColor: "bg-amber-50"
-    },
-    {
-      title: "Monthly Revenue",
-      value: "$48,250",
-      change: "+8.2%",
-      icon: DollarSign,
-      color: "text-purple-600",
-      bgColor: "bg-purple-50"
+    let filtered = appointments;
+    if (portal === "doctor" && user?.username) {
+      filtered = filtered.filter((apt: Appointment) =>
+        apt.doctor.toLowerCase() === user.username.toLowerCase()
+      );
     }
-  ];
+    if (portal === "patient" && user?.username) {
+      filtered = filtered.filter((apt: Appointment) =>
+        apt.patientName.toLowerCase() === user.username.toLowerCase()
+      );
+    }
+    return filtered.filter(apt => ["reserved", "to-pay", "tbd"].includes(normalizeAppointmentStatus(apt.status))).length;
+  }, [appointments, portal, user]);
 
   const getViewTitle = (): string => {
     const today = new Date();
@@ -189,235 +202,135 @@ export function Dashboard() {
     }
   };
 
-  const appointmentTypeCounts = appointments.reduce<Record<string, number>>((acc, apt: Appointment) => {
-    const key = getAppointmentTypeName(apt.type, apt.customType);
-    acc[key] = (acc[key] || 0) + 1;
-    return acc;
-  }, {});
+  const getHeaderText = () => {
+    if (portal === "admin") {
+      return {
+        title: "Dashboard",
+        subtitle: "Welcome back! Here's what's happening at your clinic today."
+      };
+    } else if (portal === "doctor") {
+      const firstName = user?.username ? user.username.split('@')[0] : "Doctor";
+      return {
+        title: `Welcome, Dr. ${firstName}!`,
+        subtitle: `Here's your schedule overview for ${viewMode === "day" ? "today" : viewMode === "week" ? "this week" : "this month"}.`
+      };
+    } else {
+      const firstName = user?.username ? user.username.split('@')[0] : "there";
+      return {
+        title: `Welcome back, ${firstName}!`,
+        subtitle: "Manage your dental appointments and track your health"
+      };
+    }
+  };
 
-  const totalAppointments = Object.values(appointmentTypeCounts).reduce((s: number, v: number) => s + v, 0) || 1;
-
-  const appointmentTypes = Object.keys(appointmentTypeCounts).map((name, idx) => ({
-    name,
-    value: Math.round((appointmentTypeCounts[name] / totalAppointments) * 100),
-    color: colorPalette[idx % colorPalette.length]
-  }));
+  const headerText = getHeaderText();
+  const handleOpenSnapshotAppointment = (appointmentId: string) => {
+    const appointment = appointments.find((item: Appointment) => String(item.id) === String(appointmentId));
+    setIsAppointmentHistoryOpen(false);
+    resetAppointmentSnapshot();
+    if (appointment) openEditModal(appointment, portal === "patient");
+  };
+  const isSnapshotAppointmentOpen = Boolean(
+    isEditModalOpen &&
+    appointmentSnapshotId &&
+    selectedAppointment?.id &&
+    String(selectedAppointment.id) === String(appointmentSnapshotId)
+  );
 
   return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-gray-900">Dashboard</h1>
-        <p className="text-muted-foreground">Welcome back! Here's what's happening at your clinic today.</p>
+    <div className="p-8 space-y-10 bg-[#f8fafc] min-h-screen">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="text-4xl font-black text-gray-900 tracking-tight">{headerText.title}</h1>
+          <p className="text-gray-500 font-medium">{headerText.subtitle}</p>
+        </div>
+        {portal !== "patient" && (
+          <div className="flex items-center space-x-3 bg-white p-1.5 rounded-2xl shadow-sm border border-gray-100">
+            {(["day", "week", "month"] as const).map((mode) => (
+              <Button
+                key={mode}
+                size="sm"
+                variant="ghost"
+                className={`px-6 py-2 text-xs font-bold rounded-xl transition-all duration-300 ${
+                  viewMode === mode
+                    ? "bg-violet-600 text-white shadow-md shadow-violet-200"
+                    : "text-gray-400 hover:text-gray-600 hover:bg-gray-50"
+                }`}
+                onClick={() => setViewMode(mode)}
+              >
+                {mode.charAt(0).toUpperCase() + mode.slice(1)}
+              </Button>
+            ))}
+          </div>
+        )}
       </div>
-      
+
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {dynamicStats.map((stat, index) => (
-          <Card key={index} className="hover:shadow-md transition-shadow">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                {stat.title}
-              </CardTitle>
-              <div className={`p-2 rounded-lg ${stat.bgColor || 'bg-gray-50'}`}>
-                <stat.icon className={`h-4 w-4 ${stat.color}`} />
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stat.value}</div>
-              <p className="text-xs text-muted-foreground">
-                <span className={stat.title === "Pending" ? "text-amber-600 font-medium" : "text-green-600"}>{stat.change}</span> {stat.title !== "Pending" && "from last month"}
-              </p>
-            </CardContent>
-          </Card>
-        ))}
+      <DashboardStats
+        portal={portal}
+        viewMode={viewMode}
+        appointments={appointments}
+        filteredAppointments={filteredAppointments}
+        totalPatients={totalPatients}
+        pendingAppointmentsCount={pendingAppointmentsCount}
+        user={user}
+      />
+
+      {/* Next Appointment Section (Full Width) */}
+      <NextAppointmentCard
+        appointment={nextAppointment}
+        role={portal}
+        onViewDetails={(apt: Appointment) => {
+          handleViewAppointment(apt);
+        }}
+        onViewAll={handleViewAll}
+        showHeader={true}
+      />
+
+      {/* Bottom Grid: Schedule, Stats, and Quick Actions */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-stretch">
+        <RecentSchedule
+          portal={portal}
+          viewMode={viewMode}
+          setViewMode={setViewMode}
+          appointments={filteredAppointments}
+          isLoadingView={isLoadingView}
+          viewTitle={getViewTitle()}
+          onAppointmentClick={(apt: Appointment) => {
+            handleViewAppointment(apt);
+          }}
+          onViewAll={handleViewAll}
+        />
+
+        <VisitStatistics
+          appointments={appointments}
+          filteredAppointments={filteredAppointments}
+          colorPalette={colorPalette}
+          viewMode={viewMode}
+        />
+
+        <QuickActions
+          portal={portal}
+          openCreateModal={openCreateModal}
+          openAddPatientModal={openAddPatientModal}
+        />
       </div>
-      
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Revenue Chart */}
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Revenue Overview</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={revenueData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
-                <YAxis />
-                <Tooltip formatter={(value: any, name: any) => [
-                  name === 'revenue' ? `$${value.toLocaleString()}` : value,
-                  name === 'revenue' ? 'Revenue' : 'Appointments'
-                ]} />
-                <Area type="monotone" dataKey="revenue" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.1} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-        
-        {/* Appointment Types */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Appointment Types</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={appointmentTypes}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={100}
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  {appointmentTypes.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(value: any) => [`${value}%`, 'Percentage']} />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="space-y-2 mt-4">
-              {appointmentTypes.map((type, index) => (
-                <div key={index} className="flex items-center justify-between text-sm">
-                  <div className="flex items-center space-x-2">
-                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: type.color }} />
-                    <span>{type.name}</span>
-                  </div>
-                  <span className="font-medium">{type.value}%</span>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-      
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Today's Schedule / Appointments */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle>Schedule</CardTitle>
-                <p className="text-sm text-gray-500 mt-1">{getViewTitle()}</p>
-              </div>
-              <div className="flex items-center bg-gray-100 rounded-lg p-1">
-                {(["day", "week", "month"] as const).map((mode) => (
-                  <Button
-                    key={mode}
-                    size="sm"
-                    variant="ghost"
-                    className={`
-                      px-3 py-1 text-xs font-medium rounded transition-all duration-200 
-                      ${viewMode === mode 
-                        ? "bg-black text-white shadow-sm hover:bg-gray-800" 
-                        : "bg-transparent text-gray-600 hover:bg-gray-200 hover:text-gray-900"
-                      }
-                    `}
-                    onClick={() => setViewMode(mode)}
-                  >
-                    {mode.charAt(0).toUpperCase() + mode.slice(1)}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {isLoadingView ? (
-                <div className="text-center py-8">
-                  <div className="inline-block">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-600 mx-auto mb-2"></div>
-                    <p className="text-sm text-muted-foreground">Loading schedule...</p>
-                  </div>
-                </div>
-              ) : filteredAppointments.length > 0 ? (
-                filteredAppointments.map((appointment: Appointment) => (
-                  <div 
-                    key={appointment.id} 
-                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
-                    onClick={() => openEditModal(appointment)}
-                  >
-                    <div className="flex items-center space-x-3">
-                      <div className="text-sm font-medium text-violet-600 min-w-[60px]">
-                        <div>{appointment.time}</div>
-                        {viewMode !== "day" && (
-                          <div className="text-xs text-gray-500 mt-1">
-                            {parseBackendDateToLocal(appointment.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                          </div>
-                        )}
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium">{appointment.patientName}</div>
-                        <div className="text-xs text-muted-foreground flex items-center space-x-2">
-                          <span>{getAppointmentTypeName(appointment.type, appointment.customType)} • {appointment.doctor} {appointment.price != null && `• $${appointment.price.toFixed(2)}`}</span>
-                          <Badge variant={appointment.status === "pending" ? "outline" : appointment.status === "confirmed" ? "secondary" : "default"}>
-                            {appointment.status}
-                          </Badge>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="text-center py-8 text-gray-500">
-                  No appointments scheduled for {viewMode === "day" ? "today" : viewMode === "week" ? "this week" : "this month"}.
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-        
-        {/* Quick Actions */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Quick Actions</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <Button 
-              variant="outline" 
-              className="w-full p-4 text-left h-auto transform transition-all duration-200 hover:scale-105 hover:shadow-lg hover:bg-blue-50 active:scale-95"
-              onClick={() => openCreateModal()}
-            >
-              <div className="flex items-center space-x-3">
-                <Calendar className="h-6 w-6 text-blue-600 transition-colors duration-200 group-hover:text-blue-700" />
-                <div>
-                  <div className="font-medium transition-colors duration-200">Schedule Appointment</div>
-                  <div className="text-sm text-muted-foreground">Book a new patient appointment</div>
-                </div>
-              </div>
-            </Button>
-            
-                        <Button
-              variant="brand"
-              className="w-full p-4 text-left h-auto transform transition-all duration-200 hover:scale-105 hover:shadow-lg active:scale-95"
-              onClick={() => openAddPatientModal()}
-            >
-              <div className="flex items-center space-x-3">
-                <Users className="h-6 w-6 text-white transition-transform duration-200 group-hover:scale-110" />
-                <div>
-                  <div className="font-medium text-white">Add New Patient</div>
-                  <div className="text-sm text-violet-100">Register a new patient</div>
-                </div>
-              </div>
-            </Button>
-            
-            <Button 
-              variant="outline" 
-              className="w-full p-4 text-left h-auto transform transition-all duration-200 hover:scale-105 hover:shadow-lg hover:bg-purple-50 active:scale-95"
-            >
-              <div className="flex items-center space-x-3">
-                <DollarSign className="h-6 w-6 text-purple-600 transition-colors duration-200 group-hover:text-purple-700" />
-                <div>
-                  <div className="font-medium transition-colors duration-200">View Reports</div>
-                  <div className="text-sm text-muted-foreground">Financial and clinical reports</div>
-                </div>
-              </div>
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
+
+      {/* Revenue Overview (Full Width, Admin/Doctor Only) */}
+      <RevenueOverview portal={portal} revenueData={revenueData} />
+      <AppointmentHistoryView
+        open={isAppointmentHistoryOpen}
+        onOpenChange={(open) => {
+          setIsAppointmentHistoryOpen(open);
+          if (!open) resetAppointmentSnapshot();
+        }}
+        appointmentSnapshot={appointmentSnapshot}
+        logDate={appointmentSnapshotLogDate}
+        onViewCurrent={handleViewCurrentSnapshot}
+        onOpenAppointment={handleOpenSnapshotAppointment}
+        isAppointmentOpen={isSnapshotAppointmentOpen}
+        isHistorical={appointmentSnapshotIsHistorical}
+      />
     </div>
   );
 }

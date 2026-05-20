@@ -1,5 +1,7 @@
 "use client";
 
+import { apiUrl } from "@/lib/api";
+
 import React, { useState, useEffect } from "react";
 import {
   Dialog,
@@ -23,6 +25,8 @@ import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { toast } from "sonner";
 import { CheckCircle, DollarSign } from "lucide-react";
 import { Appointment } from "@/hooks/useAppointments";
+import { getAuthHeaders } from "@/lib/auth-headers";
+import { getAppointmentTypeName } from "../lib/appointment-types";
 
 export function RecordPaymentModal() {
   const {
@@ -54,8 +58,8 @@ export function RecordPaymentModal() {
   }, [isPaymentModalOpen, appointmentId]);
 
   const selectedApt = appointments.find(
-    (a: any) => a.id === selectedAppointment
-  ) || (appointmentId ? appointments.find((a: any) => a.id === appointmentId) : undefined);
+    (a: Appointment) => a.id === selectedAppointment
+  ) || (appointmentId ? appointments.find((a: Appointment) => a.id === appointmentId) : undefined);
   
   const outstandingBalance = selectedApt
     ? (selectedApt.price || 0) - (selectedApt.totalPaid || 0)
@@ -84,9 +88,10 @@ export function RecordPaymentModal() {
         notes,
       };
 
-      const res = await fetch(`http://localhost:3001/api/payments`, {
+      const res = await fetch(apiUrl(`/api/payments`), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        credentials: "include",
         body: JSON.stringify(body),
       });
 
@@ -128,10 +133,9 @@ export function RecordPaymentModal() {
                   <SelectValue placeholder="Select appointment" />
                 </SelectTrigger>
                 <SelectContent>
-                  {appointments.map((apt: any) => (
+                  {appointments.map((apt: Appointment) => (
                     <SelectItem key={apt.id} value={apt.id}>
-                      {apt.type} - {apt.date} (Balance: ₱
-                      {(
+                      {getAppointmentTypeName(apt.type, apt.customType)} - {apt.date}{apt.time ? ` ${apt.time}` : ""} (Balance: ₱{(
                         (apt.price || 0) - (apt.totalPaid || 0)
                       ).toFixed(2)})
                     </SelectItem>
@@ -147,7 +151,7 @@ export function RecordPaymentModal() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <div className="text-xs text-blue-700 font-medium mb-1">Appointment Type</div>
-                  <div className="text-sm font-semibold text-gray-900">{selectedApt?.type}</div>
+                  <div className="text-sm font-semibold text-gray-900">{selectedApt ? getAppointmentTypeName(selectedApt.type, selectedApt.customType) : ''}</div>
                 </div>
                 <div>
                   <div className="text-xs text-blue-700 font-medium mb-1">Appointment Date</div>

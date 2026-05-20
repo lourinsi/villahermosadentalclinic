@@ -12,7 +12,7 @@ export default function Home() {
   useEffect(() => {
     if (!isLoading && user) {
       if (user.role === 'patient') {
-        router.push('/patient/account');
+        router.push('/patient/dashboard');
       } else if (user.role === 'doctor') {
         router.push('/doctor/dashboard');
       } else if (user.role === 'admin') {

@@ -1,17 +1,16 @@
 import { AppointmentModalProvider } from "@/hooks/useAppointmentModal";
 import { PaymentModalProvider } from "@/hooks/usePaymentModal";
-import { AuthProvider } from "@/hooks/useAuth.tsx";
+import { AuthProvider } from "@/hooks/useAuth";
+import { BookingModalModeProvider } from "@/hooks/useBookingModalMode";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "sonner";
-import { CreateAppointmentModal } from "@/components/CreateAppointmentModal";
 import { ScheduleAppointmentModal } from "@/components/ScheduleAppointmentModal";
 import { AddPatientModal } from "@/components/AddPatientModal";
-import { EditAppointmentModal } from "@/components/EditAppointmentModal";
 import { RecordPaymentModal } from "@/components/RecordPaymentModal";
 import { PatientPaymentModal } from "@/components/PatientPaymentModal";
-import { PatientBookingModal } from "@/components/PatientBookingModal";
+import { GlobalBookingModalWrapper } from "@/components/GlobalBookingModalWrapper";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -39,19 +38,19 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <AuthProvider>
-          <AppointmentModalProvider>
-            <PaymentModalProvider>
-              {children}
-              <Toaster />
-              <CreateAppointmentModal />
-              <ScheduleAppointmentModal />
-              <AddPatientModal />
-              <EditAppointmentModal />
-              <RecordPaymentModal />
-              <PatientPaymentModal />
-              <PatientBookingModal />
-            </PaymentModalProvider>
-          </AppointmentModalProvider>
+          <BookingModalModeProvider>
+            <AppointmentModalProvider>
+              <PaymentModalProvider>
+                {children}
+                <Toaster />
+                <ScheduleAppointmentModal />
+                <AddPatientModal />
+                <GlobalBookingModalWrapper />
+                <RecordPaymentModal />
+                <PatientPaymentModal />
+              </PaymentModalProvider>
+            </AppointmentModalProvider>
+          </BookingModalModeProvider>
         </AuthProvider>
       </body>
     </html>

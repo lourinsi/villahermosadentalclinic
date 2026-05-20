@@ -1,4 +1,7 @@
+import { apiUrl } from "@/lib/api";
+import { normalizeAppointmentStatus } from "@/lib/appointment-status";
 import { useState, useEffect } from "react";
+import { RecentTransaction } from "../lib/finance-types";
 
 export interface Appointment {
   id: string;
@@ -11,18 +14,25 @@ export interface Appointment {
   type: number;
   customType?: string;
   price?: number;
+  discount?: number;
   doctor: string;
   duration?: number;
   notes: string;
   serviceType?: string;
-  status: "scheduled" | "confirmed" | "pending" | "tentative" | "completed" | "cancelled";
+  // Status is flexible to accept any value from the backend JSON configuration
+  status: string;
+  cancellationReason?: string; // Reason why appointment was cancelled
   paymentStatus?: "paid" | "unpaid" | "overdue" | "half-paid";
   balance?: number;
   totalPaid?: number;
+  patientProfile?: string;
+  doctorProfile?: string;
+  transactions?: RecentTransaction[];
   createdAt?: string;
+  updatedAt?: string;
 }
 
-const API_URL = "http://localhost:3001/api/appointments";
+const API_URL = apiUrl("/api/appointments");
 
 export interface AppointmentFilters {
   startDate?: string;
@@ -34,6 +44,7 @@ export interface AppointmentFilters {
   type?: string;
   status?: string;
   anonymize?: boolean;
+  includeUnpaid?: boolean;
 }
 
 export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFilters) => {
@@ -55,12 +66,31 @@ export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFi
         if (filters?.type) queryParams.append("type", filters.type);
         if (filters?.status) queryParams.append("status", filters.status);
         if (filters?.anonymize) queryParams.append("anonymize", "true");
+        if (filters?.includeUnpaid) queryParams.append("includeUnpaid", "true");
 
         const url = queryParams.toString() ? `${API_URL}?${queryParams.toString()}` : API_URL;
-        const response = await fetch(url);
+        try {
+          console.debug("useAppointments: fetching appointments URL:", url);
+        } catch (e) {}
+        
+        // Get auth token from localStorage
+        const token = typeof window !== 'undefined' ? localStorage.getItem("authToken") : null;
+        const headers: HeadersInit = {
+          "Content-Type": "application/json",
+        };
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
+        
+        const response = await fetch(url, { headers, credentials: "include" });
         const result = await response.json();
         if (result.success && result.data) {
-          setAppointments(result.data);
+          setAppointments(
+            result.data.map((appointment: Appointment) => ({
+              ...appointment,
+              status: normalizeAppointmentStatus(appointment.status),
+            }))
+          );
         }
       } catch (error) {
         console.error("Error loading appointments from backend:", error);
@@ -72,18 +102,30 @@ export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFi
     };
 
     loadAppointments();
-  }, [refreshTrigger, filters?.startDate, filters?.endDate, filters?.search, filters?.doctor, filters?.type, filters?.status, filters?.patientId, filters?.parentId, filters?.anonymize]);
+  }, [refreshTrigger, filters?.startDate, filters?.endDate, filters?.search, filters?.doctor, filters?.type, filters?.status, filters?.patientId, filters?.parentId, filters?.anonymize, filters?.includeUnpaid]);
 
   const addAppointment = async (appointment: Omit<Appointment, "id" | "createdAt">) => {
     try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem("authToken") : null;
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      
       const response = await fetch(API_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
+        credentials: "include",
         body: JSON.stringify(appointment),
       });
       const result = await response.json();
       if (result.success && result.data) {
-        const newAppointment = result.data;
+        const newAppointment = {
+          ...result.data,
+          status: normalizeAppointmentStatus(result.data.status),
+        };
         setAppointments([...appointments, newAppointment]);
         return newAppointment;
       }
@@ -96,18 +138,31 @@ export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFi
 
   const updateAppointment = async (id: string, updates: Partial<Appointment>) => {
     try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem("authToken") : null;
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      
       const response = await fetch(`${API_URL}/${id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers,
+        credentials: "include",
         body: JSON.stringify(updates),
       });
       const result = await response.json();
       if (result.success && result.data) {
+        const normalizedResult = {
+          ...result.data,
+          status: normalizeAppointmentStatus(result.data.status),
+        };
         const updated = appointments.map((apt) =>
-          apt.id === id ? { ...apt, ...result.data } : apt
+          apt.id === id ? { ...apt, ...normalizedResult } : apt
         );
         setAppointments(updated);
-        return result.data;
+        return normalizedResult;
       }
       throw new Error(result.message || "Failed to update appointment");
     } catch (error) {
@@ -118,8 +173,18 @@ export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFi
 
   const deleteAppointment = async (id: string) => {
     try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem("authToken") : null;
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      
       const response = await fetch(`${API_URL}/${id}`, {
         method: "DELETE",
+        headers,
+        credentials: "include",
       });
       const result = await response.json();
       if (result.success) {

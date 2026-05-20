@@ -1,7 +1,7 @@
 "use client";
 
-import { DoctorCalendarView } from '@/components/DoctorCalendarView';
+import { CalendarPageLayout } from '@/components/CalendarPageLayout';
 
 export default function DoctorCalendarPage() {
-  return <DoctorCalendarView />;
+  return <CalendarPageLayout portal="doctor" />;
 }

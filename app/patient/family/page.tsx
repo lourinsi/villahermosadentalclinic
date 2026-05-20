@@ -1,5 +1,7 @@
 "use client";
 
+import { apiUrl } from "@/lib/api";
+
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { Patient } from "@/lib/patient-types";
@@ -19,6 +21,8 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { formatTimeTo12h } from "@/lib/time-slots";
+import { Appointment } from "@/hooks/useAppointments";
+import { isCartAppointmentStatus } from "@/lib/appointment-status";
 
 const FamilyPage = () => {
   const { user, isLoading: authLoading } = useAuth();
@@ -29,7 +33,7 @@ const FamilyPage = () => {
   const [selectedMember, setSelectedMember] = useState<Patient | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isViewingAppointments, setIsViewingAppointments] = useState(false);
-  const [memberAppointments, setMemberAppointments] = useState<any[]>([]);
+  const [memberAppointments, setMemberAppointments] = useState<Appointment[]>([]);
   const [isLoadingAppointments, setIsLoadingAppointments] = useState(false);
 
   const [newMember, setNewMember] = useState({
@@ -54,14 +58,25 @@ const FamilyPage = () => {
     if (user?.patientId) {
       try {
         setIsLoading(true);
-        const response = await fetch(`http://localhost:3001/api/patients?parentId=${user.patientId}`);
+        const token = typeof window !== 'undefined' ? localStorage.getItem("authToken") : null;
+        const headers: HeadersInit = {
+          "Content-Type": "application/json",
+        };
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
+        
+        const response = await fetch(apiUrl(`/api/patients?parentId=${user.patientId}`), { 
+          headers, 
+          credentials: "include" 
+        });
         const result = await response.json();
         if (result.success) {
           setFamilyMembers(result.data.filter((p: Patient) => p.id !== user.patientId));
         } else {
           toast.error(result.message || "Failed to fetch family members.");
         }
-      } catch (err) {
+      } catch {
         toast.error("An error occurred while fetching family members.");
       } finally {
         setIsLoading(false);
@@ -91,9 +106,18 @@ const FamilyPage = () => {
 
     try {
       setIsAdding(true);
-      const response = await fetch("http://localhost:3001/api/patients/dependent", {
+      const token = typeof window !== 'undefined' ? localStorage.getItem("authToken") : null;
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      
+      const response = await fetch(apiUrl("/api/patients/dependent"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
+        credentials: "include",
         body: JSON.stringify({
           ...newMember,
           parentId: user.patientId,
@@ -115,7 +139,7 @@ const FamilyPage = () => {
       } else {
         toast.error(result.message || "Failed to add family member.");
       }
-    } catch (error) {
+    } catch {
       toast.error("An error occurred while adding family member.");
     } finally {
       setIsAdding(false);
@@ -140,9 +164,18 @@ const FamilyPage = () => {
     if (!selectedMember) return;
 
     try {
-      const response = await fetch(`http://localhost:3001/api/patients/${selectedMember.id}`, {
+      const token = typeof window !== 'undefined' ? localStorage.getItem("authToken") : null;
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      
+      const response = await fetch(apiUrl(`/api/patients/${selectedMember.id}`), {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers,
+        credentials: "include",
         body: JSON.stringify({
           ...editFormData,
           name: `${editFormData.firstName} ${editFormData.lastName}`.trim()
@@ -157,7 +190,7 @@ const FamilyPage = () => {
       } else {
         toast.error(result.message || "Failed to update family member.");
       }
-    } catch (error) {
+    } catch {
       toast.error("An error occurred while updating family member.");
     }
   };
@@ -165,7 +198,18 @@ const FamilyPage = () => {
   const fetchMemberAppointments = async (memberId: string) => {
     try {
       setIsLoadingAppointments(true);
-      const response = await fetch(`http://localhost:3001/api/appointments?patientId=${memberId}`);
+      const token = typeof window !== 'undefined' ? localStorage.getItem("authToken") : null;
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      
+      const response = await fetch(apiUrl(`/api/appointments?patientId=${memberId}`), { 
+        headers, 
+        credentials: "include" 
+      });
       const result = await response.json();
       if (result.success) {
         setMemberAppointments(result.data);
@@ -475,7 +519,7 @@ const FamilyPage = () => {
                     <Badge className={`
                       uppercase text-[9px] font-black
                       ${apt.status === 'confirmed' || apt.status === 'scheduled' ? 'bg-green-100 text-green-700 border-green-200' : 
-                        apt.status === 'pending' ? 'bg-yellow-100 text-yellow-700 border-yellow-200' : 
+                        isCartAppointmentStatus(apt.status) ? 'bg-orange-100 text-orange-700 border-orange-200' : 
                         'bg-gray-100 text-gray-600 border-gray-200'}
                     `}>
                       {apt.status}

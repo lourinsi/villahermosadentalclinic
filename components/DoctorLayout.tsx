@@ -2,14 +2,88 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth.tsx";
+import { useBookingModalMode } from "@/hooks/useBookingModalMode";
 import { Button } from "@/components/ui/button";
-import { LogOut, User, LayoutDashboard, Calendar, Users, Settings } from "lucide-react";
+import { LogOut, User, LayoutDashboard, Calendar, Users, Bell, ClipboardList } from "lucide-react";
 import { toast } from "sonner";
+import NotificationsOpened from "./notificationsOpened";
+import BookingModalWrapper from "./BookingModalWrapper";
+import AppointmentHistoryView from "./AppointmentHistoryView";
+import { useNotifications } from "@/hooks/useNotifications";
+import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { Appointment } from "@/hooks/useAppointments";
+import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 
 const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
   const pathname = usePathname();
   const router = useRouter();
   const { logout, user } = useAuth();
+  const { mode, toggleMode } = useBookingModalMode();
+  const { notifications, markAsRead, markAsUnread, deleteNotification, deleteNotificationWithResult, markAllAsRead, deleteAllNotifications, refreshNotifications } = useNotifications();
+  const { 
+    updateAppointment, 
+    refreshAppointments, 
+    appointments, 
+    openEditModal, 
+    openEditModalById,
+    isEditModalOpen,
+    isCreateModalOpen,
+    closeEditModal,
+    closeCreateModal,
+    selectedAppointment,
+    newAppointmentDate,
+    newAppointmentTime,
+    newAppointmentDoctorName
+  } = useAppointmentModal();
+  const {
+    isAppointmentHistoryOpen,
+    setIsAppointmentHistoryOpen,
+    appointmentSnapshot,
+    appointmentSnapshotId,
+    appointmentSnapshotLogDate,
+    appointmentSnapshotIsHistorical,
+    handleViewCurrentSnapshot,
+    handleViewAppointmentSnapshot,
+    resetAppointmentSnapshot,
+  } = useNotificationAppointmentSnapshot(appointments);
+
+  const unreadCount = notifications.filter(n => !n.isRead).length;
+
+  const handleUpdateAppointmentStatus = async (appointmentId: string, status: string, notificationId: string) => {
+    try {
+      await updateAppointment(appointmentId, { status: status as Appointment["status"] });
+      toast.success(`Appointment status updated to ${status}`);
+      await markAsRead(notificationId);
+      refreshAppointments();
+      refreshNotifications();
+    } catch (error) {
+      toast.error("Failed to update appointment status");
+      console.error(error);
+    }
+  };
+
+  const handleEditAppointment = async (appointmentId: string) => {
+    console.log(`[DoctorLayout] Attempting to edit appointment: ${appointmentId}`);
+    try {
+      await openEditModalById(appointmentId);
+    } catch (error) {
+      console.error(`[DoctorLayout] Error in handleEditAppointment:`, error);
+      toast.error("Appointment not found or could not be loaded");
+    }
+  };
+
+  const handleOpenSnapshotAppointment = async (appointmentId: string) => {
+    setIsAppointmentHistoryOpen(false);
+    resetAppointmentSnapshot();
+    await handleEditAppointment(appointmentId);
+  };
+
+  const isSnapshotAppointmentOpen = Boolean(
+    isEditModalOpen &&
+    appointmentSnapshotId &&
+    selectedAppointment?.id &&
+    String(selectedAppointment.id) === String(appointmentSnapshotId)
+  );
 
   const handleLogout = async () => {
     try {
@@ -24,9 +98,10 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
 
   const navItems = [
     { href: "/doctor/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/doctor/requests", label: "Requests", icon: ClipboardList },
     { href: "/doctor/calendar", label: "My Schedule", icon: Calendar },
     { href: "/doctor/patients", label: "My Patients", icon: Users },
-    { href: "/doctor/settings", label: "Settings", icon: Settings },
+    { href: "/doctor/notifications", label: "Notifications", icon: Bell },
   ];
 
   return (
@@ -76,7 +151,65 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
           </Button>
         </div>
       </aside>
-      <main className="flex-1 p-6 overflow-auto">{children}</main>
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <Button
+              onClick={toggleMode}
+              variant="outline"
+              size="sm"
+              className="text-xs"
+              title={`Switch to ${mode === 'simple' ? 'Pro' : 'Simple'} mode`}
+            >
+              {mode === 'simple' ? '📱 Simple' : '⭐ Pro'}
+            </Button>
+          </div>
+          <NotificationsOpened 
+            notifications={notifications} 
+            unreadCount={unreadCount} 
+            portal="doctor" 
+            onUpdateAppointmentStatus={handleUpdateAppointmentStatus}
+            onMarkAsRead={markAsRead}
+            onMarkAsUnread={markAsUnread}
+            onDelete={deleteNotification}
+            onDeleteWithResult={deleteNotificationWithResult}
+            onMarkAllAsRead={markAllAsRead}
+            onDeleteAll={deleteAllNotifications}
+            onRefresh={refreshNotifications}
+            onEditAppointment={handleEditAppointment}
+            onViewAppointmentSnapshot={handleViewAppointmentSnapshot}
+          />
+        </header>
+        <main className="flex-1 p-6 overflow-auto bg-gray-50">{children}</main>
+        <AppointmentHistoryView
+          open={isAppointmentHistoryOpen}
+          onOpenChange={(open) => {
+            setIsAppointmentHistoryOpen(open);
+            if (!open) resetAppointmentSnapshot();
+          }}
+          appointmentSnapshot={appointmentSnapshot}
+          logDate={appointmentSnapshotLogDate}
+          onViewCurrent={handleViewCurrentSnapshot}
+          onOpenAppointment={handleOpenSnapshotAppointment}
+          isAppointmentOpen={isSnapshotAppointmentOpen}
+          isHistorical={appointmentSnapshotIsHistorical}
+        />
+        
+        {/* Support editing appointments from notifications */}
+        <BookingModalWrapper 
+          open={isEditModalOpen || isCreateModalOpen} 
+          onOpenChange={(open) => {
+            if (!open) {
+              closeEditModal();
+              closeCreateModal();
+            }
+          }}
+          appointmentToEdit={selectedAppointment}
+          defaultDate={newAppointmentDate}
+          defaultTime={newAppointmentTime}
+          doctorName={newAppointmentDoctorName}
+        />
+      </div>
     </div>
   );
 };

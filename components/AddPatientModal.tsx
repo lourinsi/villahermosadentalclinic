@@ -1,89 +1,127 @@
 "use client";
 
-import { useState } from "react";
+import { apiUrl } from "@/lib/api";
+
+import { useState, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { Textarea } from "./ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { toast } from "sonner";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import { createCachedPublicBookingPatient } from "@/lib/publicBookingCache";
 
 export function AddPatientModal() {
-  const { 
-    isAddPatientModalOpen, 
-    closeAddPatientModal, 
-    refreshPatients 
+  const {
+    isAddPatientModalOpen,
+    closeAddPatientModal,
+    refreshPatients,
+    notifyPatientAdded,
+    addPatientModalMode,
   } = useAppointmentModal();
+
+  const [isLoading, setIsLoading] = useState(false);
+  const [showSummary, setShowSummary] = useState(false);
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
     email: "",
     phone: "",
-    alternateEmail: "",
-    alternatePhone: "",
     dateOfBirth: "",
-    address: "",
-    city: "",
-    zipCode: "",
-    insurance: "",
-    emergencyContact: "",
-    emergencyPhone: "",
-    medicalHistory: "",
-    allergies: "",
-    notes: "",
-    dentalCharts: []
   });
-  
-  const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    console.log("=== ADD PATIENT SUBMIT ===");
+  const firstNameRef = useRef<HTMLInputElement | null>(null);
+
+  // Focus on first name when modal opens
+  useEffect(() => {
+    if (isAddPatientModalOpen && !showSummary) {
+      setTimeout(() => {
+        firstNameRef.current?.focus();
+      }, 50);
+    }
+  }, [isAddPatientModalOpen, showSummary]);
+
+  const validateForm = () => {
+    if (!formData.firstName.trim()) {
+      toast.error("Please enter first name");
+      return false;
+    }
+    if (!formData.lastName.trim()) {
+      toast.error("Please enter last name");
+      return false;
+    }
+    if (!formData.email.trim()) {
+      toast.error("Please enter email");
+      return false;
+    }
+    if (!formData.phone.trim()) {
+      toast.error("Please enter phone number");
+      return false;
+    }
+    if (!formData.dateOfBirth) {
+      toast.error("Please enter date of birth");
+      return false;
+    }
+    return true;
+  };
+
+  const handleReview = () => {
+    if (validateForm()) {
+      setShowSummary(true);
+    }
+  };
+
+  const handleSubmit = async () => {
     setIsLoading(true);
-    
     try {
       const patientData = {
         ...formData,
-        createdAt: new Date().toISOString() // Add creation timestamp
+        createdAt: new Date().toISOString(),
       };
-      console.log("Submitting patient data:", patientData);
-      const response = await fetch("http://localhost:3001/api/patients", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(patientData),
-      });
+      const isPublicBookingPatient = addPatientModalMode === "publicBooking";
 
-      console.log("Add patient response status:", response.status);
-      const result = await response.json();
-      console.log("Add patient response:", result);
-
-      if (result.success) {
-        toast.success("Patient added successfully!");
-        refreshPatients(); // Refresh patient list to show new patient immediately
+      if (isPublicBookingPatient) {
+        const publicPatient = createCachedPublicBookingPatient(patientData);
+        toast.success("Patient added to public booking cache!");
+        notifyPatientAdded(publicPatient);
         closeAddPatientModal();
-        // Reset form
+        setShowSummary(false);
         setFormData({
           firstName: "",
           lastName: "",
           email: "",
           phone: "",
-          alternateEmail: "",
-          alternatePhone: "",
           dateOfBirth: "",
-          address: "",
-          city: "",
-          zipCode: "",
-          insurance: "",
-          emergencyContact: "",
-          emergencyPhone: "",
-          medicalHistory: "",
-          allergies: "",
-          notes: "",
-          dentalCharts: []
+        });
+        return;
+      }
+
+      const response = await fetch(
+        apiUrl("/api/patients"),
+        {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(patientData),
+        }
+      );
+      const result = await response.json();
+
+      if (result.success) {
+        toast.success("Patient added successfully!");
+        if (result.data) {
+          notifyPatientAdded(result.data);
+        } else {
+          refreshPatients();
+        }
+        closeAddPatientModal();
+        setShowSummary(false);
+        setFormData({
+          firstName: "",
+          lastName: "",
+          email: "",
+          phone: "",
+          dateOfBirth: "",
         });
       } else {
         toast.error(result.message || "Failed to add patient");
@@ -96,187 +134,149 @@ export function AddPatientModal() {
     }
   };
 
+  const handleCancel = () => {
+    setShowSummary(false);
+    closeAddPatientModal();
+  };
+
   return (
-    <Dialog open={isAddPatientModalOpen} onOpenChange={closeAddPatientModal}>
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+    <Dialog open={isAddPatientModalOpen} onOpenChange={handleCancel}>
+      <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Add New Patient</DialogTitle>
         </DialogHeader>
-        
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Personal Information */}
-          <div className="space-y-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Personal Information</h3>
-            <div className="grid grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <Label>First Name *</Label>
-                <Input
-                  value={formData.firstName}
-                  onChange={(e) => setFormData(prev => ({ ...prev, firstName: e.target.value }))}
-                  required
-                />
+
+        {/* Form View with Popover Overlay */}
+        <div className="relative">
+          <form 
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleReview();
+              }
+            }} 
+            className={`space-y-4 transition-all ${showSummary ? 'opacity-30 pointer-events-none' : ''}`}
+          >
+            <div className="space-y-2">
+              <Label>First Name *</Label>
+              <Input 
+                ref={firstNameRef}
+                value={formData.firstName} 
+                onChange={(e) => setFormData(prev => ({ ...prev, firstName: e.target.value }))} 
+                placeholder="Enter first name"
+                required 
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Last Name *</Label>
+              <Input 
+                value={formData.lastName} 
+                onChange={(e) => setFormData(prev => ({ ...prev, lastName: e.target.value }))} 
+                placeholder="Enter last name"
+                required 
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Email *</Label>
+              <Input 
+                type="email"
+                value={formData.email} 
+                onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))} 
+                placeholder="Enter email"
+                required 
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Phone Number *</Label>
+              <Input 
+                type="tel"
+                value={formData.phone} 
+                onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))} 
+                placeholder="Enter phone number"
+                required 
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Date of Birth *</Label>
+              <Input 
+                type="date"
+                value={formData.dateOfBirth} 
+                onChange={(e) => setFormData(prev => ({ ...prev, dateOfBirth: e.target.value }))} 
+                required 
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4 border-t">
+              <Button 
+                variant="outline" 
+                type="button" 
+                onClick={handleCancel} 
+                disabled={isLoading}
+              >
+                Cancel
+              </Button>
+              <Button 
+                type="button" 
+                onClick={handleReview} 
+                disabled={isLoading}
+              >
+                Review
+              </Button>
+            </div>
+          </form>
+
+          {/* Summary Popover Overlay */}
+          {showSummary && (
+            <div className="absolute inset-0 bg-white rounded-lg shadow-xl border border-blue-200 p-6 flex flex-col z-50">
+              <h3 className="text-lg font-bold text-gray-900 mb-4">Confirm Patient Information</h3>
+              
+              <div className="space-y-3 mb-6 flex-1">
+                <div>
+                  <div className="text-xs text-muted-foreground font-semibold">Full Name</div>
+                  <div className="font-medium text-gray-900">{formData.firstName} {formData.lastName}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground font-semibold">Email</div>
+                  <div className="font-medium text-gray-900">{formData.email}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground font-semibold">Phone</div>
+                  <div className="font-medium text-gray-900">{formData.phone}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground font-semibold">Date of Birth</div>
+                  <div className="font-medium text-gray-900">{formData.dateOfBirth}</div>
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label>Last Name *</Label>
-                <Input
-                  value={formData.lastName}
-                  onChange={(e) => setFormData(prev => ({ ...prev, lastName: e.target.value }))}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Primary Email *</Label>
-                <Input
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Primary Phone *</Label>
-                <Input
-                  type="tel"
-                  value={formData.phone}
-                  onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Alternate Email (Personal)</Label>
-                <Input
-                  type="email"
-                  value={formData.alternateEmail}
-                  onChange={(e) => setFormData(prev => ({ ...prev, alternateEmail: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Alternate Phone (Personal)</Label>
-                <Input
-                  type="tel"
-                  value={formData.alternatePhone}
-                  onChange={(e) => setFormData(prev => ({ ...prev, alternatePhone: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Date of Birth *</Label>
-                <Input
-                  type="date"
-                  value={formData.dateOfBirth}
-                  onChange={(e) => setFormData(prev => ({ ...prev, dateOfBirth: e.target.value }))}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Insurance Provider</Label>
-                <Select
-                  value={formData.insurance}
-                  onValueChange={(value) => setFormData(prev => ({ ...prev, insurance: value }))}
+
+              <p className="text-sm text-muted-foreground mb-6 pb-4 border-b">
+                Additional patient information can be updated later after creation.
+              </p>
+
+              <div className="flex justify-end gap-2">
+                <Button 
+                  variant="outline"
+                  type="button" 
+                  onClick={() => setShowSummary(false)} 
+                  disabled={isLoading}
                 >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select insurance" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="blue-cross">Blue Cross</SelectItem>
-                    <SelectItem value="aetna">Aetna</SelectItem>
-                    <SelectItem value="delta-dental">Delta Dental</SelectItem>
-                    <SelectItem value="cigna">Cigna</SelectItem>
-                    <SelectItem value="unitedhealth">UnitedHealth</SelectItem>
-                    <SelectItem value="none">No Insurance</SelectItem>
-                  </SelectContent>
-                </Select>
+                  Back
+                </Button>
+                <Button 
+                  type="button" 
+                  onClick={handleSubmit} 
+                  disabled={isLoading}
+                >
+                  {isLoading ? "Adding..." : "Confirm & Add"}
+                </Button>
               </div>
             </div>
-          </div>
-
-          {/* Address Information */}
-          <div className="space-y-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Address</h3>
-            <div className="space-y-2">
-              <Label>Street Address</Label>
-              <Input
-                value={formData.address}
-                onChange={(e) => setFormData(prev => ({ ...prev, address: e.target.value }))}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <Label>City</Label>
-                <Input
-                  value={formData.city}
-                  onChange={(e) => setFormData(prev => ({ ...prev, city: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>ZIP Code</Label>
-                <Input
-                  value={formData.zipCode}
-                  onChange={(e) => setFormData(prev => ({ ...prev, zipCode: e.target.value }))}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Emergency Contact */}
-          <div className="space-y-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Emergency Contact</h3>
-            <div className="grid grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <Label>Contact Name</Label>
-                <Input
-                  value={formData.emergencyContact}
-                  onChange={(e) => setFormData(prev => ({ ...prev, emergencyContact: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Contact Phone</Label>
-                <Input
-                  type="tel"
-                  value={formData.emergencyPhone}
-                  onChange={(e) => setFormData(prev => ({ ...prev, emergencyPhone: e.target.value }))}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Medical Information */}
-          <div className="space-y-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Medical Information</h3>
-            <div className="space-y-2">
-              <Label>Allergies</Label>
-              <Textarea
-                placeholder="List any known allergies..."
-                value={formData.allergies}
-                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setFormData(prev => ({ ...prev, allergies: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Medical History</Label>
-              <Textarea
-                placeholder="Relevant medical history..."
-                value={formData.medicalHistory}
-                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setFormData(prev => ({ ...prev, medicalHistory: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Additional Notes</Label>
-              <Textarea
-                placeholder="Any additional notes..."
-                value={formData.notes}
-                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
-              />
-            </div>
-          </div>
-          
-          <div className="flex justify-end space-x-2 pt-4 border-t">
-            <Button variant="cancel" type="button" onClick={() => closeAddPatientModal()} disabled={isLoading}>
-              Cancel
-            </Button>
-            <Button variant="brand" type="submit" disabled={isLoading}>
-              {isLoading ? "Adding..." : "Add Patient"}
-            </Button>
-          </div>
-        </form>
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   );

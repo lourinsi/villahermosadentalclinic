@@ -1,0 +1,289 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "./ui/button";
+import { Clock, Calendar } from "lucide-react";
+import { Appointment } from "@/hooks/useAppointments";
+import { getAppointmentTypeName } from "@/lib/appointment-types";
+import { parseBackendDateToLocal } from "@/lib/utils";
+
+interface NextAppointmentCardProps {
+  appointment: Appointment | null;
+  role: "doctor" | "admin" | "patient";
+  sameTimeAppointments?: Appointment[];
+  onViewDetails: (appointment: Appointment) => void;
+  onViewAll?: () => void;
+  showHeader?: boolean;
+}
+
+export function NextAppointmentCard({
+  appointment,
+  role,
+  sameTimeAppointments = [],
+  onViewDetails,
+  onViewAll,
+  showHeader = false,
+}: NextAppointmentCardProps) {
+  const router = useRouter();
+  const [currentIndex, setCurrentIndex] = useState(0);
+  
+  const displayAppointments = appointment ? [appointment, ...sameTimeAppointments] : [];
+  const doctorsRoute =
+    role === "patient" ? "/patient/doctors" :
+    role === "admin" ? "/admin/doctors" :
+    "/doctors";
+
+  // Rotate through same-time appointments every 5 seconds
+  useEffect(() => {
+    if (displayAppointments.length <= 1) return;
+
+    const interval = setInterval(() => {
+      setCurrentIndex((prev) => (prev + 1) % displayAppointments.length);
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [displayAppointments.length]);
+
+  // If no appointment, show empty state
+  if (!appointment) {
+    const emptyContent = (
+      <div className="relative p-12 rounded-2xl bg-gray-50 border-2 border-dashed border-gray-200 text-gray-600 shadow-sm">
+        <div className="flex flex-col items-center justify-center gap-4">
+          <div className="p-4 bg-gray-100 rounded-full">
+            <Calendar className="h-8 w-8 text-gray-400" />
+          </div>
+          <div className="text-center">
+            <h3 className="text-lg font-bold text-gray-900 mb-1">No appointments yet</h3>
+            <p className="text-sm text-gray-600">Schedule your first visit with us today!</p>
+          </div>
+          <Button 
+            className="bg-violet-600 hover:bg-violet-700 text-white font-bold px-6"
+            onClick={() => router.push(doctorsRoute)}
+          >
+            Book Now
+          </Button>
+        </div>
+      </div>
+    );
+
+    if (showHeader) {
+      return (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-gray-400 font-black uppercase tracking-widest text-sm">Next Appointment</h2>
+              <p className="text-gray-300 font-bold text-xs">Don&apos;t miss your upcoming visit</p>
+            </div>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="text-gray-600 hover:text-gray-900"
+              onClick={onViewAll}
+            >
+              View All
+            </Button>
+          </div>
+          {emptyContent}
+        </div>
+      );
+    }
+
+    return emptyContent;
+  }
+
+  const currentAppointment = displayAppointments[currentIndex];
+  const hasMultiple = displayAppointments.length > 1;
+
+  // Doctor/Admin view - show patient details
+  if (role === "doctor" || role === "admin") {
+    const cardContent = (
+      <div className="relative rounded-3xl bg-white border border-emerald-100 shadow-sm overflow-hidden min-h-[240px] flex flex-col group transition-all duration-300 hover:shadow-md w-full">
+        {/* Decorative elements */}
+        <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-full -mr-16 -mt-16 opacity-50 group-hover:scale-110 transition-transform duration-500" />
+        
+        <div className="relative z-10 flex flex-col h-full p-8">
+          <div className="flex items-start justify-between mb-6">
+            <div className="space-y-1">
+              <div className="flex items-center space-x-2 text-emerald-600 bg-emerald-50 w-fit px-3 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase">
+                <Clock className="h-3 w-3" />
+                <span>Next Appointment</span>
+              </div>
+              <h3 className="text-3xl font-black text-gray-900 tracking-tight mt-2">
+                {currentAppointment.patientName}
+              </h3>
+              <p className="text-gray-500 font-bold text-lg">
+                {getAppointmentTypeName(currentAppointment.type, currentAppointment.customType)}
+              </p>
+            </div>
+            
+            <div className="h-20 w-20 rounded-2xl bg-emerald-50 flex items-center justify-center border-2 border-emerald-100/50 shadow-inner group-hover:rotate-3 transition-transform duration-500">
+              <div className="text-center">
+                <div className="text-2xl font-black text-emerald-700">
+                  {currentAppointment.patientName.split(" ")[0].charAt(0)}
+                  {currentAppointment.patientName.split(" ").pop()?.charAt(0)}
+                </div>
+                <div className="text-[8px] font-black uppercase tracking-widest text-emerald-600/70 mt-0.5">Patient</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-auto flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center space-x-2 bg-gray-50 px-4 py-2 rounded-xl border border-gray-100">
+                <Calendar className="h-4 w-4 text-emerald-600" />
+                <span className="font-bold text-sm text-gray-700">
+                  {parseBackendDateToLocal(currentAppointment.date).toLocaleDateString(
+                    "en-US",
+                    { month: "short", day: "numeric" }
+                  )}
+                </span>
+              </div>
+              <div className="flex items-center space-x-2 bg-gray-50 px-4 py-2 rounded-xl border border-gray-100">
+                <Clock className="h-4 w-4 text-emerald-600" />
+                <span className="font-bold text-sm text-gray-700">{currentAppointment.time}</span>
+              </div>
+            </div>
+
+            <Button
+              size="lg"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl px-8 h-12 shadow-lg hover:shadow-emerald-900/10 active:scale-95 transition-all w-full md:w-auto"
+              onClick={() => onViewDetails(currentAppointment)}
+            >
+              View Details
+            </Button>
+          </div>
+        </div>
+
+        {/* Carousel indicators if multiple */}
+        {hasMultiple && (
+          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex space-x-1.5">
+            {displayAppointments.map((_, i) => (
+              <div 
+                key={i} 
+                className={`h-1 rounded-full transition-all duration-300 ${i === currentIndex ? 'w-4 bg-emerald-500' : 'w-1 bg-emerald-100'}`}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+
+    if (showHeader) {
+      return (
+        <div className="space-y-4 w-full h-full flex flex-col">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-gray-400 font-black uppercase tracking-widest text-sm">Next Appointment</h2>
+              <p className="text-gray-300 font-bold text-xs">Don&apos;t miss your upcoming visit</p>
+            </div>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="rounded-lg text-emerald-600 font-bold hover:bg-emerald-50"
+              onClick={onViewAll}
+            >
+              View All
+            </Button>
+          </div>
+          <div className="flex-1">
+            {cardContent}
+          </div>
+        </div>
+      );
+    }
+
+    return cardContent;
+  }
+
+  // Patient view - show doctor details
+  const patientCardContent = (
+    <div className="relative rounded-3xl bg-white border border-violet-100 shadow-sm overflow-hidden min-h-[240px] flex flex-col group transition-all duration-300 hover:shadow-md w-full">
+      {/* Decorative elements */}
+      <div className="absolute top-0 right-0 w-32 h-32 bg-violet-50 rounded-full -mr-16 -mt-16 opacity-50 group-hover:scale-110 transition-transform duration-500" />
+      
+      <div className="relative z-10 flex flex-col h-full p-8">
+        <div className="flex items-start justify-between mb-6">
+          <div className="space-y-1">
+            <div className="flex items-center space-x-2 text-violet-600 bg-violet-50 w-fit px-3 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase">
+              <Calendar className="h-3 w-3" />
+              <span>Upcoming Visit</span>
+            </div>
+            <h3 className="text-3xl font-black text-gray-900 tracking-tight mt-2">
+              {getAppointmentTypeName(currentAppointment.type, currentAppointment.customType)}
+            </h3>
+            <p className="text-gray-500 font-bold text-lg">with Dr. {currentAppointment.doctor}</p>
+          </div>
+          
+          <div className="h-20 w-20 rounded-2xl bg-violet-50 flex items-center justify-center border-2 border-violet-100/50 shadow-inner group-hover:-rotate-3 transition-transform duration-500">
+            <Calendar className="h-10 w-10 text-violet-400 opacity-60" />
+          </div>
+        </div>
+
+        <div className="mt-auto flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center space-x-2 bg-gray-50 px-4 py-2 rounded-xl border border-gray-100">
+              <Calendar className="h-4 w-4 text-violet-600" />
+              <span className="font-bold text-sm text-gray-700">
+                {parseBackendDateToLocal(currentAppointment.date).toLocaleDateString(
+                  "en-US",
+                  { month: "short", day: "numeric" }
+                )}
+              </span>
+            </div>
+            <div className="flex items-center space-x-2 bg-gray-50 px-4 py-2 rounded-xl border border-gray-100">
+              <Clock className="h-4 w-4 text-violet-600" />
+              <span className="font-bold text-sm text-gray-700">{currentAppointment.time}</span>
+            </div>
+          </div>
+
+          <Button
+            size="lg"
+            className="bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl px-8 h-12 shadow-lg hover:shadow-violet-900/10 active:scale-95 transition-all w-full md:w-auto"
+            onClick={() => onViewDetails(currentAppointment)}
+          >
+            View Details
+          </Button>
+        </div>
+      </div>
+
+      {/* Carousel indicators if multiple */}
+      {hasMultiple && (
+        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex space-x-1.5">
+          {displayAppointments.map((_, i) => (
+            <div 
+              key={i} 
+              className={`h-1 rounded-full transition-all duration-300 ${i === currentIndex ? 'w-4 bg-violet-500' : 'w-1 bg-violet-100'}`}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  if (showHeader) {
+    return (
+      <div className="space-y-4 w-full h-full flex flex-col">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-gray-400 font-black uppercase tracking-widest text-sm">Next Appointment</h2>
+            <p className="text-gray-300 font-bold text-xs">Don&apos;t miss your upcoming visit</p>
+          </div>
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            className="rounded-lg text-violet-600 font-bold hover:bg-violet-50"
+            onClick={onViewAll}
+          >
+            View All
+          </Button>
+        </div>
+        <div className="flex-1">
+          {patientCardContent}
+        </div>
+      </div>
+    );
+  }
+
+  return patientCardContent;
+}

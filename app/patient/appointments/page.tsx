@@ -1,13 +1,7 @@
 "use client";
 
-import { PatientCalendarView } from "@/components/PatientCalendarView";
+import { CalendarPageLayout } from "@/components/CalendarPageLayout";
 
-const MyAppointmentsPage = () => {
-  return (
-    <div>
-      <PatientCalendarView />
-    </div>
-  );
-};
-
-export default MyAppointmentsPage;
+export default function MyAppointmentsPage() {
+  return <CalendarPageLayout portal="patient" defaultStatusFilter={["reserved", "scheduled"]} />;
+}
