@@ -3,11 +3,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, CreditCard, UserRound, AlertTriangle, CheckCircle2, RefreshCw, History } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getAppointmentTypeName } from "@/lib/appointmentTypes";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import { apiUrl } from "@/lib/api";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import { toast } from "sonner";
+import { useDoctors } from "@/hooks/useDoctors";
+import { formatBookingHistoryStatusLabel } from "./sharedBookingLogic";
 
 interface AppointmentHistoryViewProps {
   open: boolean;
@@ -49,15 +52,264 @@ const resolvePatientName = (appointmentSnapshot: any) => {
   return directPatientName || nestedPatientName || appointmentSnapshot?.patientId || "No patient assigned";
 };
 
+const pickImageSource = (...sources: unknown[]) => {
+  for (const source of sources) {
+    if (typeof source !== "string") continue;
+    const trimmed = source.trim();
+    if (trimmed) return trimmed;
+  }
+
+  return undefined;
+};
+
+const resolveImageSource = (source?: string) => {
+  if (!source) return undefined;
+  if (
+    source.startsWith("http") ||
+    source.startsWith("data:") ||
+    source.startsWith("blob:")
+  ) {
+    return source;
+  }
+
+  return apiUrl(source);
+};
+
+const getPatientProfilePicture = (snapshot: any, patientRecord?: any) =>
+  pickImageSource(
+    snapshot?.patientProfile,
+    snapshot?.patientProfilePicture,
+    snapshot?.patientPhoto,
+    snapshot?.patientImage,
+    snapshot?.patientAvatar,
+    snapshot?.profilePicture,
+    snapshot?.patient?.profilePicture,
+    snapshot?.patient?.profilePictureUrl,
+    snapshot?.patient?.photo,
+    snapshot?.patient?.avatar,
+    patientRecord?.profilePicture,
+    patientRecord?.profilePictureUrl,
+    patientRecord?.photo,
+    patientRecord?.avatar
+  );
+
+const resolveDoctorName = (doctor: any) => {
+  if (!doctor) return "";
+  if (typeof doctor === "string") return doctor;
+  return doctor.name || doctor.fullName || doctor.username || doctor.id || "";
+};
+
+const normalizeDoctorName = (doctor: any) => {
+  const normalized = resolveDoctorName(doctor).replace(/^Dr\.\s+/i, "").toLowerCase().trim();
+  return /^(none|null|undefined|unassigned|no doctor assigned)$/.test(normalized) ? "" : normalized;
+};
+
+const formatCompactTime = (time24?: string) => formatTimeTo12h(time24 || "").replace(/\s+/g, "");
+
+const formatAppointmentTimeRange = (time?: string, duration?: unknown) => {
+  const startLabel = formatCompactTime(time);
+  const [hourPart, minutePart] = String(time || "").split(":");
+  const hours = Number(hourPart);
+  const minutes = Number(minutePart);
+  const durationMinutes = Number(duration) || 0;
+
+  if (!startLabel || !Number.isFinite(hours) || !Number.isFinite(minutes) || durationMinutes <= 0) {
+    return startLabel || "No time";
+  }
+
+  const endTime = new Date(2000, 0, 1, hours, minutes + durationMinutes);
+  const endTime24 = `${String(endTime.getHours()).padStart(2, "0")}:${String(endTime.getMinutes()).padStart(2, "0")}`;
+
+  return `${startLabel} - ${formatCompactTime(endTime24)}`;
+};
+
+const pickNumericValue = (...values: unknown[]) => {
+  for (const value of values) {
+    if (value === undefined || value === null || value === "") continue;
+    const numericValue = Number(value);
+    if (Number.isFinite(numericValue)) return numericValue;
+  }
+
+  return null;
+};
+
+const getExplicitSnapshotPaymentAmount = (snapshot: any) =>
+  pickNumericValue(
+    snapshot?.amount,
+    snapshot?.paymentAmount,
+    snapshot?.newPayment,
+    snapshot?.amountPaid,
+    snapshot?.paymentDetails?.amount
+  );
+
+const isLogSnapshot = (snapshot: any) =>
+  Boolean(snapshot?.logType || snapshot?.changeType || snapshot?.previousState || snapshot?.newState);
+
+type DoctorReassignment = {
+  previousDoctorName: string;
+  currentDoctorName: string;
+};
+
 export default function AppointmentHistoryView({ open, onOpenChange, appointmentSnapshot, logDate, onViewCurrent, onOpenAppointment, isAppointmentOpen, isHistorical }: AppointmentHistoryViewProps) {
   const [displayedSnapshot, setDisplayedSnapshot] = useState<any | null>(appointmentSnapshot);
   const [snapshotState, setSnapshotState] = useState<SnapshotState>(Boolean(isHistorical) ? "historical" : "current");
   const [isFetchingLogs, setIsFetchingLogs] = useState(false);
+  const [patientRecord, setPatientRecord] = useState<any | null>(null);
+  const [latestPaymentLogAmount, setLatestPaymentLogAmount] = useState<number | null>(null);
+  const [latestDoctorReassignment, setLatestDoctorReassignment] = useState<DoctorReassignment | null>(null);
+  const { doctors } = useDoctors();
+  const displayedPatientId = displayedSnapshot?.patientId || displayedSnapshot?.patient?.id || "";
+  const displayedAppointmentId = displayedSnapshot?.id || displayedSnapshot?.appointmentId || "";
 
   useEffect(() => {
     setDisplayedSnapshot(appointmentSnapshot);
     setSnapshotState(Boolean(isHistorical) ? "historical" : "current");
   }, [appointmentSnapshot, isHistorical]);
+
+  useEffect(() => {
+    const patientId = String(displayedPatientId || "").trim();
+    setPatientRecord(null);
+
+    if (!open || !patientId || patientId === "Occupied" || patientId === "No patient assigned") return;
+
+    const controller = new AbortController();
+    const loadPatientRecord = async () => {
+      try {
+        const response = await fetch(apiUrl(`/api/patients/${encodeURIComponent(patientId)}`), {
+          credentials: "include",
+          headers: getAuthHeaders(),
+          signal: controller.signal,
+        });
+        const result = await response.json().catch(() => null);
+        if (response.ok && result?.success && result.data) {
+          setPatientRecord(result.data);
+        }
+      } catch (error: any) {
+        if (error?.name !== "AbortError") {
+          console.warn("[AppointmentHistoryView] Failed to load patient photo:", error);
+        }
+      }
+    };
+
+    loadPatientRecord();
+
+    return () => controller.abort();
+  }, [open, displayedPatientId]);
+
+  useEffect(() => {
+    setLatestPaymentLogAmount(null);
+
+    const appointmentId = String(displayedAppointmentId || "").trim();
+    const explicitAmount = getExplicitSnapshotPaymentAmount(displayedSnapshot);
+    if (
+      !open ||
+      !appointmentId ||
+      snapshotState === "historical" ||
+      isLogSnapshot(displayedSnapshot) ||
+      (explicitAmount !== null && explicitAmount > 0)
+    ) return;
+
+    const controller = new AbortController();
+    const loadLatestPaymentLogAmount = async () => {
+      try {
+        const response = await fetch(apiUrl(`/api/appointments/${encodeURIComponent(appointmentId)}/payments`), {
+          credentials: "include",
+          headers: getAuthHeaders(),
+          signal: controller.signal,
+        });
+        const result = await response.json().catch(() => null);
+        const logs = response.ok && result?.success && Array.isArray(result.data) ? result.data : [];
+        const latestPositiveAmount = logs
+          .map((log: any) => Number(log?.amount || 0))
+          .find((amount: number) => amount > 0);
+
+        setLatestPaymentLogAmount(latestPositiveAmount ?? 0);
+      } catch (error: any) {
+        if (error?.name !== "AbortError") {
+          console.warn("[AppointmentHistoryView] Failed to load payment logs:", error);
+          setLatestPaymentLogAmount(0);
+        }
+      }
+    };
+
+    loadLatestPaymentLogAmount();
+
+    return () => controller.abort();
+  }, [
+    open,
+    displayedAppointmentId,
+    displayedSnapshot,
+    snapshotState,
+  ]);
+
+  useEffect(() => {
+    setLatestDoctorReassignment(null);
+
+    const appointmentId = String(displayedAppointmentId || "").trim();
+    if (!open || !appointmentId || snapshotState === "historical") return;
+
+    const inlinePreviousDoctor = resolveDoctorName(displayedSnapshot?.previousDoctor || displayedSnapshot?.previousState?.doctor);
+    const inlineCurrentDoctor = resolveDoctorName(
+      displayedSnapshot?.newDoctor ||
+      displayedSnapshot?.newState?.doctor ||
+      displayedSnapshot?.doctor ||
+      displayedSnapshot?.doctorName ||
+      displayedSnapshot?.doctorId
+    );
+    const hasInlineReassignment =
+      normalizeDoctorName(inlinePreviousDoctor) &&
+      normalizeDoctorName(inlineCurrentDoctor) &&
+      normalizeDoctorName(inlinePreviousDoctor) !== normalizeDoctorName(inlineCurrentDoctor);
+
+    if (hasInlineReassignment) return;
+
+    const controller = new AbortController();
+    const loadLatestDoctorReassignment = async () => {
+      try {
+        const response = await fetch(apiUrl(`/api/appointments/${encodeURIComponent(appointmentId)}/logs`), {
+          credentials: "include",
+          headers: getAuthHeaders(),
+          signal: controller.signal,
+        });
+        const result = await response.json().catch(() => null);
+        const logs = response.ok && result?.success && Array.isArray(result.data) ? result.data : [];
+        const currentDoctorNorm = normalizeDoctorName(inlineCurrentDoctor);
+        const reassignmentLog = logs.find((log: any) => {
+          const previousDoctor = resolveDoctorName(log?.previousState?.doctor);
+          const nextDoctor = resolveDoctorName(log?.newState?.doctor);
+          const previousNorm = normalizeDoctorName(previousDoctor);
+          const nextNorm = normalizeDoctorName(nextDoctor);
+
+          return (
+            previousNorm &&
+            nextNorm &&
+            previousNorm !== nextNorm &&
+            (!currentDoctorNorm || nextNorm === currentDoctorNorm)
+          );
+        });
+
+        if (!reassignmentLog) return;
+
+        setLatestDoctorReassignment({
+          previousDoctorName: resolveDoctorName(reassignmentLog.previousState?.doctor),
+          currentDoctorName: resolveDoctorName(reassignmentLog.newState?.doctor),
+        });
+      } catch (error: any) {
+        if (error?.name !== "AbortError") {
+          console.warn("[AppointmentHistoryView] Failed to load appointment logs:", error);
+        }
+      }
+    };
+
+    loadLatestDoctorReassignment();
+
+    return () => controller.abort();
+  }, [
+    open,
+    displayedAppointmentId,
+    displayedSnapshot,
+    snapshotState,
+  ]);
 
   if (!displayedSnapshot) return null;
 
@@ -79,6 +331,50 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       : parsedLogDate.toLocaleString();
   const typeName = resolveAppointmentTypeName(displayedSnapshot.type, displayedSnapshot.customType);
   const patientName = resolvePatientName(displayedSnapshot);
+  const resolvedPatientImage = resolveImageSource(getPatientProfilePicture(displayedSnapshot, patientRecord));
+  const rawDisplayedDoctorName = resolveDoctorName(displayedSnapshot.doctor || displayedSnapshot.doctorName || displayedSnapshot.doctorId);
+  const displayedDoctorName = normalizeDoctorName(rawDisplayedDoctorName) ? rawDisplayedDoctorName : "";
+  const rawPreviousDoctorName = resolveDoctorName(displayedSnapshot.previousDoctor || displayedSnapshot.previousState?.doctor);
+  const rawCurrentDoctorName = resolveDoctorName(displayedSnapshot.newDoctor || displayedSnapshot.newState?.doctor || displayedDoctorName);
+  const previousDoctorName = normalizeDoctorName(rawPreviousDoctorName) ? rawPreviousDoctorName : "";
+  const currentDoctorName = normalizeDoctorName(rawCurrentDoctorName) ? rawCurrentDoctorName : "";
+  const hasDoctorReassignment =
+    previousDoctorName &&
+    currentDoctorName &&
+    normalizeDoctorName(previousDoctorName) !== normalizeDoctorName(currentDoctorName);
+  const fetchedDoctorReassignmentMatchesCurrent = Boolean(
+    latestDoctorReassignment?.previousDoctorName &&
+    latestDoctorReassignment?.currentDoctorName &&
+    normalizeDoctorName(latestDoctorReassignment.previousDoctorName) !== normalizeDoctorName(latestDoctorReassignment.currentDoctorName) &&
+    (!currentDoctorName || normalizeDoctorName(latestDoctorReassignment.currentDoctorName) === normalizeDoctorName(currentDoctorName))
+  );
+  const resolvedPreviousDoctorName = hasDoctorReassignment
+    ? previousDoctorName
+    : fetchedDoctorReassignmentMatchesCurrent
+      ? latestDoctorReassignment?.previousDoctorName || ""
+      : "";
+  const resolvedCurrentDoctorName = hasDoctorReassignment
+    ? currentDoctorName
+    : fetchedDoctorReassignmentMatchesCurrent
+      ? currentDoctorName || latestDoctorReassignment?.currentDoctorName || ""
+      : "";
+  const hasResolvedDoctorReassignment = Boolean(resolvedPreviousDoctorName && resolvedCurrentDoctorName);
+
+  const doctorRecord = doctors.find((doctor: any) =>
+    String(doctor.id) === String(displayedSnapshot.doctorId || displayedDoctorName) ||
+    String(doctor.name) === String(displayedDoctorName) ||
+    normalizeDoctorName(doctor.name) === normalizeDoctorName(displayedDoctorName)
+  );
+  const doctorImage =
+    displayedSnapshot.doctorProfile ||
+    displayedSnapshot.doctorProfilePicture ||
+    displayedSnapshot.doctorPhoto ||
+    displayedSnapshot.doctor?.profilePicture ||
+    displayedSnapshot.doctor?.profilePictureUrl ||
+    doctorRecord?.profilePicture ||
+    (doctorRecord as any)?.profilePictureUrl;
+
+  const resolvedDoctorImage = resolveImageSource(pickImageSource(doctorImage));
   const changedByName = displayedSnapshot.changedByName || appointmentSnapshot?.changedByName;
   const isPastSnapshot = snapshotState === "historical";
   const stateLabel = isPastSnapshot ? "Past Log" : snapshotState === "latest" ? "Latest" : "Current";
@@ -89,8 +385,16 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       : "border-emerald-200 bg-emerald-50 text-emerald-700";
   const StateIcon = isPastSnapshot ? History : CheckCircle2;
   const timestampPrefix = isPastSnapshot ? "Saved on" : snapshotState === "latest" ? "Latest log from" : "Current as of";
+  const explicitSnapshotPaymentAmount = getExplicitSnapshotPaymentAmount(displayedSnapshot);
+  const openedFromLog = isLogSnapshot(displayedSnapshot);
+  const snapshotPaymentAmount =
+    isPastSnapshot || openedFromLog
+      ? explicitSnapshotPaymentAmount ?? 0
+      : explicitSnapshotPaymentAmount && explicitSnapshotPaymentAmount > 0
+        ? explicitSnapshotPaymentAmount
+        : latestPaymentLogAmount ?? 0;
 
-  const appointmentId = displayedSnapshot?.id || displayedSnapshot?.appointmentId;
+  const appointmentId = displayedAppointmentId;
   const canOpenAppointment = Boolean(appointmentId && snapshotState === "current" && onOpenAppointment && !isAppointmentOpen);
 
   const viewLatestSnapshot = () => {
@@ -207,9 +511,12 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
           {/* Schedule Info */}
           <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-3">
             <div className="flex items-center gap-3">
-              <div className="bg-white p-2 rounded-md shadow-sm border border-slate-200">
-                <UserRound className="w-5 h-5 text-blue-600" />
-              </div>
+              <Avatar className="h-11 w-11 rounded-md border border-slate-200 bg-white shadow-sm">
+                <AvatarImage src={resolvedPatientImage} alt={patientName} className="object-cover" />
+                <AvatarFallback className="rounded-md bg-white">
+                  <UserRound className="w-5 h-5 text-blue-600" />
+                </AvatarFallback>
+              </Avatar>
               <div>
                 <Label className="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Patient</Label>
                 <p className="font-medium text-slate-900">{patientName}</p>
@@ -232,18 +539,26 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
               </div>
               <div>
                 <Label className="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Time</Label>
-                <p className="font-medium text-slate-900">{formatTimeTo12h(displayedSnapshot.time)} ({displayedSnapshot.duration} mins)</p>
+                <p className="font-medium text-slate-900">{formatAppointmentTimeRange(displayedSnapshot.time, displayedSnapshot.duration)}</p>
               </div>
             </div>
 
             <div className="flex items-center gap-3">
-              <div className="bg-white p-2 rounded-md shadow-sm border border-slate-200">
-                <Stethoscope className="w-5 h-5 text-blue-600" />
-              </div>
+              <Avatar className="h-11 w-11 rounded-md border border-slate-200 bg-white shadow-sm">
+                <AvatarImage src={resolvedDoctorImage} alt={displayedDoctorName || "Doctor"} className="object-cover" />
+                <AvatarFallback className="rounded-md bg-white">
+                  <Stethoscope className="w-5 h-5 text-blue-600" />
+                </AvatarFallback>
+              </Avatar>
               <div>
                 <Label className="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Service & Doctor</Label>
                 <p className="font-medium text-slate-900">{typeName}</p>
-                <p className="text-sm text-slate-600">{displayedSnapshot.doctor || "No doctor assigned"}</p>
+                <p className="text-sm text-slate-600">{displayedDoctorName || "No doctor assigned"}</p>
+                {hasResolvedDoctorReassignment && (
+                  <p className="mt-1 text-xs font-semibold text-blue-700">
+                    Reassigned from {resolvedPreviousDoctorName} to {resolvedCurrentDoctorName}
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -258,7 +573,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                   displayedSnapshot.status === 'cancelled' ? 'bg-red-100 text-red-700' :
                   'bg-blue-100 text-blue-700'
                 }`}> 
-                  {displayedSnapshot.status?.toUpperCase()}
+                  {formatBookingHistoryStatusLabel(displayedSnapshot.status).toUpperCase()}
                 </span>
               </div>
             </div>
@@ -270,7 +585,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                   displayedSnapshot.paymentStatus === 'half-paid' ? 'bg-amber-100 text-amber-700' :
                   'bg-slate-100 text-slate-700'
                 }`}>
-                  {displayedSnapshot.paymentStatus?.toUpperCase()}
+                  {formatBookingHistoryStatusLabel(displayedSnapshot.paymentStatus).toUpperCase()}
                 </span>
               </div>
             </div>
@@ -295,9 +610,9 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
             <div className="flex justify-between items-center">
               <div className="flex items-center gap-2 text-green-600">
                 <CreditCard className="w-4 h-4" />
-                <span className="text-sm font-medium">Total Paid</span>
+                <span className="text-sm font-medium">Paid in Snapshot</span>
               </div>
-                <span className="font-bold text-green-600">₱{displayedSnapshot.totalPaid?.toLocaleString()}</span>
+                <span className="font-bold text-green-600">₱{snapshotPaymentAmount.toLocaleString()}</span>
             </div>
             <div className="pt-2 border-t border-slate-200 flex justify-between items-center">
               <span className="text-sm font-bold text-slate-700">Remaining Balance</span>

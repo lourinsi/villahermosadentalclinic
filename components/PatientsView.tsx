@@ -2,11 +2,10 @@
 
 import { apiUrl } from "@/lib/api";
 
-import React, { useState, useEffect, useRef, useImperativeHandle } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
-import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
@@ -14,136 +13,37 @@ import { toast } from "sonner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogFooter } from "./ui/alert-dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
-import { usePaymentStatuses } from "@/hooks/usePaymentStatuses";
 import {
   Search,
   Plus,
   Phone,
   Mail,
   Calendar,
-  Edit,
   Eye,
-  Clock,
-  CheckCircle,
-  AlertTriangle,
-  DollarSign,
-  CreditCard,
-  Trash,
   MoreVertical,
   Bell,
-  User as UserIcon
+  Trash2
 } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { PatientDetailsModal, PatientDetailsRef, Patient } from "./PatientDetailsModal";
 import { EditPaymentModal } from "./EditPaymentModal";
 import BookingModalWrapper from "./BookingModalWrapper";
-import ConfirmDialog from "./ConfirmDialog";
 import { Appointment } from "../hooks/useAppointments";
-import { RecentTransaction } from "../lib/finance-types";
-import { DentalChart } from "./DentalChart";
-import { getAppointmentTypeName } from "../lib/appointment-types";
 import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
-import { getAuthHeaders } from "@/lib/auth-headers";
-import { useDoctors } from "../hooks/useDoctors";
 import { useAuth } from "@/hooks/useAuth";
 import { getNextAvailableSlot } from "../lib/appointment-utils";
-import { PastAppointmentButton } from "./PastAppointmentButton";
-import AppointmentHistoryView from "./AppointmentHistoryView";
+import { getAuthHeaders } from "@/lib/auth-headers";
 
 // dummy data removed per request
 
 // appointment history dummy data removed per request
 
-interface Patient {
-  id?: string;
-  firstName?: string;
-  lastName?: string;
-  name?: string;
-  email: string;
-  phone: string;
-  alternateEmail?: string;
-  alternatePhone?: string;
-  dateOfBirth: string;
-  lastVisit?: string;
-  nextAppointment?: string | null;
-  status?: string;
-  insurance?: string;
-  balance?: number;
-  createdAt?: string;
-  allergies?: string;
-  medicalHistory?: string;
-  treatmentPlan?: string;
-  clinicalNotes?: string;
-  address?: string;
-  city?: string;
-  zipCode?: string;
-  emergencyContact?: string;
-  emergencyPhone?: string;
-  notes?: string;
-  parentId?: string;
-  isPrimary?: boolean;
-  relationship?: string;
-  dentalCharts?: { date: string; data: string; isEmpty: boolean }[];
-}
-
 interface PatientsViewProps {
   doctorFilter?: string; // When set, only show patients this doctor has seen
 }
-
-// Local history appointment shape (type can be string for display)
-interface HistoryAppointment extends Omit<Appointment, 'type' | 'date' | 'transactions'> {
-  type: string;
-  date: string;
-  transactions: RecentTransaction[];
-}
-
-type PaymentRow = RecentTransaction & {
-  patientId?: string;
-  createdAt?: string | Date;
-  updatedAt?: string | Date;
-  deleted?: boolean;
-};
-
-const isLegacyPaymentRow = (txn: RecentTransaction) => String(txn.id || "").startsWith("legacy-");
-
-const toDateOnly = (value?: string | Date) => {
-  if (!value) return "";
-  if (value instanceof Date) return value.toISOString().split("T")[0];
-  return String(value).split("T")[0].split(" ")[0];
-};
-
-const getPaymentTransactionKey = (txn: RecentTransaction) =>
-  String(txn.id || txn.transactionId || `${txn.appointmentId || "none"}-${txn.date || "no-date"}-${txn.method || "method"}-${txn.amount || 0}`);
-
-const parsePaymentTimestamp = (value?: string | Date) => {
-  if (!value) return 0;
-  if (value instanceof Date) return value.getTime();
-
-  const raw = String(value);
-  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? `${raw}T00:00:00` : raw;
-  const parsed = new Date(normalized).getTime();
-
-  return Number.isNaN(parsed) ? 0 : parsed;
-};
-
-const comparePaymentTransactionsDesc = (a: RecentTransaction, b: RecentTransaction) => {
-  const aRow = a as PaymentRow;
-  const bRow = b as PaymentRow;
-  const paymentDateDiff = parsePaymentTimestamp(b.date) - parsePaymentTimestamp(a.date);
-
-  if (paymentDateDiff !== 0) return paymentDateDiff;
-
-  const createdDiff = parsePaymentTimestamp(bRow.createdAt) - parsePaymentTimestamp(aRow.createdAt);
-  if (createdDiff !== 0) return createdDiff;
-
-  const updatedDiff = parsePaymentTimestamp(bRow.updatedAt) - parsePaymentTimestamp(aRow.updatedAt);
-  if (updatedDiff !== 0) return updatedDiff;
-
-  return getPaymentTransactionKey(b).localeCompare(getPaymentTransactionKey(a));
-};
 
 export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   const [searchTerm, setSearchTerm] = useState("");
@@ -166,17 +66,10 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
 
   const [isConfirmUnsavedChangesOpen, setIsConfirmUnsavedChangesOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const patientDetailsRef = useRef<{ save: () => Promise<boolean>; changedFields: Record<string, { old: any; new: any }> } | null>(null);
+  const patientDetailsRef = useRef<PatientDetailsRef | null>(null);
   const itemsPerPage = 10;
   const { user } = useAuth();
-  const { openScheduleModal, openAddPatientModal, refreshPatients, refreshTrigger, appointments } = useAppointmentModal();
-
-  // Generic confirm dialog state (reusable across this component)
-  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
-  const [confirmLoading, setConfirmLoading] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<null | (() => Promise<void>)>(null);
-  const [confirmTitle, setConfirmTitle] = useState<string>("");
-  const [confirmMessage, setConfirmMessage] = useState<string>("");
+  const { openAddPatientModal, refreshPatients, refreshTrigger, appointments } = useAppointmentModal();
 
   // BookingModal state
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
@@ -329,15 +222,16 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   }, [currentPage, fetchPatients]);
 
   const getStatusBadge = (status: string | undefined) => {
-    switch (status) {
+    const s = status?.toLowerCase() || "active";
+    switch (s) {
       case "active":
-        return <Badge className="bg-green-100 text-green-800">Active</Badge>;
+        return <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-50">Active</Badge>;
       case "overdue":
-        return <Badge className="bg-red-100 text-red-800">Overdue</Badge>;
+        return <Badge className="bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-50">Overdue</Badge>;
       case "inactive":
-        return <Badge className="bg-gray-100 text-gray-800">Inactive</Badge>;
+        return <Badge className="bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-50">Inactive</Badge>;
       default:
-        return <Badge>{status || "Unknown"}</Badge>;
+        return <Badge variant="outline" className="capitalize">{s}</Badge>;
     }
   };
 
@@ -355,6 +249,8 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
     try {
       const res = await fetch(apiUrl(`/api/patients/${patientToDelete.id}`), {
         method: "DELETE",
+        headers: getAuthHeaders(),
+        credentials: "include",
       });
       if (res.ok) {
         toast.success("Patient deleted successfully");
@@ -435,67 +331,78 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="p-4 md:p-8 max-w-[1600px] mx-auto space-y-8 bg-[#fdfdff] min-h-screen">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">
-            {doctorFilter ? "My Patients" : "Patients"}
+          <h1 className="text-3xl font-bold tracking-tight text-slate-900">
+            {doctorFilter ? "My Patients" : "Patient Directory"}
           </h1>
-          <p className="text-muted-foreground">
+          <p className="text-slate-500 text-lg mt-1">
             {doctorFilter
-              ? "View patients you have treated"
-              : "Manage patient information and appointments"}
+              ? "Comprehensive list of patients under your care"
+              : "Access and manage all patient records and history"}
           </p>
         </div>
-        {/* always allow adding a patient, even when filtered for a specific doctor */}
-        <Button variant="brand" onClick={handleAddPatient}>
-          <Plus className="h-4 w-4 mr-2" />
-          Add New Patient
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button variant="brand" onClick={handleAddPatient} className="shadow-sm">
+            <Plus className="h-4 w-4 mr-2" />
+            New Patient
+          </Button>
+        </div>
       </div>
 
-      {/* Search and Filters */}
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex items-center space-x-4">
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input 
-                placeholder="Search patients..." 
-                value={searchTerm} 
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setCurrentPage(1);
-                }} 
-                className="pl-9" 
-              />
-            </div>
-            <Select 
-              value={statusFilter} 
-              onValueChange={(value) => {
-                setStatusFilter(value);
-                setCurrentPage(1);
-              }}
-            >
-              <SelectTrigger className="w-[140px]">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="overdue">Overdue</SelectItem>
-                <SelectItem value="inactive">Inactive</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Filters and Search - Unified into one row for better desktop UX */}
+        <div className="lg:col-span-12">
+          <Card className="border-none shadow-sm ring-1 ring-slate-200">
+            <CardContent className="p-4">
+              <div className="flex flex-col sm:flex-row items-center gap-4">
+                <div className="relative flex-1 w-full sm:max-w-md">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                  <Input
+                    placeholder="Search by name, email, or phone..."
+                    value={searchTerm}
+                    onChange={(e) => {
+                      setSearchTerm(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="pl-10 h-11 bg-slate-50 border-none focus-visible:ring-1 focus-visible:ring-violet-200 transition-all"
+                  />
+                </div>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <Select
+                    value={statusFilter}
+                    onValueChange={(value) => {
+                      setStatusFilter(value);
+                      setCurrentPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="w-full sm:w-[160px] h-11 bg-slate-50 border-none focus:ring-1 focus:ring-violet-200">
+                      <SelectValue placeholder="All Statuses" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Statuses</SelectItem>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="overdue">Overdue</SelectItem>
+                      <SelectItem value="inactive">Inactive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Patient List ({totalFiltered})</CardTitle>
-        </CardHeader>
-        <CardContent>
+        <div className="lg:col-span-12">
+          <Card className="border-none shadow-md ring-1 ring-slate-200 overflow-hidden">
+            <CardHeader className="bg-slate-50/50 border-b border-slate-100 py-4">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base font-semibold text-slate-700">
+                  Showing {totalFiltered} {totalFiltered === 1 ? 'patient' : 'patients'}
+                </CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
           {isLoading ? (
             <div className="text-center py-8 text-muted-foreground">
               <div className="inline-block">
@@ -516,114 +423,150 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
           ) : (
             <>
               <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Patient</TableHead>
-                    <TableHead>Contact</TableHead>
-                  <TableHead>Next Appointment</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Balance</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {paginatedPatients.map((patient) => (
-                  <TableRow key={patient.id}>
-                    <TableCell>
-                      <div>
-                        <div className="font-medium">{patient.name}</div>
-                        <div className="text-sm text-muted-foreground">Last Visit: {patient.lastVisit || "N/A"}</div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="space-y-1">
-                        <div className="flex items-center space-x-1 text-sm">
-                          <Mail className="h-3 w-3" />
-                          <span>{patient.email}</span>
-                        </div>
-                        <div className="flex items-center space-x-1 text-sm">
-                          <Phone className="h-3 w-3" />
-                          <span>{patient.phone}</span>
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {patient.nextAppointment ? (
-                        <div className="flex items-center space-x-1">
-                          <Calendar className="h-3 w-3" />
-                          <span>{patient.nextAppointment}</span>
-                        </div>
-                      ) : (
-                        <span className="text-muted-foreground">None scheduled</span>
-                      )}
-                    </TableCell>
-                    <TableCell>{getStatusBadge(patient.status)}</TableCell>
-                    <TableCell>
-                      <span className={(patient.balance ?? 0) > 0 ? "text-red-600 font-medium" : "text-green-600"}>
-                        ${patient.balance ?? 0}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center space-x-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setSelectedPatient(patient);
-                            setIsPatientDetailsModified(false);
-                            setIsPatientDetailsModalOpen(true);
-                          }}
-                        >
-                          <Eye className="h-3 w-3 mr-1" />
-                          View
-                        </Button>
-                        
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setMessagePatient(patient);
-                            setIsMessageModalOpen(true);
-                          }}
-                          title="Send message to patient"
-                        >
-                          <Bell className="h-3 w-3 mr-1" />
-                          Message
-                        </Button>
-                        
-                        <Button 
-                          variant="dark" 
-                          size="sm"
-                          onClick={() => {
-                            console.log("Schedule button clicked. Patient:", patient);
-                            // Immediately mark this patient as the selected patient for booking
-                            setSelectedPatient(patient);
-                            // Also set a synchronous default id so the modal receives it immediately
-                            setBookingDefaultPatientId(String(patient.id));
-
-                            // Find next available slot
-                            const slot = getNextAvailableSlot(doctorFilter ? doctorAppointments : appointments, doctorFilter);
-                            setNextAvailableDate(slot.date);
-                            setNextAvailableTime(slot.time);
-                            // For doctor role, pre-select their own name; for admin, leave empty
-                            if (user?.role === 'doctor') {
-                              setNextAvailableDoctor(user?.username || "");
-                            } else {
-                              setNextAvailableDoctor("");
-                            }
-                            setSelectedAppointmentToEdit(null); // New appointment
-                            setBookingModalOpen(true);
-                          }}
-                        >
-                          <Calendar className="h-3 w-3 mr-1" />
-                          Schedule
-                        </Button>
-                      </div>
-                    </TableCell>
+                <TableHeader className="bg-slate-50/50">
+                  <TableRow className="hover:bg-transparent border-slate-100">
+                    <TableHead className="w-[300px] text-slate-500 font-medium py-4">Patient Information</TableHead>
+                    <TableHead className="text-slate-500 font-medium">Contact Details</TableHead>
+                    <TableHead className="text-slate-500 font-medium">Next Visit</TableHead>
+                    <TableHead className="text-slate-500 font-medium text-center">Status</TableHead>
+                    <TableHead className="text-slate-500 font-medium text-right">Balance</TableHead>
+                    <TableHead className="w-[100px] text-slate-500 font-medium text-right pr-6">Actions</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {paginatedPatients.map((patient) => (
+                    <TableRow key={patient.id} className="group hover:bg-slate-50/50 transition-colors border-slate-100">
+                      <TableCell className="py-4">
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-10 w-10 border border-slate-200 shadow-sm">
+                            <AvatarImage src={patient.profilePicture} alt={patient.name} className="object-cover" />
+                            <AvatarFallback className="bg-violet-50 text-violet-600 font-semibold">
+                              {patient.firstName?.[0]}{patient.lastName?.[0]}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="flex flex-col">
+                            <span className="font-semibold text-slate-900 group-hover:text-violet-600 transition-colors cursor-pointer"
+                              onClick={() => {
+                                setSelectedPatient(patient);
+                                setIsPatientDetailsModified(false);
+                                setIsPatientDetailsModalOpen(true);
+                              }}
+                            >
+                              {patient.name}
+                            </span>
+                            <span className="text-xs text-slate-400">ID: {patient.id?.slice(-8).toUpperCase()}</span>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-col gap-1.5">
+                          <div className="flex items-center gap-2 text-sm text-slate-600">
+                            <div className="p-1 rounded-md bg-slate-100/50">
+                              <Mail className="h-3 w-3 text-slate-400" />
+                            </div>
+                            <span className="truncate max-w-[180px]">{patient.email}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-sm text-slate-600">
+                            <div className="p-1 rounded-md bg-slate-100/50">
+                              <Phone className="h-3 w-3 text-slate-400" />
+                            </div>
+                            <span>{patient.phone}</span>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        {patient.nextAppointment ? (
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                              <Calendar className="h-3.5 w-3.5 text-violet-500" />
+                              {patient.nextAppointment}
+                            </div>
+                            <span className="text-[11px] text-slate-400 ml-5">Scheduled</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2 text-sm text-slate-400">
+                            <Calendar className="h-3.5 w-3.5 opacity-30" />
+                            <span>No appointments</span>
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {getStatusBadge(patient.status)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex flex-col items-end gap-1">
+                          <span className={`font-bold text-sm ${ (patient.balance ?? 0) > 0 ? "text-red-500" : "text-emerald-600" }`}>
+                            ₱{(patient.balance ?? 0).toLocaleString()}
+                          </span>
+                          <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Current</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right pr-6">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-900">
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-48">
+                            <DropdownMenuItem
+                              className="gap-2"
+                              onClick={() => {
+                                setSelectedPatient(patient);
+                                setIsPatientDetailsModified(false);
+                                setIsPatientDetailsModalOpen(true);
+                              }}
+                            >
+                              <Eye className="h-4 w-4 text-slate-400" />
+                              View Details
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="gap-2"
+                              onClick={() => {
+                                setMessagePatient(patient);
+                                setIsMessageModalOpen(true);
+                              }}
+                            >
+                              <Bell className="h-4 w-4 text-slate-400" />
+                              Send Message
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="gap-2 font-medium text-violet-600 focus:text-violet-700"
+                              onClick={() => {
+                                setSelectedPatient(patient);
+                                setBookingDefaultPatientId(String(patient.id));
+                                const slot = getNextAvailableSlot(doctorFilter ? doctorAppointments : appointments, doctorFilter);
+                                setNextAvailableDate(slot.date);
+                                setNextAvailableTime(slot.time);
+                                if (user?.role === 'doctor') {
+                                  setNextAvailableDoctor(user?.username || "");
+                                } else {
+                                  setNextAvailableDoctor("");
+                                }
+                                setSelectedAppointmentToEdit(null);
+                                setBookingModalOpen(true);
+                              }}
+                            >
+                              <Calendar className="h-4 w-4" />
+                              Schedule Visit
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="gap-2 text-red-600 focus:text-red-700"
+                              onClick={() => {
+                                setPatientToDelete(patient);
+                                setIsPatientDeleteDialogOpen(true);
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              Remove Patient
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
 
             {/* Pagination */}
               <div className="flex items-center justify-between mt-4 pt-4 border-t">
@@ -653,45 +596,37 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
           )}
         </CardContent>
       </Card>
+    </div>
+  </div>
 
-      <Dialog
-        open={isPatientDetailsModalOpen}
-        onOpenChange={(open) => {
-          if (!open && isPatientDetailsModified) {
-            setIsConfirmUnsavedChangesOpen(true);
-            // Keep the dialog open when there are unsaved changes
-          } else {
-            setIsPatientDetailsModalOpen(open);
-            if (!open) {
-              setSelectedPatient(null);
-              setIsPatientDetailsModified(false);
-            }
-          }
-        }}
-      >
-        <DialogContent className="sm:max-w-7xl w-[95vw] max-h-[90vh] overflow-y-auto data-[state=closed]:zoom-out-100 data-[state=open]:zoom-in-100">
-          <DialogHeader>
-            <DialogTitle>Patient Details - {selectedPatient?.name}</DialogTitle>
-          </DialogHeader>
-          {selectedPatient && (
-            <PatientDetails
-              ref={patientDetailsRef}
-              patient={selectedPatient}
-              onDeletePatient={(p) => {
-                setPatientToDelete(p);
-                setIsPatientDeleteDialogOpen(true);
-              }}
-              isModified={isPatientDetailsModified}
-              setIsModified={setIsPatientDetailsModified}
-              doctorFilter={doctorFilter}
-              onOpenBookingModal={(appointment) => {
-                setSelectedAppointmentToEdit(appointment);
-                setBookingModalOpen(true);
-              }}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
+  <PatientDetailsModal
+    open={isPatientDetailsModalOpen}
+    onOpenChange={(open) => {
+      if (!open && isPatientDetailsModified) {
+        setIsConfirmUnsavedChangesOpen(true);
+      } else {
+        setIsPatientDetailsModalOpen(open);
+        if (!open) {
+          setSelectedPatient(null);
+          setIsPatientDetailsModified(false);
+        }
+      }
+    }}
+    patient={selectedPatient}
+    detailsRef={patientDetailsRef}
+    onDeletePatient={(p: Patient) => {
+      setPatientToDelete(p);
+      setIsPatientDeleteDialogOpen(true);
+    }}
+    isModified={isPatientDetailsModified}
+    setIsModified={setIsPatientDetailsModified}
+    doctorFilter={doctorFilter}
+    openBookingAppointmentId={bookingModalOpen ? selectedAppointmentToEdit?.id : null}
+    onOpenBookingModal={(appointment: Appointment) => {
+      setSelectedAppointmentToEdit(appointment);
+      setBookingModalOpen(true);
+    }}
+  />
 
       <EditPaymentModal />
 
@@ -725,7 +660,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
             <p className="text-sm text-muted-foreground">
               You have unsaved changes. Do you want to save them before closing?
             </p>
-            
+
             {/* Summary of changes */}
             {Object.keys(patientDetailsRef.current?.changedFields || {}).length > 0 && (
               <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
@@ -847,1586 +782,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
         }}
       />
 
-      
+
     </div>
   );
 }
-
-const PatientDetails = React.forwardRef<{
-  save: () => Promise<boolean>;
-  changedFields: Record<string, { old: any; new: any }>;
-}, {
-  patient: Patient;
-  onDeletePatient: (p: Patient) => void;
-  isModified: boolean;
-  setIsModified: (isModified: boolean) => void;
-  doctorFilter?: string;
-  onOpenBookingModal?: (appointment: Appointment) => void;
-}>(({
-  patient,
-  onDeletePatient,
-  isModified,
-  setIsModified,
-  doctorFilter,
-  onOpenBookingModal
-}, ref) => {
-  const { openEditModal, refreshPatients, appointments } = useAppointmentModal();
-  const { openPaymentModal, openEditPaymentModal } = usePaymentModal();
-  const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
-  const { statuses: PAYMENT_STATUSES } = usePaymentStatuses();
-  const [formData, setFormData] = useState({
-    firstName: patient.firstName || patient.name?.split(' ')[0] || '',
-    lastName: patient.lastName || patient.name?.split(' ').slice(1).join(' ') || '',
-    email: patient.email || '',
-    phone: patient.phone || '',
-    alternateEmail: patient.alternateEmail || '',
-    alternatePhone: patient.alternatePhone || '',
-    dateOfBirth: patient.dateOfBirth || '',
-    insurance: patient.insurance || '',
-    balance: patient.balance ?? 0,
-    status: patient.status || 'active',
-    createdAt: patient.createdAt || new Date().toISOString().split('T')[0],
-    allergies: patient.allergies || '',
-    medicalHistory: patient.medicalHistory || '',
-    treatmentPlan: patient.treatmentPlan || '',
-    clinicalNotes: patient.clinicalNotes || '',
-    address: patient.address || '',
-    city: patient.city || '',
-    zipCode: patient.zipCode || '',
-    emergencyContact: patient.emergencyContact || '',
-    emergencyPhone: patient.emergencyPhone || '',
-    notes: patient.notes || '',
-    dentalCharts: patient.dentalCharts || []
-  });
-
-  const [isSaving, setIsSaving] = useState(false);
-  const [patientAppointments, setPatientAppointments] = useState<Appointment[]>([]);
-  const [familyMembers, setFamilyMembers] = useState<Patient[]>([]);
-  const [parentPatient, setParentPatient] = useState<Patient | null>(null);
-  const [isLoadingFamily, setIsLoadingFamily] = useState(false);
-
-  // Payment state and helpers (local to PatientDetails)
-  const [allTransactions, setAllTransactions] = useState<RecentTransaction[]>([]);
-  const [mockAppointmentHistoryLocal, setMockAppointmentHistoryLocal] = useState<Appointment[]>([]);
-  const [expandedTransactions, setExpandedTransactions] = useState<Set<string>>(new Set());
-
-  const getHistoryAppointmentType = React.useCallback((apt: Appointment) => {
-    return getAppointmentTypeName(apt.type as number, apt.customType) || String(apt.type || "Appointment");
-  }, []);
-
-  const createLegacyPaymentRow = React.useCallback((apt: Appointment): RecentTransaction | null => {
-    const totalPaid = Number(apt.totalPaid || 0);
-    if (totalPaid <= 0) return null;
-
-    const appointmentType = getHistoryAppointmentType(apt);
-    const appointmentDate = String(apt.date || "");
-    const paymentDate = toDateOnly(apt.updatedAt) || toDateOnly(appointmentDate) || toDateOnly(apt.createdAt);
-
-    return {
-      id: `legacy-${apt.id}`,
-      appointmentId: apt.id,
-      appointmentType,
-      appointmentDate,
-      doctor: apt.doctor || "",
-      date: paymentDate,
-      description: `Recorded payment total for ${appointmentType}`,
-      amount: totalPaid,
-      type: "payment",
-      method: "Recorded Total",
-      transactionId: `LEGACY-${apt.id}`,
-      notes: "Imported from appointment total paid because no individual payment record exists.",
-      status: apt.paymentStatus === "unpaid" ? "pending" : "completed",
-    };
-  }, [getHistoryAppointmentType]);
-
-  const buildPatientTransactions = React.useCallback((history: Appointment[], payments: PaymentRow[] = []) => {
-    const appointmentById = new Map(history.map((apt) => [apt.id, apt]));
-    const realRows = payments
-      .filter((payment) => !payment.deleted)
-      .map((payment) => {
-        const appointment = payment.appointmentId ? appointmentById.get(payment.appointmentId) : undefined;
-        const appointmentType = payment.appointmentType || (appointment ? getHistoryAppointmentType(appointment) : "Unassigned Payment");
-        const appointmentDate = payment.appointmentDate || (appointment ? String(appointment.date || "") : "");
-
-        return {
-          ...payment,
-          id: payment.id || payment.transactionId || `payment-${payment.appointmentId || "unknown"}-${payment.date}`,
-          date: toDateOnly(payment.date) || toDateOnly(payment.createdAt),
-          description: payment.description || `Payment for ${appointmentType}`,
-          amount: Number(payment.amount || 0),
-          type: payment.type || "payment",
-          method: payment.method || "Unknown",
-          appointmentId: payment.appointmentId,
-          appointmentType,
-          appointmentDate,
-          doctor: payment.doctor || appointment?.doctor || "",
-          status: payment.status || "completed",
-        } as RecentTransaction;
-      });
-
-    const realAppointmentIds = new Set(realRows.map((row) => row.appointmentId).filter(Boolean));
-    const legacyRows = history
-      .filter((apt) => !realAppointmentIds.has(apt.id))
-      .map(createLegacyPaymentRow)
-      .filter(Boolean) as RecentTransaction[];
-
-    return [...realRows, ...legacyRows]
-      .filter((txn) => Number(txn.amount || 0) > 0)
-      .sort(comparePaymentTransactionsDesc);
-  }, [createLegacyPaymentRow, getHistoryAppointmentType]);
-
-  // Track the original loaded data (after server fetch) for accurate change detection
-  const [originalLoadedData, setOriginalLoadedData] = useState(formData);
-
-  // Compute changed fields for unsaved changes dialog
-  const changedFields = React.useMemo(() => {
-    const changes: Record<string, { old: any; new: any }> = {};
-    const fieldLabels: Record<string, string> = {
-      firstName: 'First Name',
-      lastName: 'Last Name',
-      email: 'Primary Email',
-      phone: 'Primary Phone',
-      alternateEmail: 'Alternate Email',
-      alternatePhone: 'Alternate Phone',
-      dateOfBirth: 'Date of Birth',
-      insurance: 'Insurance Provider',
-      balance: 'Balance',
-      status: 'Status',
-      createdAt: 'Created Date',
-      allergies: 'Allergies',
-      medicalHistory: 'Medical History',
-      treatmentPlan: 'Treatment Plan',
-      clinicalNotes: 'Clinical Notes',
-      address: 'Address',
-      city: 'City',
-      zipCode: 'ZIP Code',
-      emergencyContact: 'Emergency Contact',
-      emergencyPhone: 'Emergency Phone',
-      notes: 'Notes',
-    };
-
-    // Compare against the originally loaded data (from server), not the initial prop
-    Object.keys(fieldLabels).forEach((key) => {
-      const orig = originalLoadedData[key as keyof typeof originalLoadedData];
-      const current = formData[key as keyof typeof formData];
-      if (String(orig) !== String(current)) {
-        changes[fieldLabels[key]] = {
-          old: orig,
-          new: current,
-        };
-      }
-    });
-
-    return changes;
-  }, [formData, originalLoadedData]);
-
-  // Local confirm dialog state for PatientDetails (prefixed to avoid collisions)
-  const [pdIsConfirmOpen, setPdIsConfirmOpen] = useState(false);
-  const [pdConfirmLoading, setPdConfirmLoading] = useState(false);
-  const [pdConfirmAction, setPdConfirmAction] = useState<null | (() => Promise<void>)>(null);
-  const [pdConfirmTitle, setPdConfirmTitle] = useState<string>("");
-  const [pdConfirmMessage, setPdConfirmMessage] = useState<string>("");
-
-  // New state for filters
-  const [historyStatusFilter, setHistoryStatusFilter] = useState('all');
-  const [historyDoctorFilter, setHistoryDoctorFilter] = useState('all');
-  const [historyProcedureFilter, setHistoryProcedureFilter] = useState('all');
-
-  // Snapshot states
-  const [isSnapshotOpen, setIsSnapshotOpen] = useState(false);
-  const [selectedSnapshot, setSelectedSnapshot] = useState<any>(null);
-  const [snapshotLogDate, setSnapshotLogDate] = useState("");
-
-  const isPaymentLogTransaction = React.useCallback((transaction: RecentTransaction) => {
-    if (isLegacyPaymentRow(transaction) || !transaction.appointmentId) return false;
-
-    const matchingTransactions = allTransactions.filter((txn) =>
-      !isLegacyPaymentRow(txn) &&
-      String(txn.appointmentId || "") === String(transaction.appointmentId || "")
-    );
-
-    if (matchingTransactions.length <= 1) return false;
-
-    const latestTransaction = [...matchingTransactions].sort(comparePaymentTransactionsDesc)[0];
-
-    return getPaymentTransactionKey(latestTransaction) !== getPaymentTransactionKey(transaction);
-  }, [allTransactions]);
-
-  const handleOpenSnapshot = (appointment: Appointment | HistoryAppointment, transaction?: RecentTransaction) => {
-    const originalAppointment = patientAppointments.find((apt: Appointment) => String(apt.id) === String(appointment.id));
-    const displayDate = toDateOnly(originalAppointment?.date || appointment.date);
-    const displayTime = originalAppointment?.time || appointment.time || String(appointment.date || "").split(" ")[1] || "";
-    const price = Number(appointment.price ?? originalAppointment?.price ?? 0);
-    const totalPaid = Number(appointment.totalPaid ?? originalAppointment?.totalPaid ?? 0);
-    const balance = Math.max(0, price - totalPaid);
-    const logDate = transaction?.date || appointment.updatedAt || originalAppointment?.updatedAt || appointment.createdAt || originalAppointment?.createdAt || new Date().toISOString();
-    const patientDisplayName =
-      appointment.patientName ||
-      originalAppointment?.patientName ||
-      patient.name ||
-      [patient.firstName, patient.lastName].filter(Boolean).join(" ");
-
-    setSelectedSnapshot({
-      ...(originalAppointment || {}),
-      ...appointment,
-      patientName: patientDisplayName,
-      date: displayDate,
-      time: displayTime,
-      price,
-      totalPaid,
-      balance,
-    });
-    setSnapshotLogDate(logDate);
-    setIsSnapshotOpen(true);
-  };
-
-  const handleOpenTransactionSnapshot = (transaction: RecentTransaction) => {
-    const appointment = mockAppointmentHistoryLocal.find((apt: Appointment) => String(apt.id) === String(transaction.appointmentId))
-      || patientAppointments.find((apt: Appointment) => String(apt.id) === String(transaction.appointmentId));
-
-    if (!appointment) {
-      toast.error("Could not find appointment for this payment");
-      return;
-    }
-
-    handleOpenSnapshot(appointment, transaction);
-  };
-
-  const getTransactionPaymentDisplay = (transaction: RecentTransaction) => {
-    if (isPaymentLogTransaction(transaction)) {
-      return { label: "Log", className: "bg-gray-100 text-gray-700 border-gray-200", isLog: true };
-    }
-
-    const appointment = mockAppointmentHistoryLocal.find((apt: Appointment) => String(apt.id) === String(transaction.appointmentId))
-      || patientAppointments.find((apt: Appointment) => String(apt.id) === String(transaction.appointmentId));
-    const price = Number(appointment?.price || 0);
-    const totalPaid = Number(appointment?.totalPaid || 0);
-    const paymentStatus = String(appointment?.paymentStatus || transaction.status || "").toLowerCase();
-
-    if (paymentStatus === "paid" || paymentStatus === "over-paid" || (price > 0 && totalPaid >= price)) {
-      return { label: "fullypaid", className: "bg-green-50 text-green-700 border-green-200", isLog: false };
-    }
-
-    if (paymentStatus === "half-paid" || (price > 0 && totalPaid > 0 && totalPaid < price)) {
-      return { label: "halfpaid", className: "bg-amber-50 text-amber-700 border-amber-200", isLog: false };
-    }
-
-    return {
-      label: paymentStatus || "unpaid",
-      className: paymentStatus === "overdue" ? "bg-red-50 text-red-700 border-red-200" : "",
-      isLog: false,
-    };
-  };
-
-  const uniqueDoctors = React.useMemo(() => {
-    const doctors = new Set(mockAppointmentHistoryLocal.map(apt => apt.doctor).filter(Boolean));
-    return ['all', ...Array.from(doctors)];
-  }, [mockAppointmentHistoryLocal]);
-
-  // Build a display-only history array (string `type`) derived from internal Appointment[]
-  const mappedHistory: HistoryAppointment[] = React.useMemo(() => {
-    return (mockAppointmentHistoryLocal || []).map((apt: Appointment) => ({
-      ...apt,
-      type: getAppointmentTypeName(apt.type as number, apt.customType) || String(apt.type || ''),
-      date: String(apt.date || ''),
-      transactions: apt.transactions || [],
-    } as HistoryAppointment));
-  }, [mockAppointmentHistoryLocal]);
-
-  const uniqueProcedures = React.useMemo(() => {
-      const procedures = new Set(mappedHistory.map(apt => apt.type).filter(Boolean));
-      return ['all', ...Array.from(procedures) as string[]];
-  }, [mappedHistory]);
-
-  const filteredHistory = React.useMemo(() => {
-    return mappedHistory.filter(apt => {
-        if (historyStatusFilter !== 'all' && apt.paymentStatus !== historyStatusFilter) return false;
-        if (historyDoctorFilter !== 'all' && apt.doctor !== historyDoctorFilter) return false;
-        if (historyProcedureFilter !== 'all' && String(apt.type) !== historyProcedureFilter) return false;
-        return true;
-    });
-  }, [mappedHistory, historyStatusFilter, historyDoctorFilter, historyProcedureFilter]);
-
-  // Filters for Payments tab
-  const [paymentDoctorFilter, setPaymentDoctorFilter] = useState('all');
-  const [paymentMethodFilter, setPaymentMethodFilter] = useState('all');
-  const [paymentProcedureFilter, setPaymentProcedureFilter] = useState('all');
-
-  const uniquePaymentDoctors = React.useMemo(() => {
-    const doctors = new Set(allTransactions.map(t => t.doctor).filter(Boolean).map(String));
-    return ['all', ...Array.from(doctors)];
-  }, [allTransactions]);
-
-  const uniquePaymentMethods = React.useMemo(() => {
-    const methods = new Set(allTransactions.map(t => t.method).filter(Boolean).map(String));
-    return ['all', ...Array.from(methods)];
-  }, [allTransactions]);
-
-  const uniquePaymentProcedures = React.useMemo(() => {
-    const procedures = new Set(allTransactions.map(t => t.appointmentType).filter(Boolean).map(String));
-    return ['all', ...Array.from(procedures)];
-  }, [allTransactions]);
-
-  useEffect(() => {
-    if (paymentDoctorFilter !== 'all' && !uniquePaymentDoctors.includes(paymentDoctorFilter)) setPaymentDoctorFilter('all');
-  }, [paymentDoctorFilter, uniquePaymentDoctors]);
-
-  useEffect(() => {
-    if (paymentMethodFilter !== 'all' && !uniquePaymentMethods.includes(paymentMethodFilter)) setPaymentMethodFilter('all');
-  }, [paymentMethodFilter, uniquePaymentMethods]);
-
-  useEffect(() => {
-    if (paymentProcedureFilter !== 'all' && !uniquePaymentProcedures.includes(paymentProcedureFilter)) setPaymentProcedureFilter('all');
-  }, [paymentProcedureFilter, uniquePaymentProcedures]);
-
-  const filteredTransactions = React.useMemo(() => {
-    return allTransactions.filter(t => {
-      if (doctorFilter && t.doctor !== doctorFilter) return false;
-      if (paymentDoctorFilter !== 'all' && t.doctor !== paymentDoctorFilter) return false;
-      if (paymentMethodFilter !== 'all' && t.method !== paymentMethodFilter) return false;
-      if (paymentProcedureFilter !== 'all' && t.appointmentType !== paymentProcedureFilter) return false;
-      return true;
-    });
-  }, [allTransactions, doctorFilter, paymentDoctorFilter, paymentMethodFilter, paymentProcedureFilter]);
-
-  const toggleExpandTransactions = (id: string) => {
-    setExpandedTransactions((prev) => {
-      const copy = new Set(prev);
-      if (copy.has(id)) copy.delete(id);
-      else copy.add(id);
-      return copy;
-    });
-  };
-
-  const getPaymentMethodIcon = (method: string) => {
-    switch ((method || '').toLowerCase()) {
-      case 'cash':
-        return <DollarSign className="h-4 w-4" />;
-      case 'card':
-      case 'credit':
-      case 'credit card':
-        return <CreditCard className="h-4 w-4" />;
-      default:
-        return <DollarSign className="h-4 w-4" />;
-    }
-  };
-
-  const getAppointmentStatusBadge = (status: string) => {
-    const k = String(status || "scheduled").toLowerCase().trim();
-    const statusOption = APPOINTMENT_STATUSES.find(s => s.value.toLowerCase() === k);
-    
-    if (statusOption) {
-      return (
-        <Badge className={`${statusOption.bgColor} ${statusOption.textColor} border-none hover:opacity-80 font-medium capitalize`}>
-          {statusOption.label}
-        </Badge>
-      );
-    }
-    
-    return <Badge variant="outline" className="font-medium capitalize">{status}</Badge>;
-  };
-
-  const getPaymentStatusBadge = (status: string) => {
-    const k = String(status || "unpaid").toLowerCase().trim();
-    const statusOption = PAYMENT_STATUSES.find(s => s.value.toLowerCase() === k);
-    
-    if (statusOption) {
-      return (
-        <Badge className={`${statusOption.bgColor} ${statusOption.textColor} border-none hover:opacity-80 font-medium capitalize`}>
-          {statusOption.label}
-        </Badge>
-      );
-    }
-    
-    // Fallback logic for statuses not in PAYMENT_STATUSES (like over-paid)
-    switch (k) {
-      case 'over-paid':
-        return <Badge className="bg-blue-100 text-blue-800 border-none font-medium">Over-paid</Badge>;
-      default:
-        return <Badge variant="outline" className="font-medium capitalize">{status || "Unpaid"}</Badge>;
-    }
-  };
-
-  useEffect(() => {
-    const fetchFamilyData = async () => {
-      if (!patient?.id) return;
-
-      try {
-        setIsLoadingFamily(true);
-        
-        // 1. If this patient has a parentId, fetch the parent
-        if (patient.parentId && patient.parentId !== patient.id) {
-          const parentRes = await fetch(apiUrl(`/api/patients/${patient.parentId}`), { credentials: 'include' });
-          const parentJson = await parentRes.json();
-          if (parentJson.success) {
-            setParentPatient(parentJson.data);
-          }
-        } else {
-          setParentPatient(null);
-        }
-
-        // 2. Fetch all dependents (patients where parentId is this patient's id)
-        const familyRes = await fetch(apiUrl(`/api/patients?parentId=${patient.id}`), { credentials: 'include' });
-        const familyJson = await familyRes.json();
-        if (familyJson.success) {
-          // Filter out the current patient from the family list
-          setFamilyMembers(familyJson.data.filter((m: Patient) => m.id !== patient.id));
-        }
-      } catch (err) {
-        console.error("Error fetching family data:", err);
-      } finally {
-        setIsLoadingFamily(false);
-      }
-    };
-
-    fetchFamilyData();
-  }, [patient]);
-
-  useImperativeHandle(ref, () => ({
-    save: handleUpdatePatient,
-    changedFields,
-  }));
-
-  useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (isModified) {
-        e.preventDefault();
-        e.returnValue = '';
-      }
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
-  }, [isModified]);
-  
-  useEffect(() => {
-    // If patient has an id, fetch the full record from the server so we show all fields (not just the transformed list values)
-    const loadFullPatient = async () => {
-      if (!patient?.id) {
-        const initialData = {
-          firstName: patient.firstName || patient.name?.split(' ')[0] || '',
-          lastName: patient.lastName || patient.name?.split(' ').slice(1).join(' ') || '',
-          email: patient.email || '',
-          phone: patient.phone || '',
-          alternateEmail: patient.alternateEmail || '',
-          alternatePhone: patient.alternatePhone || '',
-          dateOfBirth: patient.dateOfBirth || '',
-          insurance: patient.insurance || '',
-          balance: patient.balance ?? 0,
-          status: patient.status || 'active',
-          createdAt: patient.createdAt || new Date().toISOString().split('T')[0],
-          allergies: patient.allergies || '',
-          medicalHistory: patient.medicalHistory || '',
-          treatmentPlan: patient.treatmentPlan || '',
-          clinicalNotes: patient.clinicalNotes || '',
-          address: patient.address || '',
-          city: patient.city || '',
-          zipCode: patient.zipCode || '',
-          emergencyContact: patient.emergencyContact || '',
-          emergencyPhone: patient.emergencyPhone || '',
-          notes: patient.notes || '',
-          dentalCharts: patient.dentalCharts || []
-        };
-        setFormData(initialData);
-        setOriginalLoadedData(initialData);
-        return;
-      }
-
-      try {
-        const res = await fetch(apiUrl(`/api/patients/${patient.id}`), { credentials: 'include' });
-        const json = await res.json();
-        if (json?.success && json.data) {
-          const p = json.data;
-          const loadedData = {
-            firstName: p.firstName || p.name?.split(' ')[0] || '',
-            lastName: p.lastName || p.name?.split(' ').slice(1).join(' ') || '',
-            email: p.email || '',
-            phone: p.phone || '',
-            alternateEmail: p.alternateEmail || '',
-            alternatePhone: p.alternatePhone || '',
-            dateOfBirth: p.dateOfBirth || '',
-            insurance: p.insurance || '',
-            balance: p.balance ?? 0,
-            status: p.status || 'active',
-            createdAt: p.createdAt ? new Date(p.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-            allergies: p.allergies || '',
-            medicalHistory: p.medicalHistory || '',
-            treatmentPlan: p.treatmentPlan || '',
-            clinicalNotes: p.clinicalNotes || '',
-            address: p.address || '',
-            city: p.city || '',
-            zipCode: p.zipCode || '',
-            emergencyContact: p.emergencyContact || '',
-            emergencyPhone: p.emergencyPhone || '',
-            notes: p.notes || '',
-            dentalCharts: p.dentalCharts || []
-          };
-          setFormData(loadedData);
-          // Update original loaded data to match what came from server
-          setOriginalLoadedData(loadedData);
-        }
-      } catch (err) {
-        console.error("Failed to load full patient data:", err);
-      }
-    };
-
-    loadFullPatient();
-  }, [patient]);
-
-  useEffect(() => {
-    // If doctorFilter is set, fetch appointments directly from API for this patient
-    // This ensures we get the doctor's appointments even if shared state is empty
-    if (doctorFilter) {
-      const fetchPatientAppointments = async () => {
-        try {
-          const patientName = patient.name || `${patient.firstName} ${patient.lastName}`;
-          const response = await fetch(
-            apiUrl(`/api/appointments?doctor=${encodeURIComponent(doctorFilter)}`),
-            { credentials: 'include' }
-          );
-          const result = await response.json();
-          if (result.success && result.data) {
-            // Filter to only this patient's appointments
-            const filtered = result.data.filter((apt: Appointment) =>
-              apt.patientId === patient.id ||
-              apt.patientName === patientName
-            ).sort((a: Appointment, b: Appointment) =>
-              parseBackendDateToLocal(b.date).getTime() - parseBackendDateToLocal(a.date).getTime()
-            );
-            setPatientAppointments(filtered);
-          }
-        } catch (error) {
-          console.error("Error fetching patient appointments:", error);
-          setPatientAppointments([]);
-        }
-      };
-      fetchPatientAppointments();
-    } else {
-      const fetchPatientAppointments = async () => {
-        const fallback = appointments.filter((apt: Appointment) =>
-          apt.patientId === patient.id ||
-          apt.patientName === `${patient.firstName} ${patient.lastName}` ||
-          apt.patientName === patient.name
-        ).sort((a: Appointment, b: Appointment) => parseBackendDateToLocal(b.date).getTime() - parseBackendDateToLocal(a.date).getTime());
-
-        if (!patient.id) {
-          setPatientAppointments(fallback);
-          return;
-        }
-
-        try {
-          const response = await fetch(
-            apiUrl(`/api/appointments?patientId=${encodeURIComponent(patient.id)}`),
-            { credentials: 'include' }
-          );
-          const result = await response.json();
-          if (result.success && Array.isArray(result.data)) {
-            const fetched = result.data.sort((a: Appointment, b: Appointment) =>
-              parseBackendDateToLocal(b.date).getTime() - parseBackendDateToLocal(a.date).getTime()
-            );
-            setPatientAppointments(fetched);
-            return;
-          }
-        } catch (error) {
-          console.error("Error fetching patient appointments:", error);
-        }
-
-        setPatientAppointments(fallback);
-      };
-
-      fetchPatientAppointments();
-    }
-  }, [appointments, patient, doctorFilter]);
-
-    // Map patientAppointments into local appointment history shape used for payments
-    useEffect(() => {
-  const mapped: Appointment[] = patientAppointments.map((apt: Appointment, i: number) => {
-        const id = apt.id || `apt-${i}`;
-        const cost = (apt.price != null ? apt.price : 0);
-        const totalPaid = apt.totalPaid != null ? apt.totalPaid : 0;
-        const transactions = apt.transactions ? apt.transactions : [];
-        
-        let paymentStatus: Appointment["paymentStatus"] | "over-paid";
-        const oneWeekAgo = new Date();
-        oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-        const aptDateStr = (apt.date || '').split(' ')[0];
-        const appointmentDate = parseBackendDateToLocal(aptDateStr);
-
-        if (totalPaid > cost && cost > 0) {
-          paymentStatus = 'over-paid';
-        } else if (totalPaid > 0 && totalPaid < cost) {
-          paymentStatus = 'half-paid';
-        } else if (totalPaid >= cost && cost > 0) {
-          paymentStatus = 'paid';
-        } else if (totalPaid === 0 && cost > 0 && appointmentDate < oneWeekAgo) {
-          paymentStatus = 'overdue';
-        } else {
-          paymentStatus = 'unpaid';
-        }
-
-        return {
-            ...apt,
-            id,
-            date: apt.date + (apt.time ? ` ${apt.time}` : ''),
-            // keep internal type numeric if available
-            type: (typeof apt.type === 'number' ? apt.type : 0) as number,
-            doctor: apt.doctor || '',
-            notes: apt.notes || '',
-            price: cost,
-            totalPaid,
-            paymentStatus: paymentStatus as Appointment["paymentStatus"],
-            transactions: transactions,
-          } as Appointment;
-      });
-
-      const applyTransactions = (payments: PaymentRow[] = []) => {
-        const normalized = buildPatientTransactions(mapped, payments);
-        const paymentsByAppointment = new Map<string, RecentTransaction[]>();
-
-        normalized.forEach((txn) => {
-          if (!txn.appointmentId) return;
-          const existing = paymentsByAppointment.get(txn.appointmentId) || [];
-          paymentsByAppointment.set(txn.appointmentId, [...existing, txn]);
-        });
-
-        const mergedHistory = mapped.map((apt) => {
-          const transactions = paymentsByAppointment.get(apt.id) || [];
-          const totalPaid = transactions.length > 0
-            ? transactions.reduce((sum, txn) => sum + Number(txn.amount || 0), 0)
-            : Number(apt.totalPaid || 0);
-
-          const price = Number(apt.price || 0);
-          let paymentStatus: Appointment["paymentStatus"] | "over-paid";
-          const oneWeekAgo = new Date();
-          oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-          const aptDateStr = (apt.date || '').split(' ')[0];
-          const appointmentDate = parseBackendDateToLocal(aptDateStr);
-
-          if (totalPaid > price && price > 0) {
-            paymentStatus = 'over-paid';
-          } else if (totalPaid > 0 && totalPaid < price) {
-            paymentStatus = 'half-paid';
-          } else if (totalPaid >= price && price > 0) {
-            paymentStatus = 'paid';
-          } else if (totalPaid === 0 && price > 0 && appointmentDate < oneWeekAgo) {
-            paymentStatus = 'overdue';
-          } else {
-            paymentStatus = 'unpaid';
-          }
-
-          return {
-            ...apt,
-            totalPaid,
-            transactions,
-            paymentStatus: paymentStatus as Appointment["paymentStatus"],
-          } as Appointment;
-        });
-
-        setMockAppointmentHistoryLocal(mergedHistory);
-        setAllTransactions(normalized);
-      };
-
-      applyTransactions();
-
-      // Fetch payments from new payments collection and merge into history
-      if (patient?.id) {
-        fetch(apiUrl(`/api/payments/patient/${patient.id}`), {
-          headers: getAuthHeaders({ "Content-Type": "application/json" }),
-          credentials: 'include',
-        })
-          .then(res => res.json())
-          .then(json => {
-            if (json?.success && Array.isArray(json.data)) {
-              applyTransactions(json.data as PaymentRow[]);
-            }
-          })
-          .catch(err => console.warn('[Payments] Failed to fetch patient payments:', err));
-      }
-    }, [buildPatientTransactions, patientAppointments, patient?.id]);
-
-  const handleUpdatePatient = async () => {
-    console.log("=== UPDATE PATIENT BUTTON CLICKED ===");
-    console.log("Patient ID:", patient.id);
-    console.log("Form data:", formData);
-
-    setIsSaving(true);
-    try {
-      const response = await fetch(apiUrl(`/api/patients/${patient.id}`), { method: "PUT", headers: getAuthHeaders({ "Content-Type": "application/json" }), credentials: 'include', body: JSON.stringify({ ...formData }) });
-
-      const result = await response.json();
-      console.log("Update response:", result);
-      if (result.success) {
-        toast.success("Patient updated successfully");
-        refreshPatients();
-        setIsModified(false);
-        // Update original data to current form data so no changes show until next edit
-        setOriginalLoadedData(formData);
-        return true; // Indicate success
-      } else {
-        toast.error(result.message || "Failed to update patient");
-        return false; // Indicate failure
-      }
-    } catch (err) {
-      console.error("Error updating patient:", err);
-      toast.error("Error connecting to server. Make sure the backend is running on port 3001.");
-      return false; // Indicate failure
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleDeletePatient = () => {
-    onDeletePatient(patient);
-  };
-
-  const handleDeletePayment = async (paymentId: string, appointmentId?: string) => {
-    console.log("=== DELETE PAYMENT STARTED ===");
-    console.log("Payment ID:", paymentId);
-    console.log("Appointment ID:", appointmentId);
-
-    if (paymentId.startsWith("legacy-")) {
-      toast.error("This payment total comes from legacy appointment data and cannot be deleted here.");
-      return;
-    }
-    
-    try {
-      const deleteUrl = apiUrl(`/api/payments/${paymentId}`);
-      console.log("DELETE URL:", deleteUrl);
-      
-      const response = await fetch(deleteUrl, {
-        method: "DELETE",
-        headers: getAuthHeaders({ "Content-Type": "application/json" }),
-        credentials: "include",
-      });
-
-      console.log("Response Status:", response.status);
-      console.log("Response OK:", response.ok);
-      
-      const result = await response.json();
-      console.log("Response JSON:", result);
-      
-      if (result.success) {
-        toast.success("Payment deleted successfully");
-        setAllTransactions((prev) => prev.filter((txn) => txn.id !== paymentId));
-        setMockAppointmentHistoryLocal((prev) => prev.map((apt) => {
-          if (appointmentId && apt.id !== appointmentId) return apt;
-          const newTransactions = apt.transactions?.filter((txn: RecentTransaction) => txn.id !== paymentId) || [];
-          if (appointmentId && apt.id === appointmentId) {
-            return {
-              ...apt,
-              transactions: newTransactions,
-              totalPaid: newTransactions.reduce((sum: number, txn: RecentTransaction) => sum + Number(txn.amount || 0), 0),
-            };
-          }
-          return {
-            ...apt,
-            transactions: newTransactions,
-          };
-        }));
-        console.log("Delete successful, refreshing patients...");
-        // Refresh the appointments to reflect the deletion
-        refreshPatients();
-      } else {
-        console.log("Delete failed with message:", result.message);
-        toast.error(result.message || "Failed to delete payment");
-      }
-    } catch (err) {
-      console.error("Error deleting payment:", err);
-      toast.error("Error deleting payment");
-    }
-  };
-
-  return (
-    <div className="space-y-4">
-      <div className="flex justify-end space-x-2 pb-4 border-b">
-        <Button variant="destructive" size="sm" onClick={handleDeletePatient} disabled={isSaving}>
-          <AlertTriangle className="h-4 w-4 mr-2" />
-          Delete
-        </Button>
-        <Button variant="brand" size="sm" onClick={handleUpdatePatient} disabled={!isModified || isSaving}>
-          <Edit className="h-4 w-4 mr-2" />
-          {isSaving ? "Saving..." : "Update Patient"}
-        </Button>
-      </div>
-
-      <Tabs defaultValue="info" className="w-full">
-  <TabsList className="grid w-full grid-cols-6">
-          <TabsTrigger
-            value="info"
-            className="data-[state=active]:bg-violet-500 data-[state=active]:text-white hover:bg-violet-100"
-          >
-            Personal Info
-          </TabsTrigger>
-          <TabsTrigger
-            value="family"
-            className="data-[state=active]:bg-violet-500 data-[state=active]:text-white hover:bg-violet-100"
-          >
-            Family
-          </TabsTrigger>
-          <TabsTrigger
-            value="records"
-            className="data-[state=active]:bg-violet-500 data-[state=active]:text-white hover:bg-violet-100"
-          >
-            Dental Records
-          </TabsTrigger>
-          <TabsTrigger
-            value="chart"
-            className="data-[state=active]:bg-violet-500 data-[state=active]:text-white hover:bg-violet-100"
-          >
-            Dental Chart
-          </TabsTrigger>
-          <TabsTrigger
-            value="history"
-            className="data-[state=active]:bg-violet-500 data-[state=active]:text-white hover:bg-violet-100"
-          >
-            Appointment History
-          </TabsTrigger>
-          <TabsTrigger
-            value="payments"
-            className="data-[state=active]:bg-violet-500 data-[state=active]:text-white hover:bg-violet-100"
-          >
-            Payments
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="info" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Personal Information</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label>First Name</Label>
-                  <Input value={formData.firstName} onChange={(e) => { setFormData(prev => ({ ...prev, firstName: e.target.value })); setIsModified(true); }} disabled={isSaving} />
-                </div>
-                <div>
-                  <Label>Last Name</Label>
-                  <Input value={formData.lastName} onChange={(e) => { setFormData(prev => ({ ...prev, lastName: e.target.value })); setIsModified(true); }} disabled={isSaving} />
-                </div>
-
-                <div>
-                  <Label>Date of Birth</Label>
-                  <Input type="date" value={formData.dateOfBirth} onChange={(e) => { setFormData(prev => ({ ...prev, dateOfBirth: e.target.value })); setIsModified(true); }} disabled={isSaving} />
-                </div>
-                <div>
-                  <Label>Created At</Label>
-                  <Input type="date" value={formData.createdAt} onChange={(e) => { setFormData(prev => ({ ...prev, createdAt: e.target.value })); setIsModified(true); }} disabled={isSaving} />
-                </div>
-
-                <div>
-                  <Label>Primary Email</Label>
-                  <Input type="email" value={formData.email} onChange={(e) => { setFormData(prev => ({ ...prev, email: e.target.value })); setIsModified(true); }} disabled={isSaving} />
-                </div>
-                <div>
-                  <Label>Primary Phone</Label>
-                  <Input value={formData.phone} onChange={(e) => { setFormData(prev => ({ ...prev, phone: e.target.value })); setIsModified(true); }} disabled={isSaving} />
-                </div>
-                
-                <div>
-                  <Label>Alternate Email (Personal)</Label>
-                  <Input type="email" value={formData.alternateEmail} onChange={(e) => { setFormData(prev => ({ ...prev, alternateEmail: e.target.value })); setIsModified(true); }} disabled={isSaving} placeholder="Personal email for notifications..." />
-                </div>
-                <div>
-                  <Label>Alternate Phone (Personal)</Label>
-                  <Input value={formData.alternatePhone} onChange={(e) => { setFormData(prev => ({ ...prev, alternatePhone: e.target.value })); setIsModified(true); }} disabled={isSaving} placeholder="Personal phone for notifications..." />
-                </div>
-
-                <div>
-                  <Label>Insurance Provider</Label>
-                  <Input value={formData.insurance} onChange={(e) => { setFormData(prev => ({ ...prev, insurance: e.target.value })); setIsModified(true); }} disabled={isSaving} />
-                </div>
-                <div>
-                  <Label>Current Balance</Label>
-                  <Input type="number" value={formData.balance} onChange={(e) => { setFormData(prev => ({ ...prev, balance: parseFloat(e.target.value) || 0 })); setIsModified(true); }} disabled={isSaving} />
-                </div>
-
-                <div className="col-span-2" />
-
-                <div>
-                  <Label>Address</Label>
-                  <Input value={formData.address} onChange={(e) => { setFormData(prev => ({ ...prev, address: e.target.value })); setIsModified(true); }} disabled={isSaving} />
-                </div>
-                <div>
-                  <Label>City</Label>
-                  <Input value={formData.city} onChange={(e) => { setFormData(prev => ({ ...prev, city: e.target.value })); setIsModified(true); }} disabled={isSaving} />
-                </div>
-                <div>
-                  <Label>Zip Code</Label>
-                  <Input value={formData.zipCode} onChange={(e) => { setFormData(prev => ({ ...prev, zipCode: e.target.value })); setIsModified(true); }} disabled={isSaving} />
-                </div>
-                <div>
-                  <Label>Emergency Contact Name</Label>
-                  <Input value={formData.emergencyContact} onChange={(e) => { setFormData(prev => ({ ...prev, emergencyContact: e.target.value })); setIsModified(true); }} disabled={isSaving} />
-                </div>
-                <div>
-                  <Label>Emergency Contact Phone</Label>
-                  <Input value={formData.emergencyPhone} onChange={(e) => { setFormData(prev => ({ ...prev, emergencyPhone: e.target.value })); setIsModified(true); }} disabled={isSaving} />
-                </div>
-
-                <div>
-                  <Label>Status</Label>
-                  <Select value={formData.status} onValueChange={(value) => { setFormData(prev => ({ ...prev, status: value })); setIsModified(true); }} disabled={isSaving}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="active">Active</SelectItem>
-                      <SelectItem value="overdue">Overdue</SelectItem>
-                      <SelectItem value="inactive">Inactive</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="col-span-2">
-                  <Label>General Notes</Label>
-                  <Input value={formData.notes} onChange={(e) => { setFormData(prev => ({ ...prev, notes: e.target.value })); setIsModified(true); }} disabled={isSaving} placeholder="Enter general notes about the patient..." className="h-20" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-        
-        <TabsContent value="family" className="space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg flex items-center">
-                  <UserIcon className="h-5 w-5 mr-2 text-violet-600" />
-                  Family Relationship
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="p-4 rounded-lg bg-gray-50 border">
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-sm font-medium text-gray-500">Account Type</span>
-                    <Badge variant={patient.isPrimary ? "brand" : "outline"}>
-                      {patient.isPrimary ? "Primary Account" : "Dependent Account"}
-                    </Badge>
-                  </div>
-                  
-                  {!patient.isPrimary && parentPatient && (
-                    <div className="mt-4 pt-4 border-t">
-                      <span className="text-sm font-medium text-gray-500 block mb-2">Primary Account Holder</span>
-                      <div className="flex items-center p-3 bg-white rounded border">
-                        <div className="h-10 w-10 rounded-full bg-violet-100 flex items-center justify-center mr-3">
-                          <UserIcon className="h-6 w-6 text-violet-600" />
-                        </div>
-                        <div>
-                          <div className="font-semibold text-gray-900">{parentPatient.name}</div>
-                          <div className="text-xs text-gray-500">Parent / Guardian</div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  
-                  {patient.isPrimary && (
-                    <div className="mt-2 text-sm text-gray-600">
-                      This is the primary account. This patient manages their own appointments and those of their dependents.
-                    </div>
-                  )}
-                </div>
-
-                {patient.isPrimary && (
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-center">
-                      <h3 className="font-medium text-gray-900">Family Members / Dependents</h3>
-                    </div>
-                    
-                    {isLoadingFamily ? (
-                      <div className="text-center py-4">
-                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-violet-600 mx-auto"></div>
-                      </div>
-                    ) : familyMembers.length === 0 ? (
-                      <div className="text-center py-8 bg-gray-50 rounded-lg border-2 border-dashed">
-                        <p className="text-sm text-gray-500">No family members registered.</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        {familyMembers.map((member) => (
-                          <div key={member.id} className="flex items-center justify-between p-3 bg-white border rounded-lg hover:shadow-sm transition-shadow">
-                            <div className="flex items-center">
-                              <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center mr-3">
-                                <UserIcon className="h-5 w-5 text-blue-600" />
-                              </div>
-                              <div>
-                                <div className="text-sm font-semibold">{member.name}</div>
-                                <div className="text-xs text-gray-500">{member.relationship || "Family Member"}</div>
-                              </div>
-                            </div>
-                            <Button variant="ghost" size="sm" onClick={() => {
-                              toast.info(`Viewing ${member.name}'s profile from the main list is recommended.`);
-                            }}>
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg flex items-center">
-                  <Clock className="h-5 w-5 mr-2 text-blue-600" />
-                  Family Shared Info
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-3">
-                  <div className="p-3 bg-blue-50/50 border border-blue-100 rounded-lg">
-                    <p className="text-xs text-blue-700 font-medium mb-1">Inherited Contact Details</p>
-                    <div className="grid grid-cols-2 gap-4 text-sm mt-2">
-                      <div>
-                        <span className="text-gray-500 block">Email</span>
-                        <span className="font-medium">{patient.email}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-500 block">Phone</span>
-                        <span className="font-medium">{patient.phone}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {(formData.alternateEmail || formData.alternatePhone) && (
-                    <div className="p-3 bg-green-50/50 border border-green-100 rounded-lg">
-                      <p className="text-xs text-green-700 font-medium mb-1">Personal Contact Details (Overridden)</p>
-                      <div className="grid grid-cols-2 gap-4 text-sm mt-2">
-                        {formData.alternateEmail && (
-                          <div>
-                            <span className="text-gray-500 block">Personal Email</span>
-                            <span className="font-medium text-green-700">{formData.alternateEmail}</span>
-                          </div>
-                        )}
-                        {formData.alternatePhone && (
-                          <div>
-                            <span className="text-gray-500 block">Personal Phone</span>
-                            <span className="font-medium text-green-700">{formData.alternatePhone}</span>
-                          </div>
-                        )}
-                      </div>
-                      <p className="text-[10px] text-green-600 mt-2 italic">
-                        * These personal details will be used for notifications instead of the primary account details.
-                      </p>
-                    </div>
-                  )}
-                  
-                  <div className="p-3 bg-blue-50/50 border border-blue-100 rounded-lg">
-                    <p className="text-xs text-blue-700 font-medium mb-1">Inherited Address</p>
-                    <p className="text-sm">
-                      {patient.address}<br />
-                      {patient.city}, {patient.zipCode}
-                    </p>
-                  </div>
-
-                  <div className="p-3 bg-blue-50/50 border border-blue-100 rounded-lg">
-                    <p className="text-xs text-blue-700 font-medium mb-1">Family Insurance</p>
-                    <p className="text-sm font-medium">{patient.insurance || "None specified"}</p>
-                  </div>
-                </div>
-                
-                <p className="text-xs text-gray-500 italic">
-                  * Dependents automatically inherit contact, address, and insurance information from the primary account holder.
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="records" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Dental Records & Treatment Notes</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <Label>Allergies</Label>
-                <Input value={formData.allergies} onChange={(e) => { setFormData(prev => ({ ...prev, allergies: e.target.value })); setIsModified(true); }} disabled={isSaving} placeholder="Enter any allergies or sensitivities..." className="h-24" />
-              </div>
-              <div>
-                <Label>Medical History</Label>
-                <Input value={formData.medicalHistory} onChange={(e) => { setFormData(prev => ({ ...prev, medicalHistory: e.target.value })); setIsModified(true); }} disabled={isSaving} placeholder="Enter relevant medical history..." className="h-24" />
-              </div>
-              <div>
-                <Label>Current Treatment Plan</Label>
-                <Input value={formData.treatmentPlan} onChange={(e) => { setFormData(prev => ({ ...prev, treatmentPlan: e.target.value })); setIsModified(true); }} disabled={isSaving} placeholder="Enter treatment plan..." className="h-24" />
-              </div>
-              <div>
-                <Label>Clinical Notes</Label>
-                <Input value={formData.clinicalNotes} onChange={(e) => { setFormData(prev => ({ ...prev, clinicalNotes: e.target.value })); setIsModified(true); }} disabled={isSaving} placeholder="Enter clinical observations and notes..." className="h-24" />
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="chart" className="space-y-4">
-          <DentalChart 
-            records={formData.dentalCharts} 
-            onSaveRecords={(updatedRecords) => {
-              setFormData(prev => ({ ...prev, dentalCharts: updatedRecords }));
-              setIsModified(true);
-            }}
-          />
-        </TabsContent>
-
-        <TabsContent value="history" className="space-y-4">
-          <Card>
-            <CardHeader>
-                <div className="flex justify-between items-center flex-wrap gap-2">
-                    <CardTitle>Appointment History</CardTitle>
-                    <div className="flex items-center space-x-2">
-                        <Select value={historyStatusFilter} onValueChange={setHistoryStatusFilter}>
-                            <SelectTrigger className="w-[140px]">
-                                <SelectValue placeholder="Filter by status" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">All Statuses</SelectItem>
-                                {PAYMENT_STATUSES.map(status => (
-                                    <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
-                                ))}
-                                <SelectItem value="over-paid">Over-paid</SelectItem>
-                            </SelectContent>
-                        </Select>
-                        {/* Hide doctor filter when viewing as a doctor - they only see their own appointments */}
-                        {!doctorFilter && (
-                          <Select value={historyDoctorFilter} onValueChange={setHistoryDoctorFilter}>
-                              <SelectTrigger className="w-[180px]">
-                                  <SelectValue placeholder="Filter by doctor" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                  {uniqueDoctors.map(doctor => (
-                                      <SelectItem key={doctor} value={doctor}>{doctor === 'all' ? 'All Doctors' : doctor}</SelectItem>
-                                  ))}
-                              </SelectContent>
-                          </Select>
-                        )}
-                        <Select value={historyProcedureFilter} onValueChange={setHistoryProcedureFilter}>
-                            <SelectTrigger className="w-[180px]">
-                                <SelectValue placeholder="Filter by procedure" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {uniqueProcedures.map(proc => (
-                                    <SelectItem key={proc} value={proc}>{proc === 'all' ? 'All Procedures' : proc}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                        <PastAppointmentButton
-                          size="sm"
-                          doctorName={doctorFilter}
-                          patientId={patient?.id}
-                          onCreated={() => {
-                            // Optionally refresh patients or history if needed
-                            // refreshPatients is already called in PastAppointmentButton's onBooked
-                          }}
-                        />
-                    </div>
-                </div>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {(filteredHistory.length === 0) ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    {mockAppointmentHistoryLocal.length === 0 ? "No appointments scheduled for this patient yet." : "No appointments match the selected filters."}
-                    </div>
-                ) : (
-                  <div className="space-y-4">
-                    {filteredHistory.map((appointment: HistoryAppointment, index: number) => {
-                      const sortedTransactions = Array.from(new Map((appointment.transactions || []).map((t: RecentTransaction) => [t.id, t])).values())
-                        .sort(comparePaymentTransactionsDesc);
-
-                      const isExpanded = expandedTransactions.has(appointment.id);
-                      const visibleTransactions = isExpanded ? sortedTransactions : sortedTransactions.slice(0, 1);
-
-                      return (
-                        <div key={appointment.id || `apt-${index}`} className="border rounded-lg p-4 space-y-3">
-                          <div className="grid grid-cols-2 gap-x-4 items-start">
-                            <div className="space-y-2">
-                              <div className="flex items-center space-x-3">
-                                <div className="text-sm">
-                                  <div className="font-medium text-base">{appointment.type}</div>
-                                  <div className="text-muted-foreground">{appointment.date}</div>
-                                </div>
-                                <div className="flex gap-2">
-                                  {getAppointmentStatusBadge(String(appointment.status || ''))}
-                                  {getPaymentStatusBadge(String(appointment.paymentStatus || ''))}
-                                </div>
-                              </div>
-                              <div className="text-sm">
-                                <div className="font-medium">{appointment.doctor}</div>
-                                <div className="text-muted-foreground">{appointment.notes}</div>
-                              </div>
-                            </div>
-                            <div className="space-y-2 text-right">
-                              <div>
-                                <div className="text-sm font-medium">Total: ${appointment.price}</div>
-                                <div className="text-sm text-muted-foreground">Paid: ${appointment.totalPaid}</div>
-                                {(appointment.price || 0) - (appointment.totalPaid || 0) > 0 && (
-                                  <div className="text-sm font-medium text-red-600">
-                                    Balance: ${(appointment.price || 0) - (appointment.totalPaid || 0)}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="flex items-center justify-between pt-4 mt-4 border-t">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                const original = patientAppointments.find((x: Appointment) => x.id === appointment.id);
-
-                                if (original && onOpenBookingModal) {
-                                  onOpenBookingModal(original);
-                                }
-                              }}
-                            >
-                              <DollarSign className="h-3 w-3 mr-1" />
-                              Record Payment
-                            </Button>
-                          </div>
-                          {sortedTransactions.length > 0 && (
-                            <div className="border-t pt-3 mt-3">
-                              <div className="flex items-center justify-between mb-2">
-                                <div className="text-sm font-medium">Payment Transactions</div>
-                                {sortedTransactions.length > 1 &&
-                                  <button type="button" className="text-sm text-primary underline-offset-1 hover:underline" onClick={() => toggleExpandTransactions(appointment.id)}>
-                                    {isExpanded ? 'Less' : 'More'}
-                                  </button>
-                                }
-                              </div>
-                              <div className="space-y-2">
-                                {visibleTransactions.map((txn: RecentTransaction) => {
-                                  const isLog = isPaymentLogTransaction(txn);
-
-                                  return (
-                                  <div key={txn.id} className="flex items-center justify-between text-sm bg-gray-50 p-2 rounded">
-                                    <div className="flex items-center space-x-2">
-                                      {getPaymentMethodIcon(txn.method)}
-                                      <div>
-                                        <div className="flex items-center gap-2 font-medium">
-                                          <span>{txn.method} - ${txn.amount}</span>
-                                          {isLog && (
-                                            <Badge variant="outline" className="bg-gray-100 text-gray-700 border-gray-200">
-                                              Log
-                                            </Badge>
-                                          )}
-                                        </div>
-                                        <div className="text-xs text-muted-foreground">{txn.date} • {txn.transactionId}</div>
-                                      </div>
-                                    </div>
-                                    <div className="flex items-center gap-1">
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-8 w-8 p-0"
-                                        onClick={() => handleOpenSnapshot(appointment, txn)}
-                                      >
-                                        <Eye className="h-4 w-4" />
-                                        <span className="sr-only">View Appointment Snapshot</span>
-                                      </Button>
-                                      {!isLegacyPaymentRow(txn) && (
-                                        <>
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            className="h-8 w-8 p-0"
-                                            onClick={() => {
-                                              if (txn.id && patient.id) openEditPaymentModal(txn.id, txn as any, String(patient.id), mockAppointmentHistoryLocal as any);
-                                            }}
-                                          >
-                                            <Edit className="h-4 w-4" />
-                                            <span className="sr-only">Edit Payment</span>
-                                          </Button>
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
-                                            onClick={() => {
-                                              if (txn.id && appointment.id) {
-                                                setPdConfirmTitle("Delete Payment");
-                                                setPdConfirmMessage(`Are you sure you want to delete this payment (${txn.method} - $${txn.amount})?`);
-                                                setPdConfirmAction(() => async () => {
-                                                  await handleDeletePayment(String(txn.id), String(appointment.id));
-                                                });
-                                                setPdIsConfirmOpen(true);
-                                              }
-                                            }}
-                                          >
-                                            <Trash className="h-4 w-4" />
-                                            <span className="sr-only">Delete Payment</span>
-                                          </Button>
-                                        </>
-                                      )}
-                                    </div>
-                                  </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card> 
-        </TabsContent>
-
-        <TabsContent value="payments" className="space-y-4">
-          <Card>
-            <CardHeader>
-                <div className="flex justify-between items-center flex-wrap gap-2">
-                    <CardTitle>Payment History</CardTitle>
-                    <div className="flex flex-col items-end gap-1">
-                            <Button 
-                            size="sm"
-                            onClick={() => {
-                              if (patient.id && patient.name) {
-                                // Open payment modal for adding a new payment (no appointment selected)
-                                openPaymentModal(patient.id, patient.name, mockAppointmentHistoryLocal, null);
-                              }
-                            }}
-                        >
-                            <Plus className="h-4 w-4 mr-2" />
-                            Add Payment
-                        </Button>
-                        <div className="text-sm text-muted-foreground">
-                            Total Transactions: <span className="font-semibold">{filteredTransactions.length}</span>
-                        </div>
-                    </div>
-                </div>
-                <div className="flex items-center space-x-2 pt-2">
-                    <Select value={paymentMethodFilter} onValueChange={setPaymentMethodFilter}>
-                        <SelectTrigger className="w-[180px]">
-                            <SelectValue placeholder="Filter by payment method" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {uniquePaymentMethods.map(method => (
-                                <SelectItem key={method} value={method}>{method === 'all' ? 'All Methods' : method}</SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                    {/* Hide doctor filter when viewing as a doctor */}
-                    {!doctorFilter && (
-                      <Select value={paymentDoctorFilter} onValueChange={setPaymentDoctorFilter}>
-                          <SelectTrigger className="w-[180px]">
-                              <SelectValue placeholder="Filter by doctor" />
-                          </SelectTrigger>
-                          <SelectContent>
-                {uniquePaymentDoctors.map(doctor => (
-                  <SelectItem key={String(doctor)} value={String(doctor)}>{String(doctor) === 'all' ? 'All Doctors' : String(doctor)}</SelectItem>
-                ))}
-                          </SelectContent>
-                      </Select>
-                    )}
-                    <Select value={paymentProcedureFilter} onValueChange={setPaymentProcedureFilter}>
-                        <SelectTrigger className="w-[180px]">
-                            <SelectValue placeholder="Filter by procedure" />
-                        </SelectTrigger>
-                        <SelectContent>
-              {uniquePaymentProcedures.map(proc => (
-                <SelectItem key={String(proc)} value={String(proc)}>{String(proc) === 'all' ? 'All Procedures' : String(proc)}</SelectItem>
-              ))}
-                        </SelectContent>
-                    </Select>
-                </div>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {/* Summary Cards */}
-                <div className="grid grid-cols-3 gap-4 mb-6">
-                  <Card>
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm text-muted-foreground">Total Paid</p>
-                          <p className="text-2xl font-semibold text-green-600">
-                            ${mockAppointmentHistoryLocal.reduce((sum: number, apt: Appointment) => sum + (apt.totalPaid || 0), 0)}
-                          </p>
-                        </div>
-                        <CheckCircle className="h-8 w-8 text-green-600" />
-                      </div>
-                    </CardContent>
-                  </Card>
-                  <Card>
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm text-muted-foreground">Outstanding</p>
-                          <p className="text-2xl font-semibold text-red-600">
-                            ${mockAppointmentHistoryLocal.reduce((sum: number, apt: Appointment) => sum + ((apt.price || 0) - (apt.totalPaid || 0)), 0)}
-                          </p>
-                        </div>
-                        <AlertTriangle className="h-8 w-8 text-red-600" />
-                      </div>
-                    </CardContent>
-                  </Card>
-                  <Card>
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm text-muted-foreground">Total Billed</p>
-                          <p className="text-2xl font-semibold">
-                            ${mockAppointmentHistoryLocal.reduce((sum: number, apt: Appointment) => sum + (apt.price || 0), 0)}
-                          </p>
-                        </div>
-                        <DollarSign className="h-8 w-8 text-gray-600" />
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-
-                {/* Transaction List */}
-                <div className="space-y-3">
-                  <h3 className="font-medium">All Transactions</h3>
-                  {filteredTransactions.length > 0 ? (
-                    filteredTransactions.map((txn) => {
-                      const paymentDisplay = getTransactionPaymentDisplay(txn);
-
-                      return (
-                      <div
-                        key={txn.id}
-                        className={`border rounded-lg p-4 ${paymentDisplay.isLog ? "bg-gray-50/60 border-gray-200 opacity-80" : ""}`}
-                      >
-                        <div className="flex items-start justify-between mb-2">
-                          <div className="flex items-center space-x-3">
-                            <div className="p-2 bg-gray-100 rounded">
-                              {getPaymentMethodIcon(txn.method)}
-                            </div>
-                            <div>
-                              <div className="font-medium">{txn.method}</div>
-                              <div className="text-sm text-muted-foreground">
-                                {txn.appointmentType} - {txn.appointmentDate}
-                              </div>
-                              <div className="text-xs text-muted-foreground mt-1">
-                                Dr: {txn.doctor}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="flex items-start gap-3">
-                            <div className="text-right">
-                              <div className="text-lg font-semibold text-green-600">${txn.amount}</div>
-                              <div className="text-xs text-muted-foreground">{txn.date}</div>
-                            </div>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => handleOpenTransactionSnapshot(txn)}
-                            >
-                              <Eye className="h-4 w-4" />
-                              <span className="sr-only">View Appointment Snapshot</span>
-                            </Button>
-                            {!isLegacyPaymentRow(txn) && (
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8"
-                                  >
-                                    <MoreVertical className="h-4 w-4" />
-                                  </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                  <DropdownMenuItem 
-                                    onClick={() => {
-                                      if (patient.id && patient.name) {
-                                        if (txn.id && patient.id) openEditPaymentModal(String(txn.id), txn as any, String(patient.id), mockAppointmentHistoryLocal as Appointment[]);
-                                      }
-                                    }}
-                                  >
-                                    <Edit className="h-4 w-4 mr-2" />
-                                    Edit
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem 
-                                    onClick={() => {
-                                      setPdConfirmTitle("Delete Payment");
-                                      setPdConfirmMessage("Are you sure you want to delete this payment?");
-                                      setPdConfirmAction(() => async () => {
-                                        if (txn.id) await handleDeletePayment(String(txn.id), txn.appointmentId);
-                                      });
-                                      setPdIsConfirmOpen(true);
-                                    }}
-                                    className="text-red-600"
-                                  >
-                                    <Trash className="h-4 w-4 mr-2" />
-                                    Delete
-                                  </DropdownMenuItem>
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex items-center justify-between text-sm pt-2 border-t">
-                          <div className="text-muted-foreground">
-                            ID: {txn.transactionId}
-                          </div>
-                          <Badge variant="outline" className={paymentDisplay.className}>
-                            {paymentDisplay.label}
-                          </Badge>
-                        </div>
-                        {txn.notes && (
-                          <div className="text-sm text-muted-foreground mt-2 italic">
-                            {txn.notes}
-                          </div>
-                        )}
-                      </div>
-                      );
-                    })
-                  ) : (
-                    <div className="text-center py-8 text-muted-foreground">
-                      No payment transactions found for the selected filters.
-                    </div>
-                  )}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-      {/* Record Payment Dialog is now a separate component */}
-      <ConfirmDialog
-        open={pdIsConfirmOpen}
-        onOpenChange={(open) => {
-          if (!open) setPdConfirmAction(null);
-          setPdIsConfirmOpen(open);
-        }}
-        title={pdConfirmTitle || "Confirm"}
-        message={pdConfirmMessage || "Are you sure?"}
-        loading={pdConfirmLoading}
-        onConfirm={async () => {
-          if (pdConfirmAction) {
-            try {
-              setPdConfirmLoading(true);
-              await pdConfirmAction();
-            } finally {
-              setPdConfirmLoading(false);
-              setPdConfirmAction(null);
-            }
-          }
-        }}
-        confirmLabel="Yes"
-        cancelLabel="No"
-      />
-
-      {/* Appointment Snapshot Dialog */}
-      <AppointmentHistoryView
-        open={isSnapshotOpen}
-        onOpenChange={setIsSnapshotOpen}
-        appointmentSnapshot={selectedSnapshot}
-        logDate={snapshotLogDate}
-      />
-    </div>
-  );
-});
-PatientDetails.displayName = "PatientDetails";

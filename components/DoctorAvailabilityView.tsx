@@ -30,6 +30,8 @@ import ViewMode from "@/components/viewMode";
 import { toast } from "sonner";
 import { getCachedPublicBlockingAppointments } from "@/lib/publicBookingCache";
 import { isCartAppointmentStatus, isReservedAppointmentStatus } from "@/lib/appointment-status";
+import AppointmentHistoryView from "@/components/AppointmentHistoryView";
+import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 
 interface DoctorAvailabilityViewProps {
   doctorName: string;
@@ -46,14 +48,25 @@ export function DoctorAvailabilityView({
 }: DoctorAvailabilityViewProps) {
   const router = useRouter();
   const { user } = useAuth();
-  const { doctors, isLoadingDoctors } = useDoctors(undefined, { publicBooking: portal === "public" && !user?.role });
-  const { updateAppointment, openEditModal, openPatientBookingModal } = useAppointmentModal();
+  const { doctors, isLoadingDoctors } = useDoctors(undefined, { publicBooking: portal === "public" });
+  const { updateAppointment, openEditModal, openPatientBookingModal, isEditModalOpen, selectedAppointment } = useAppointmentModal();
   
   const [viewMode, setViewMode] = useState<ViewMode>("day");
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isLoadingAvailability, setIsLoadingAvailability] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const {
+    isAppointmentHistoryOpen,
+    setIsAppointmentHistoryOpen,
+    appointmentSnapshot,
+    appointmentSnapshotId,
+    appointmentSnapshotLogDate,
+    appointmentSnapshotIsHistorical,
+    handleViewCurrentSnapshot,
+    handleViewAppointment,
+    resetAppointmentSnapshot,
+  } = useNotificationAppointmentSnapshot(appointments);
 
   const doctor = useMemo(() => {
     return doctors.find(d => d.name === doctorName);
@@ -72,6 +85,18 @@ export function DoctorAvailabilityView({
 
     openPatientBookingModal(date, time, doctorName);
   }, [doctorName, onBookSlot, openPatientBookingModal]);
+  const handleOpenSnapshotAppointment = useCallback((appointmentId: string) => {
+    const appointment = appointments.find((item) => String(item.id) === String(appointmentId));
+    setIsAppointmentHistoryOpen(false);
+    resetAppointmentSnapshot();
+    if (appointment) openEditModal(appointment, portal === "patient");
+  }, [appointments, openEditModal, portal, resetAppointmentSnapshot, setIsAppointmentHistoryOpen]);
+  const isSnapshotAppointmentOpen = Boolean(
+    isEditModalOpen &&
+    appointmentSnapshotId &&
+    selectedAppointment?.id &&
+    String(selectedAppointment.id) === String(appointmentSnapshotId)
+  );
 
   const isOwnAppointment = useCallback((apt: Appointment | undefined): boolean => {
     if (!apt) return false;
@@ -313,7 +338,7 @@ export function DoctorAvailabilityView({
               setIsProcessing(false);
             }
           }
-          openEditModal(slot.appointment, true);
+          handleViewAppointment(slot.appointment);
           return;
         }
       }
@@ -338,13 +363,13 @@ export function DoctorAvailabilityView({
               setIsProcessing(false);
             }
           }
-          openEditModal(slot.appointment, true);
+          handleViewAppointment(slot.appointment);
         } else {
           toast.error("This appointment belongs to another patient");
         }
       } else {
         // Admin can view all appointments
-        openEditModal(slot.appointment);
+        handleViewAppointment(slot.appointment);
       }
     }
   };
@@ -446,7 +471,7 @@ export function DoctorAvailabilityView({
                                       <button
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          openEditModal(apt);
+                                          handleViewAppointment(apt);
                                         }}
                                         className="ml-2 p-1 hover:bg-emerald-600 rounded transition-colors"
                                         title="View appointment"
@@ -853,6 +878,19 @@ export function DoctorAvailabilityView({
           border-radius: 10px;
         }
       `}</style>
+      <AppointmentHistoryView
+        open={isAppointmentHistoryOpen}
+        onOpenChange={(open) => {
+          setIsAppointmentHistoryOpen(open);
+          if (!open) resetAppointmentSnapshot();
+        }}
+        appointmentSnapshot={appointmentSnapshot}
+        logDate={appointmentSnapshotLogDate}
+        onViewCurrent={handleViewCurrentSnapshot}
+        onOpenAppointment={handleOpenSnapshotAppointment}
+        isAppointmentOpen={isSnapshotAppointmentOpen}
+        isHistorical={appointmentSnapshotIsHistorical}
+      />
     </div>
   );
 }

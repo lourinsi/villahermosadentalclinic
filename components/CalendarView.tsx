@@ -34,10 +34,12 @@ import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
 import { AllAppointmentsView } from "./AllAppointmentsView";
 import { Avatar, AvatarImage, AvatarFallback } from "./ui/avatar";
 import CalendarPopover from "./CalendarPopover";
+import AppointmentHistoryView from "./AppointmentHistoryView";
 
 import ViewMode from "./viewMode";
 import { useRouter, useSearchParams } from 'next/navigation';
 import { isReservedAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
+import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 
 // Map numeric keys to readable UI labels using APPOINTMENT_STATUSES
 // This will be moved inside the component since we need the hook
@@ -59,6 +61,7 @@ interface CalendarViewProps {
   isLoadingOverride?: boolean;
   onCreateAppointment?: (date?: Date, time?: string, doctorName?: string) => void;
   onOpenAppointment?: (appointment: Appointment) => void;
+  onOpenSnapshotAppointment?: (appointment: Appointment) => void;
 }
 
 export function CalendarView({
@@ -69,6 +72,7 @@ export function CalendarView({
   isLoadingOverride,
   onCreateAppointment,
   onOpenAppointment,
+  onOpenSnapshotAppointment,
 }: CalendarViewProps) {
   const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -92,15 +96,28 @@ export function CalendarView({
     appointments, 
     deleteAppointment, 
     refreshAppointments, 
-    openEditModal
+    openEditModal,
+    isEditModalOpen,
+    selectedAppointment
   } = useAppointmentModal();
   const displayedAppointments = appointmentsOverride ?? appointments;
   const usesExternalAppointments = appointmentsOverride !== undefined;
+  const {
+    isAppointmentHistoryOpen,
+    setIsAppointmentHistoryOpen,
+    appointmentSnapshot,
+    appointmentSnapshotId,
+    appointmentSnapshotLogDate,
+    appointmentSnapshotIsHistorical,
+    handleViewCurrentSnapshot,
+    handleViewAppointment,
+    resetAppointmentSnapshot,
+  } = useNotificationAppointmentSnapshot(displayedAppointments);
   
 
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [appointmentToDelete, setAppointmentToDelete] = useState<string | null>(null);
-  const { doctors, isLoadingDoctors } = useDoctors(undefined, { publicBooking: portal === 'public' && !user?.role });
+  const { doctors, isLoadingDoctors } = useDoctors(undefined, { publicBooking: portal === 'public' });
 
   const handleCreateAppointment = useCallback(
     (date?: Date, time?: string, doctorName?: string) => {
@@ -121,9 +138,30 @@ export function CalendarView({
         return;
       }
 
-      openEditModal(appointment);
+      handleViewAppointment(appointment);
     },
-    [onOpenAppointment, openEditModal]
+    [onOpenAppointment, handleViewAppointment]
+  );
+  const handleOpenSnapshotAppointment = useCallback((appointmentId: string, appointmentSnapshot?: any) => {
+    const appointment =
+      displayedAppointments.find((item) => String(item.id) === String(appointmentId)) ||
+      appointmentSnapshot;
+    setIsAppointmentHistoryOpen(false);
+    resetAppointmentSnapshot();
+    if (!appointment) return;
+
+    if (onOpenSnapshotAppointment) {
+      onOpenSnapshotAppointment(appointment);
+      return;
+    }
+
+    openEditModal(appointment);
+  }, [displayedAppointments, onOpenSnapshotAppointment, openEditModal, resetAppointmentSnapshot, setIsAppointmentHistoryOpen]);
+  const isSnapshotAppointmentOpen = Boolean(
+    isEditModalOpen &&
+    appointmentSnapshotId &&
+    selectedAppointment?.id &&
+    String(selectedAppointment.id) === String(appointmentSnapshotId)
   );
   
   // For doctor portal, automatically filter to logged-in doctor
@@ -1105,7 +1143,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                     )}
                     {viewMode === "all" && (
                       <div className="p-4">
-                        <AllAppointmentsView appointments={filteredAppointments} isLoading={isLoadingView} />
+                        <AllAppointmentsView appointments={filteredAppointments} isLoading={isLoadingView} onOpenAppointment={handleOpenAppointment} />
                       </div>
                     )}
                   </>
@@ -1149,6 +1187,19 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <AppointmentHistoryView
+        open={isAppointmentHistoryOpen}
+        onOpenChange={(open) => {
+          setIsAppointmentHistoryOpen(open);
+          if (!open) resetAppointmentSnapshot();
+        }}
+        appointmentSnapshot={appointmentSnapshot}
+        logDate={appointmentSnapshotLogDate}
+        onViewCurrent={handleViewCurrentSnapshot}
+        onOpenAppointment={handleOpenSnapshotAppointment}
+        isAppointmentOpen={isSnapshotAppointmentOpen}
+        isHistorical={appointmentSnapshotIsHistorical}
+      />
     </div>
   );
 }

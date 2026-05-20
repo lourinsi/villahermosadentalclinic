@@ -13,6 +13,8 @@ import { parseBackendDateToLocal } from "../lib/utils";
 import BookingModalWrapper from "./BookingModalWrapper";
 import { NextAppointmentCard } from "./NextAppointmentCard";
 import { isCartAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
+import AppointmentHistoryView from "./AppointmentHistoryView";
+import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 
 const revenueData = [
   { month: "Jan", revenue: 42000, appointments: 180 },
@@ -33,6 +35,17 @@ export function Dashboard({ portal }: { portal?: string }) {
   const [isLoadingView, setIsLoadingView] = useState(false);
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
+  const {
+    isAppointmentHistoryOpen,
+    setIsAppointmentHistoryOpen,
+    appointmentSnapshot,
+    appointmentSnapshotId,
+    appointmentSnapshotLogDate,
+    appointmentSnapshotIsHistorical,
+    handleViewCurrentSnapshot,
+    handleViewAppointment,
+    resetAppointmentSnapshot,
+  } = useNotificationAppointmentSnapshot(appointments);
 
   // Fetch total patients from backend
   useEffect(() => {
@@ -196,6 +209,21 @@ export function Dashboard({ portal }: { portal?: string }) {
     value: Math.round(((appointmentTypeCounts[name] as number) / totalAppointments) * 100),
     color: colorPalette[idx % colorPalette.length]
   }));
+  const handleOpenSnapshotAppointment = (appointmentId: string) => {
+    const appointment = appointments.find((item: Appointment) => String(item.id) === String(appointmentId));
+    setIsAppointmentHistoryOpen(false);
+    resetAppointmentSnapshot();
+    if (appointment) {
+      setSelectedAppointment(appointment);
+      setBookingModalOpen(true);
+    }
+  };
+  const isSnapshotAppointmentOpen = Boolean(
+    bookingModalOpen &&
+    appointmentSnapshotId &&
+    selectedAppointment?.id &&
+    String(selectedAppointment.id) === String(appointmentSnapshotId)
+  );
 
   return (
     <div className="p-6 space-y-6">
@@ -408,8 +436,7 @@ export function Dashboard({ portal }: { portal?: string }) {
                     key={appointment.id}
                     className="group flex items-center justify-between p-4 hover:bg-violet-50/50 transition-all duration-300 cursor-pointer"
                     onClick={() => {
-                      setSelectedAppointment(appointment);
-                      setBookingModalOpen(true);
+                      handleViewAppointment(appointment);
                     }}
                   >
                     <div className="flex items-center space-x-4">
@@ -554,13 +581,25 @@ export function Dashboard({ portal }: { portal?: string }) {
             role="admin"
             sameTimeAppointments={sameTimeAppointments}
             onViewDetails={(apt) => {
-              setSelectedAppointment(apt);
-              setBookingModalOpen(true);
+              handleViewAppointment(apt);
             }}
             showHeader={true}
           />
         )}
       </div>
+      <AppointmentHistoryView
+        open={isAppointmentHistoryOpen}
+        onOpenChange={(open) => {
+          setIsAppointmentHistoryOpen(open);
+          if (!open) resetAppointmentSnapshot();
+        }}
+        appointmentSnapshot={appointmentSnapshot}
+        logDate={appointmentSnapshotLogDate}
+        onViewCurrent={handleViewCurrentSnapshot}
+        onOpenAppointment={handleOpenSnapshotAppointment}
+        isAppointmentOpen={isSnapshotAppointmentOpen}
+        isHistorical={appointmentSnapshotIsHistorical}
+      />
 
       {/* Booking Modal */}
       <BookingModalWrapper

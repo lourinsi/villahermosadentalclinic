@@ -16,6 +16,8 @@ import { RecentSchedule } from "./RecentSchedule";
 import { VisitStatistics } from "./VisitStatistics";
 import { QuickActions } from "./QuickActions";
 import { isCartAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
+import AppointmentHistoryView from "./AppointmentHistoryView";
+import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 
 const revenueData = [
   { month: "Jan", revenue: 42000, appointments: 180 },
@@ -34,11 +36,22 @@ interface DashboardProps {
 
 export function Dashboard({ portal }: DashboardProps) {
   const router = useRouter();
-  const { openCreateModal, openAddPatientModal, appointments, refreshTrigger, openEditModal } = useAppointmentModal();
+  const { openCreateModal, openAddPatientModal, appointments, refreshTrigger, openEditModal, isEditModalOpen, selectedAppointment } = useAppointmentModal();
   const { user } = useAuth();
   const [viewMode, setViewMode] = useState<"day" | "week" | "month">("day");
   const [totalPatients, setTotalPatients] = useState(0);
   const [isLoadingView, setIsLoadingView] = useState(false);
+  const {
+    isAppointmentHistoryOpen,
+    setIsAppointmentHistoryOpen,
+    appointmentSnapshot,
+    appointmentSnapshotId,
+    appointmentSnapshotLogDate,
+    appointmentSnapshotIsHistorical,
+    handleViewCurrentSnapshot,
+    handleViewAppointment,
+    resetAppointmentSnapshot,
+  } = useNotificationAppointmentSnapshot(appointments);
 
   const handleViewAll = () => {
     if (portal === "patient") {
@@ -211,6 +224,18 @@ export function Dashboard({ portal }: DashboardProps) {
   };
 
   const headerText = getHeaderText();
+  const handleOpenSnapshotAppointment = (appointmentId: string) => {
+    const appointment = appointments.find((item: Appointment) => String(item.id) === String(appointmentId));
+    setIsAppointmentHistoryOpen(false);
+    resetAppointmentSnapshot();
+    if (appointment) openEditModal(appointment, portal === "patient");
+  };
+  const isSnapshotAppointmentOpen = Boolean(
+    isEditModalOpen &&
+    appointmentSnapshotId &&
+    selectedAppointment?.id &&
+    String(selectedAppointment.id) === String(appointmentSnapshotId)
+  );
 
   return (
     <div className="p-8 space-y-10 bg-[#f8fafc] min-h-screen">
@@ -256,7 +281,7 @@ export function Dashboard({ portal }: DashboardProps) {
         appointment={nextAppointment}
         role={portal}
         onViewDetails={(apt: Appointment) => {
-          openEditModal(apt);
+          handleViewAppointment(apt);
         }}
         onViewAll={handleViewAll}
         showHeader={true}
@@ -272,7 +297,7 @@ export function Dashboard({ portal }: DashboardProps) {
           isLoadingView={isLoadingView}
           viewTitle={getViewTitle()}
           onAppointmentClick={(apt: Appointment) => {
-            openEditModal(apt);
+            handleViewAppointment(apt);
           }}
           onViewAll={handleViewAll}
         />
@@ -293,6 +318,19 @@ export function Dashboard({ portal }: DashboardProps) {
 
       {/* Revenue Overview (Full Width, Admin/Doctor Only) */}
       <RevenueOverview portal={portal} revenueData={revenueData} />
+      <AppointmentHistoryView
+        open={isAppointmentHistoryOpen}
+        onOpenChange={(open) => {
+          setIsAppointmentHistoryOpen(open);
+          if (!open) resetAppointmentSnapshot();
+        }}
+        appointmentSnapshot={appointmentSnapshot}
+        logDate={appointmentSnapshotLogDate}
+        onViewCurrent={handleViewCurrentSnapshot}
+        onOpenAppointment={handleOpenSnapshotAppointment}
+        isAppointmentOpen={isSnapshotAppointmentOpen}
+        isHistorical={appointmentSnapshotIsHistorical}
+      />
     </div>
   );
 }

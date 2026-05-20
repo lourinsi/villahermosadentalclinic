@@ -5,6 +5,10 @@ import {
   normalizeAppointmentStatus,
 } from "@/lib/appointment-status";
 import { getAppointmentPrice } from "@/lib/appointment-types";
+import {
+  isPastAppointmentDate,
+  normalizePastAppointmentStatus,
+} from "@/components/sharedBookingLogic";
 
 const PUBLIC_BOOKING_PATIENTS_KEY = "villahermosa.publicBookingPatients";
 const PUBLIC_BOOKING_APPOINTMENTS_KEY = "villahermosa.publicBookingAppointments";
@@ -38,6 +42,27 @@ const emitPublicBookingCacheChanged = () => {
   if (typeof window === "undefined") return;
 
   window.dispatchEvent(new CustomEvent(PUBLIC_BOOKING_CACHE_EVENT));
+};
+
+const normalizePublicBookingAppointment = (
+  appointment: PublicBookingAppointment,
+  now: Date = new Date()
+): PublicBookingAppointment => {
+  const status =
+    normalizeAppointmentStatus(appointment.status) || CART_APPOINTMENT_STATUS;
+  const shouldRestrictPastStatus = isPastAppointmentDate(appointment.date, now);
+  const nextStatus = shouldRestrictPastStatus
+    ? normalizePastAppointmentStatus(status)
+    : status;
+
+  return {
+    ...appointment,
+    status: nextStatus,
+    updatedAt:
+      nextStatus !== status
+        ? new Date().toISOString()
+        : appointment.updatedAt,
+  };
 };
 
 const normalizePublicPatient = (patient: PublicBookingPatient): PublicBookingPatient => ({
@@ -111,12 +136,33 @@ export function getCachedPublicBookingAppointments(): PublicBookingAppointment[]
     const raw = window.localStorage.getItem(PUBLIC_BOOKING_APPOINTMENTS_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed)
-      ? parsed.map((appointment) => ({
-          ...appointment,
-          status: normalizeAppointmentStatus(appointment.status) || CART_APPOINTMENT_STATUS,
-        }))
-      : [];
+    if (!Array.isArray(parsed)) return [];
+
+    const now = new Date();
+    let changed = false;
+    const appointments = parsed.map((appointment) => {
+      const normalized = normalizePublicBookingAppointment(
+        appointment as PublicBookingAppointment,
+        now
+      );
+      if (
+        normalizeAppointmentStatus(appointment.status) !==
+          normalizeAppointmentStatus(normalized.status) ||
+        appointment.updatedAt !== normalized.updatedAt
+      ) {
+        changed = true;
+      }
+      return normalized;
+    });
+
+    if (changed) {
+      window.localStorage.setItem(
+        PUBLIC_BOOKING_APPOINTMENTS_KEY,
+        JSON.stringify(appointments)
+      );
+    }
+
+    return appointments;
   } catch {
     return [];
   }
@@ -128,7 +174,7 @@ export function cachePublicBookingAppointment(
   if (typeof window === "undefined" || !appointment?.id) return undefined;
 
   const existing = getCachedPublicBookingAppointments();
-  const normalized = {
+  const normalized = normalizePublicBookingAppointment({
     ...appointment,
     id: String(appointment.id),
     patientId: String(appointment.patientId),
@@ -136,7 +182,7 @@ export function cachePublicBookingAppointment(
     paymentStatus: appointment.paymentStatus || "unpaid",
     cachedAt: appointment.cachedAt || new Date().toISOString(),
     isPublicCache: true,
-  };
+  });
   const next = [
     normalized,
     ...existing.filter((cached) => String(cached.id) !== String(normalized.id)),
@@ -172,7 +218,7 @@ export function getCachedPublicCartAppointments() {
 export function getCachedPublicCalendarAppointments() {
   return getCachedPublicBookingAppointments().filter((appointment) => {
     const status = String(appointment.status || "").toLowerCase();
-    return status === "scheduled" || status === "reserved";
+    return status === "scheduled" || status === "reserved" || status === "tbd";
   });
 }
 

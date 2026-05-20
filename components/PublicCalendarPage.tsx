@@ -13,7 +13,7 @@ import {
   type PublicBookingAppointment,
 } from "@/lib/publicBookingCache";
 
-const PUBLIC_CALENDAR_STATUSES = ["reserved", "scheduled"];
+const PUBLIC_CALENDAR_STATUSES = ["reserved", "scheduled", "tbd"];
 
 export default function PublicCalendarPage() {
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
@@ -62,7 +62,7 @@ export default function PublicCalendarPage() {
               defaultStatusFilter={PUBLIC_CALENDAR_STATUSES}
               appointmentsOverride={appointments as any}
               onCreateAppointment={openBookingModal}
-              onOpenAppointment={openCachedAppointment as any}
+              onOpenSnapshotAppointment={openCachedAppointment as any}
             />
           </Suspense>
         </div>

@@ -24,12 +24,14 @@ import useSharedBookingLogic, {
   PAST_APPOINTMENT_STATUS_VALUES,
   findNextAvailableBookingSlot,
   formatBookingDoctorName as formatDoctorName,
+  formatBookingHistoryStatusLabel,
   getBookingAppointmentTypeIndex as getAppointmentTypeIndex,
   getBookingAppointmentStatusConfig,
   getBookingAutoPreselectConfig,
   getBookingActor,
   getBookingCancellationConfig,
   getBookingConflictWarnings,
+  getBookingHistoryPaymentStatusChange,
   getBookingCreateDate,
   getBookingCreateTime,
   getBookingDefaultDate,
@@ -44,9 +46,11 @@ import useSharedBookingLogic, {
   getProjectedBookingStatus,
   getProjectedPaymentStatus,
   isCartAppointmentStatus,
+  isSignificantBookingPaymentStatus,
   isPastAppointmentDate,
   normalizeBookingDoctorName as normalizeDoctorName,
   normalizePastAppointmentStatus,
+  shouldShowBookingHistoryLog,
   toBookingPatientOption as toPatientOption,
 } from './sharedBookingLogic';
 import AppointmentHistoryView from "./AppointmentHistoryView";
@@ -100,7 +104,7 @@ const getMergedBookingLogs = (appointmentLogs: any[], paymentLogs: any[]): Booki
     mergedLogs.push(current);
   }
 
-  return mergedLogs;
+  return mergedLogs.filter(shouldShowBookingHistoryLog);
 };
 
 const isInitialHistoryLog = (log: BookingHistoryLog) =>
@@ -114,25 +118,70 @@ const formatHistoryTimestamp = (changedAt: string) =>
     minute: "2-digit",
   });
 
-const formatHistorySchedule = (date?: string, time?: string) => {
-  if (!date && !time) return "";
-  const dateLabel = date
-    ? new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric" })
-    : "Same date";
-  return `${dateLabel}${time ? ` at ${formatTimeTo12h(time)}` : ""}`;
+const getHistoryDoctorChange = (log: BookingHistoryLog) => {
+  const previousDoctor = normalizeDoctorName(log.previousState?.doctor) ? formatDoctorName(log.previousState?.doctor) : "";
+  const nextDoctor = normalizeDoctorName(log.newState?.doctor) ? formatDoctorName(log.newState?.doctor) : "";
+
+  return {
+    previousDoctor,
+    nextDoctor,
+    changed: Boolean(nextDoctor && normalizeDoctorName(log.newState?.doctor) !== normalizeDoctorName(log.previousState?.doctor)),
+  };
 };
 
-const getHistoryBadge = (log: BookingHistoryLog) => {
-  if (log.amount !== undefined) return `₱${Number(log.amount || 0).toLocaleString()}`;
-  if (isInitialHistoryLog(log)) return "New";
-  return log.newState?.status || log.previousState?.status || "Updated";
+const getHistoryPaymentAmount = (log: BookingHistoryLog) => Number(log.amount || 0);
+
+const getHistoryActor = (log: BookingHistoryLog) => log.changedByName || log.changedBy || "";
+
+type HistoryBadge = {
+  label: string;
+  tone: "appointment" | "payment" | "amount";
+};
+
+const getHistoryBadges = (log: BookingHistoryLog): HistoryBadge[] => {
+  const badges: HistoryBadge[] = [];
+  const paymentStatusChange = getBookingHistoryPaymentStatusChange(log);
+  const appointmentStatus = log.newState?.status || log.previousState?.status || (isInitialHistoryLog(log) ? "new" : "");
+
+  if (appointmentStatus) {
+    badges.push({
+      label: formatBookingHistoryStatusLabel(appointmentStatus),
+      tone: "appointment",
+    });
+  }
+
+  const paymentStatus = paymentStatusChange.nextStatus || log.paymentStatus;
+  if (isSignificantBookingPaymentStatus(paymentStatus)) {
+    badges.push({
+      label: formatBookingHistoryStatusLabel(paymentStatus),
+      tone: "payment",
+    });
+  }
+
+  const amount = getHistoryPaymentAmount(log);
+  if (amount > 0) {
+    badges.push({
+      label: `PHP ${amount.toLocaleString()}`,
+      tone: "amount",
+    });
+  }
+
+  return badges;
+};
+
+const getHistoryBadgeClass = (tone: HistoryBadge["tone"]) => {
+  if (tone === "payment") return "bg-emerald-100 text-emerald-700";
+  if (tone === "amount") return "bg-green-100 text-green-700";
+  return "bg-blue-100 text-blue-700";
 };
 
 const getHistoryTitle = (log: BookingHistoryLog) => {
-  if (log.logType === "payment") {
-    return `Payment of ₱${Number(log.amount || 0).toLocaleString()}`;
-  }
+  const paymentStatusChange = getBookingHistoryPaymentStatusChange(log);
+  const amount = getHistoryPaymentAmount(log);
 
+  if (log.logType === "payment") {
+    return amount > 0 ? "Payment recorded" : "Payment status updated";
+  }
   if (isInitialHistoryLog(log)) return "Appointment created";
 
   if (
@@ -142,41 +191,47 @@ const getHistoryTitle = (log: BookingHistoryLog) => {
     return "Schedule updated";
   }
 
-  if (log.newState?.status && log.newState.status !== log.previousState?.status) {
-    return "Status updated";
-  }
-
-  if (log.newState?.paymentStatus && log.newState.paymentStatus !== log.previousState?.paymentStatus) {
-    return "Payment status updated";
-  }
+  if (log.newState?.status && log.newState.status !== log.previousState?.status) return "Status updated";
+  if (amount > 0) return "Payment recorded";
+  if (paymentStatusChange.changed) return "Payment status updated";
+  if (getHistoryDoctorChange(log).changed) return "Doctor updated";
 
   return "Appointment updated";
 };
 
 const getHistoryDetail = (log: BookingHistoryLog) => {
-  if (log.logType === "payment") {
-    const balance = log.newBalance !== undefined ? `Balance ₱${Number(log.newBalance || 0).toLocaleString()}` : "Balance updated";
-    return `${log.paymentMethod || "Payment"} • ${balance}`;
-  }
-
-  if (
+  const paymentStatusChange = getBookingHistoryPaymentStatusChange(log);
+  const amount = getHistoryPaymentAmount(log);
+  const scheduleChanged = Boolean(
     (log.newState?.date && log.newState.date !== log.previousState?.date) ||
     (log.newState?.time && log.newState.time !== log.previousState?.time)
-  ) {
-    const previousSchedule = formatHistorySchedule(log.previousState?.date, log.previousState?.time);
-    const nextSchedule = formatHistorySchedule(log.newState?.date || log.previousState?.date, log.newState?.time || log.previousState?.time);
-    return `${previousSchedule} → ${nextSchedule}`;
+  );
+  const doctorChanged = getHistoryDoctorChange(log).changed;
+  const statusChanged = Boolean(log.newState?.status && log.newState.status !== log.previousState?.status);
+
+  if (log.logType === "payment") {
+    if (amount > 0) return "Payment recorded";
+    if (paymentStatusChange.changed) return "Payment status updated";
+    return "Payment updated";
   }
 
-  if (log.newState?.status && log.newState.status !== log.previousState?.status) {
-    return `${log.previousState?.status || "none"} → ${log.newState.status}`;
+  if (isInitialHistoryLog(log)) {
+    const actor = getHistoryActor(log);
+    if (amount > 0) return "Payment recorded";
+    return actor ? `Created by ${actor}` : "Appointment record created";
   }
 
-  if (log.newState?.paymentStatus && log.newState.paymentStatus !== log.previousState?.paymentStatus) {
-    return `${(log.previousState?.paymentStatus || "none").replace(/-/g, " ")} → ${log.newState.paymentStatus.replace(/-/g, " ")}`;
-  }
+  const details: string[] = [];
+  if (scheduleChanged) details.push("Schedule changed");
+  if (doctorChanged) details.push("Doctor changed");
+  if (statusChanged) details.push("Appointment status updated");
+  if (paymentStatusChange.changed) details.push("Payment status updated");
+  if (amount > 0) details.push("Payment recorded");
 
-  return log.changedByName || log.changedBy ? `Updated by ${log.changedByName || log.changedBy}` : "Details were updated";
+  if (details.length > 0) return details.slice(0, 2).join(" - ");
+
+  const actor = getHistoryActor(log);
+  return actor ? `Updated by ${actor}` : "Details were updated";
 };
 
 interface BookingModalProps {
@@ -196,7 +251,7 @@ interface BookingModalProps {
 
 export default function BookingModal({ open, onOpenChange, defaultDate, defaultTime, doctorName, defaultPatientId, onBooked, onDeleted, appointmentToEdit, title, bookingMode = "standard", appointmentCreationMode = "standard" }: BookingModalProps) {
   const { user } = useAuth();
-  const { doctors } = useDoctors(undefined, { publicBooking: bookingMode === "public" && !user?.role });
+  const { doctors } = useDoctors(undefined, { publicBooking: bookingMode === "public" });
   const { addAppointment, updateAppointment, isPaymentFlow, openAddPatientModal, lastAddedPatient, lastAddedPatientAt } = useAppointmentModal();
   const { statuses: appointmentStatuses } = useAppointmentStatuses();
   const { statuses: paymentStatuses } = usePaymentStatuses();
@@ -257,6 +312,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   const {
     isPublicBookingMode,
+    isStaffBookingMode,
     canCreatePatients,
     canManagePricing,
     canManageStatuses,
@@ -265,6 +321,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   } = getBookingActor({
     userRole: user?.role,
     bookingMode,
+    isEditing: Boolean(appointmentToEdit),
   });
   const publicBlockingAppointments = useMemo(
     () => (isPublicBookingMode ? getCachedPublicBlockingAppointments() : []),
@@ -1295,7 +1352,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     });
 
   // Derived display values for schedule block
-  const scheduleDoctorName = appointmentToEdit?.doctor || selectedDoctor || doctorName;
+  const scheduleDoctorName = selectedDoctor || appointmentToEdit?.doctor || doctorName;
   const displayDoctor = formatDoctorName(scheduleDoctorName);
   const showDoctorStep = !isDoctorSelectionLocked;
   const visibleBookingSteps: Array<{ id: ImprovedBookingStep; label: string; icon: string }> = [
@@ -1559,7 +1616,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           : await updateAppointment(appointmentToEdit.id, {
               patientId: selectedPatient,
               patientName: selectedPatientRecord?.name || selectedPatient,
-              doctor: appointmentToEdit.doctor || doctorName || '',
+              doctor: selectedDoctor || appointmentToEdit.doctor || doctorName || '',
               date: dateStr,
               time: selectedTime,
               type: getAppointmentTypeIndex(appointmentType),
@@ -2416,6 +2473,7 @@ return (
                           {[
                             { id: "GCash", label: "GCash", icon: "GC", color: "bg-blue-600", shadow: "shadow-blue-100" },
                             { id: "Card", label: "Credit Card", icon: <CreditCard className="h-4 w-4"/>, color: "bg-indigo-600", shadow: "shadow-indigo-100" },
+                            ...(isStaffBookingMode ? [{ id: "Cash", label: "Cash", icon: <Banknote className="h-4 w-4"/>, color: "bg-slate-700", shadow: "shadow-slate-100" }] : []),
                             { id: "Pay at Clinic", label: "Pay at Clinic", icon: <Banknote className="h-4 w-4"/>, color: "bg-emerald-600", shadow: "shadow-emerald-100" }
                           ].map((pm) => (
                             <button
@@ -2611,7 +2669,7 @@ return (
               </div>
             ) : (
               mergedHistoryLogs.map((log, index) => {
-                const hasPaymentInfo = log.amount !== undefined || log.logType === "payment";
+                const badges = getHistoryBadges(log);
                 const changedBy = log.changedByName || log.changedBy;
 
                 return (
@@ -2620,11 +2678,14 @@ return (
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="text-sm font-black text-gray-900">{getHistoryTitle(log)}</p>
-                          <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-tight ${
-                            hasPaymentInfo ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700"
-                          }`}>
-                            {getHistoryBadge(log)}
-                          </span>
+                          {badges.map((badge) => (
+                            <span
+                              key={`${badge.tone}-${badge.label}`}
+                              className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-tight ${getHistoryBadgeClass(badge.tone)}`}
+                            >
+                              {badge.label}
+                            </span>
+                          ))}
                         </div>
                         <p className="mt-1 text-xs font-semibold text-gray-500">{getHistoryDetail(log)}</p>
                         <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">
@@ -2637,8 +2698,8 @@ return (
                         onClick={() => {
                           const historicalData =
                             log.logType === "appointment" && log.newState && Object.keys(log.newState).length > 3
-                              ? { ...appointmentToEdit, ...log.newState, changedAt: log.changedAt, changedByName: changedBy }
-                              : { ...appointmentToEdit, ...log.previousState, changedAt: log.changedAt, changedByName: changedBy };
+                              ? { ...appointmentToEdit, ...log.newState, amount: log.amount, paymentStatus: log.paymentStatus || log.newState?.paymentStatus, previousState: log.previousState, newState: log.newState, changeType: log.changeType, logType: log.logType, changedAt: log.changedAt, changedByName: changedBy }
+                              : { ...appointmentToEdit, ...log.previousState, amount: log.amount, paymentStatus: log.paymentStatus || log.newState?.paymentStatus || log.previousState?.paymentStatus, previousState: log.previousState, newState: log.newState, changeType: log.changeType, logType: log.logType, changedAt: log.changedAt, changedByName: changedBy };
 
                           setIsHistoryDialogOpen(false);
                           setSnapshotToView(historicalData);

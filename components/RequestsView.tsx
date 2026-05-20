@@ -2,7 +2,7 @@
 
 import { apiUrl } from "@/lib/api";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
@@ -60,15 +60,73 @@ import {
   AlertDialogFooter as Footer,
 } from "./ui/alert-dialog";
 import PastAppointmentButton from "./PastAppointmentButton";
+import AppointmentHistoryView from "./AppointmentHistoryView";
+import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
+import { getAuthHeaders } from "@/lib/auth-headers";
 
 interface RequestsViewProps {
   doctorFilter?: string;
 }
 
+const REQUESTS_PER_PAGE = 10;
+const HISTORY_PER_PAGE = 10;
+
 export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
-  const { appointments, isLoading, updateAppointment, openEditModal, refreshAppointments, refreshTrigger } = useAppointmentModal();
+  const {
+    appointments,
+    updateAppointment,
+    openEditModal,
+    openEditModalById,
+    refreshTrigger,
+    isEditModalOpen,
+    selectedAppointment,
+  } = useAppointmentModal();
   const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
   const { statuses: PAYMENT_STATUSES } = usePaymentStatuses();
+  const [requests, setRequests] = useState<Appointment[]>([]);
+  const [isRequestsLoading, setIsRequestsLoading] = useState(true);
+  const [requestCurrentPage, setRequestCurrentPage] = useState(1);
+  const [requestTotalPages, setRequestTotalPages] = useState(1);
+  const [requestTotal, setRequestTotal] = useState(0);
+  const [requestRefreshKey, setRequestRefreshKey] = useState(0);
+  const [history, setHistory] = useState<Appointment[]>([]);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(true);
+  const [historyCurrentPage, setHistoryCurrentPage] = useState(1);
+  const [historyTotalPages, setHistoryTotalPages] = useState(1);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const {
+    isAppointmentHistoryOpen,
+    setIsAppointmentHistoryOpen,
+    appointmentSnapshot,
+    appointmentSnapshotId,
+    appointmentSnapshotLogDate,
+    appointmentSnapshotIsHistorical,
+    handleViewCurrentSnapshot,
+    handleViewAppointment,
+    resetAppointmentSnapshot,
+  } = useNotificationAppointmentSnapshot([...appointments, ...requests, ...history]);
+  const handleOpenSnapshotAppointment = async (appointmentId: string) => {
+    const appointment = [...appointments, ...requests, ...history].find((item: Appointment) => String(item.id) === String(appointmentId));
+    setIsAppointmentHistoryOpen(false);
+    resetAppointmentSnapshot();
+    if (appointment) {
+      openEditModal(appointment);
+      return;
+    }
+
+    try {
+      await openEditModalById(appointmentId);
+    } catch {
+      toast.error("Appointment not found or could not be loaded");
+    }
+  };
+  const isSnapshotAppointmentOpen = Boolean(
+    isEditModalOpen &&
+    appointmentSnapshotId &&
+    selectedAppointment?.id &&
+    String(selectedAppointment.id) === String(appointmentSnapshotId)
+  );
   
   // Function to update notifications when appointment data changes
   const updateNotificationsForAppointment = async (appointmentId: string, changes: { status?: string; paymentStatus?: string }) => {
@@ -92,11 +150,6 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     }
   };
   
-  useEffect(() => {
-    // Add to Cart appointments are patient cart records and should stay out of staff request/history views.
-    refreshAppointments();
-  }, [refreshAppointments]);
-
   // Log available statuses when RequestsView loads
   useEffect(() => {
     if (APPOINTMENT_STATUSES && APPOINTMENT_STATUSES.length > 0) {
@@ -170,71 +223,331 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       .substring(0, 2);
   };
 
-  const requests = useMemo(() => {
-    const result = appointments.filter((apt) => {
-      const matchesDoctor = !doctorFilter || (apt.doctor || "").toLowerCase() === doctorFilter.toLowerCase();
-      // Requests are those with actionable statuses (including TBD)
-      if (isPatientCartStatus(apt.status) || !isPendingRequestStatus(apt.status) || !matchesDoctor) {
-        return false;
+  const sortAppointmentsForColumn = (
+    items: Appointment[],
+    column: string | null,
+    direction: "asc" | "desc",
+    fallbackColumn: string = "date"
+  ) => {
+    const sortColumn = column || fallbackColumn;
+
+    return [...items].sort((a: Appointment, b: Appointment) => {
+      let aVal: string | number;
+      let bVal: string | number;
+
+      switch (sortColumn) {
+        case "date":
+          aVal = new Date(`${a.date}T${a.time}`).getTime();
+          bVal = new Date(`${b.date}T${b.time}`).getTime();
+          break;
+        case "patient":
+          aVal = a.patientName.toLowerCase();
+          bVal = b.patientName.toLowerCase();
+          break;
+        case "service":
+          aVal = getAppointmentTypeName(a.type, a.customType).toLowerCase();
+          bVal = getAppointmentTypeName(b.type, b.customType).toLowerCase();
+          break;
+        case "doctor":
+          aVal = a.doctor.toLowerCase();
+          bVal = b.doctor.toLowerCase();
+          break;
+        case "status":
+          aVal = canonicalStatus(a.status);
+          bVal = canonicalStatus(b.status);
+          break;
+        case "payment":
+          aVal = canonicalStatus(a.paymentStatus || "unpaid");
+          bVal = canonicalStatus(b.paymentStatus || "unpaid");
+          break;
+        case "booked":
+          aVal = a.createdAt ? new Date(a.createdAt).getTime() : Number.MIN_VALUE;
+          bVal = b.createdAt ? new Date(b.createdAt).getTime() : Number.MIN_VALUE;
+          break;
+        case "updated":
+          aVal = a.updatedAt ? new Date(a.updatedAt).getTime() : Number.MIN_VALUE;
+          bVal = b.updatedAt ? new Date(b.updatedAt).getTime() : Number.MIN_VALUE;
+          break;
+        default:
+          return 0;
       }
 
-      if (pendingSearchTerm && !apt.patientName.toLowerCase().includes(pendingSearchTerm.toLowerCase()) && 
-          !getAppointmentTypeName(apt.type, apt.customType).toLowerCase().includes(pendingSearchTerm.toLowerCase())) {
-        return false;
-      }
-      
-      // Status filter (compare canonical keys so UI filters like 'To Pay' still match backend values)
-      if (pendingStatusFilter !== "all" && canonicalStatus(apt.status) !== canonicalStatus(pendingStatusFilter)) {
-        return false;
-      }
-
-      // Doctor filter
-      if (pendingDoctorFilter !== "all" && apt.doctor !== pendingDoctorFilter) {
-        return false;
-      }
-      
-      // Date filter
-      if (pendingDateFilter && apt.date !== pendingDateFilter) {
-        return false;
-      }
-
-      return true;
+      if (aVal < bVal) return direction === "asc" ? -1 : 1;
+      if (aVal > bVal) return direction === "asc" ? 1 : -1;
+      return 0;
     });
+  };
 
-    return result;
-  }, [appointments, doctorFilter, pendingSearchTerm, pendingStatusFilter, pendingDoctorFilter, pendingDateFilter, refreshTrigger]);
+  const fetchRequests = useCallback(async (page = 1, signal?: AbortSignal) => {
+    try {
+      setIsRequestsLoading(true);
 
-  const history = useMemo(() => {
-    return appointments
-      .filter((apt) => {
-        const matchesDoctor = !doctorFilter || (apt.doctor || "").toLowerCase() === doctorFilter.toLowerCase();
-        // In history, we show only scheduled, completed, or cancelled appointments
-        if (isPatientCartStatus(apt.status) || !isHistoryStatus(apt.status) || !matchesDoctor) return false;
-        
-        // Search filter
-        if (historySearchTerm && !apt.patientName.toLowerCase().includes(historySearchTerm.toLowerCase()) && 
-            !getAppointmentTypeName(apt.type, apt.customType).toLowerCase().includes(historySearchTerm.toLowerCase())) {
-          return false;
-        }
-        
-        // Status filter (use canonical comparison)
-        if (historyStatusFilter !== "all" && canonicalStatus(apt.status) !== canonicalStatus(historyStatusFilter)) {
-          return false;
-        }
-        
-        // Date filter
-        if (historyDateFilter && apt.date !== historyDateFilter) {
-          return false;
-        }
-        
-        return true;
-      })
-      .sort((a, b) => {
-        // Sort by date and time descending (latest first)
-        if (a.date !== b.date) return b.date.localeCompare(a.date);
-        return b.time.localeCompare(a.time);
+      const params = new URLSearchParams({
+        view: "requests",
+        page: String(page),
+        limit: String(REQUESTS_PER_PAGE),
       });
-  }, [appointments, doctorFilter, historySearchTerm, historyStatusFilter, historyDateFilter, refreshTrigger]);
+      const search = pendingSearchTerm.trim();
+      const selectedDoctor = doctorFilter || (pendingDoctorFilter !== "all" ? pendingDoctorFilter : "");
+
+      if (search) params.set("search", search);
+      if (pendingStatusFilter !== "all") params.set("status", pendingStatusFilter);
+      if (selectedDoctor) params.set("doctor", selectedDoctor);
+      if (pendingDateFilter) {
+        params.set("startDate", pendingDateFilter);
+        params.set("endDate", pendingDateFilter);
+      }
+      if (pendingSortColumn) {
+        params.set("sortBy", pendingSortColumn);
+        params.set("sortDirection", pendingSortDirection);
+      }
+
+      const response = await fetch(apiUrl(`/api/appointments?${params.toString()}`), {
+        credentials: "include",
+        headers: getAuthHeaders(),
+        signal,
+      });
+      const result = await response.json();
+
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.message || "Failed to fetch appointment requests");
+      }
+
+      const data = (result.data || []).map((appointment: Appointment) => ({
+        ...appointment,
+        status: normalizeAppointmentStatus(appointment.status),
+      }));
+      const serverReturnedPage = Boolean(result.meta);
+      const clientFilteredData = data.filter((appointment: Appointment) => {
+        if (isPatientCartStatus(appointment.status) || !isPendingRequestStatus(appointment.status)) {
+          return false;
+        }
+
+        if (doctorFilter && (appointment.doctor || "").toLowerCase() !== doctorFilter.toLowerCase()) {
+          return false;
+        }
+
+        if (pendingDoctorFilter !== "all" && appointment.doctor !== pendingDoctorFilter) {
+          return false;
+        }
+
+        if (
+          search &&
+          !appointment.patientName.toLowerCase().includes(search.toLowerCase()) &&
+          !getAppointmentTypeName(appointment.type, appointment.customType).toLowerCase().includes(search.toLowerCase())
+        ) {
+          return false;
+        }
+
+        if (pendingStatusFilter !== "all" && canonicalStatus(appointment.status) !== canonicalStatus(pendingStatusFilter)) {
+          return false;
+        }
+
+        if (pendingDateFilter && appointment.date !== pendingDateFilter) {
+          return false;
+        }
+
+        return true;
+      });
+      const clientSortedData = pendingSortColumn
+        ? sortAppointmentsForColumn(clientFilteredData, pendingSortColumn, pendingSortDirection)
+        : clientFilteredData;
+      const total = Number(result.meta?.total ?? clientFilteredData.length);
+      const nextTotalPages = Math.max(
+        1,
+        Number(result.meta?.totalPages) || Math.ceil(total / REQUESTS_PER_PAGE)
+      );
+      const visibleRequests = serverReturnedPage && clientFilteredData.length <= REQUESTS_PER_PAGE
+        ? clientFilteredData
+        : clientSortedData.slice((page - 1) * REQUESTS_PER_PAGE, page * REQUESTS_PER_PAGE);
+
+      if (page > nextTotalPages) {
+        setRequestCurrentPage(nextTotalPages);
+        return;
+      }
+
+      setRequests(visibleRequests);
+      setRequestTotal(total);
+      setRequestTotalPages(nextTotalPages);
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
+
+      console.error("Error fetching appointment requests:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to fetch appointment requests");
+      setRequests([]);
+      setRequestTotal(0);
+      setRequestTotalPages(1);
+    } finally {
+      if (!signal?.aborted) setIsRequestsLoading(false);
+    }
+  }, [
+    doctorFilter,
+    pendingDateFilter,
+    pendingDoctorFilter,
+    pendingSearchTerm,
+    pendingSortColumn,
+    pendingSortDirection,
+    pendingStatusFilter,
+  ]);
+
+  useEffect(() => {
+    setRequestCurrentPage(1);
+  }, [
+    doctorFilter,
+    pendingDateFilter,
+    pendingDoctorFilter,
+    pendingSearchTerm,
+    pendingSortColumn,
+    pendingSortDirection,
+    pendingStatusFilter,
+  ]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchRequests(requestCurrentPage, controller.signal);
+
+    return () => controller.abort();
+  }, [fetchRequests, requestCurrentPage, requestRefreshKey, refreshTrigger]);
+
+  const refreshRequests = useCallback(() => {
+    setRequestRefreshKey((key) => key + 1);
+  }, []);
+
+  const fetchHistory = useCallback(async (page = 1, signal?: AbortSignal) => {
+    try {
+      setIsHistoryLoading(true);
+
+      const params = new URLSearchParams({
+        view: "history",
+        page: String(page),
+        limit: String(HISTORY_PER_PAGE),
+      });
+      const search = historySearchTerm.trim();
+
+      if (search) params.set("search", search);
+      if (historyStatusFilter !== "all") params.set("status", historyStatusFilter);
+      if (doctorFilter) params.set("doctor", doctorFilter);
+      if (historyDateFilter) {
+        params.set("startDate", historyDateFilter);
+        params.set("endDate", historyDateFilter);
+      }
+      if (historySortColumn) {
+        params.set("sortBy", historySortColumn);
+        params.set("sortDirection", historySortDirection);
+      }
+
+      const response = await fetch(apiUrl(`/api/appointments?${params.toString()}`), {
+        credentials: "include",
+        headers: getAuthHeaders(),
+        signal,
+      });
+      const result = await response.json();
+
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.message || "Failed to fetch appointment history");
+      }
+
+      const data = (result.data || []).map((appointment: Appointment) => ({
+        ...appointment,
+        status: normalizeAppointmentStatus(appointment.status),
+      }));
+      const serverReturnedPage = Boolean(result.meta);
+      const clientFilteredData = data.filter((appointment: Appointment) => {
+        if (isPatientCartStatus(appointment.status) || !isHistoryStatus(appointment.status)) {
+          return false;
+        }
+
+        if (doctorFilter && (appointment.doctor || "").toLowerCase() !== doctorFilter.toLowerCase()) {
+          return false;
+        }
+
+        if (
+          search &&
+          !appointment.patientName.toLowerCase().includes(search.toLowerCase()) &&
+          !getAppointmentTypeName(appointment.type, appointment.customType).toLowerCase().includes(search.toLowerCase())
+        ) {
+          return false;
+        }
+
+        if (historyStatusFilter !== "all" && canonicalStatus(appointment.status) !== canonicalStatus(historyStatusFilter)) {
+          return false;
+        }
+
+        if (historyDateFilter && appointment.date !== historyDateFilter) {
+          return false;
+        }
+
+        return true;
+      });
+      const clientSortedData = sortAppointmentsForColumn(
+        clientFilteredData,
+        historySortColumn,
+        historySortColumn ? historySortDirection : "desc",
+        "date"
+      );
+      const total = Number(result.meta?.total ?? clientFilteredData.length);
+      const nextTotalPages = Math.max(
+        1,
+        Number(result.meta?.totalPages) || Math.ceil(total / HISTORY_PER_PAGE)
+      );
+      const visibleHistory = serverReturnedPage && clientFilteredData.length <= HISTORY_PER_PAGE
+        ? clientFilteredData
+        : clientSortedData.slice((page - 1) * HISTORY_PER_PAGE, page * HISTORY_PER_PAGE);
+
+      if (page > nextTotalPages) {
+        setHistoryCurrentPage(nextTotalPages);
+        return;
+      }
+
+      setHistory(visibleHistory);
+      setHistoryTotal(total);
+      setHistoryTotalPages(nextTotalPages);
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
+
+      console.error("Error fetching appointment history:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to fetch appointment history");
+      setHistory([]);
+      setHistoryTotal(0);
+      setHistoryTotalPages(1);
+    } finally {
+      if (!signal?.aborted) setIsHistoryLoading(false);
+    }
+  }, [
+    doctorFilter,
+    historyDateFilter,
+    historySearchTerm,
+    historySortColumn,
+    historySortDirection,
+    historyStatusFilter,
+  ]);
+
+  useEffect(() => {
+    setHistoryCurrentPage(1);
+  }, [
+    doctorFilter,
+    historyDateFilter,
+    historySearchTerm,
+    historySortColumn,
+    historySortDirection,
+    historyStatusFilter,
+  ]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchHistory(historyCurrentPage, controller.signal);
+
+    return () => controller.abort();
+  }, [fetchHistory, historyCurrentPage, historyRefreshKey, refreshTrigger]);
+
+  const refreshHistory = useCallback(() => {
+    setHistoryRefreshKey((key) => key + 1);
+  }, []);
+
+  const refreshAppointmentLists = useCallback(() => {
+    refreshRequests();
+    refreshHistory();
+  }, [refreshHistory, refreshRequests]);
 
   const handleApprove = async (appointment: Appointment) => {
     setPendingApproveAppointment(appointment);
@@ -257,7 +570,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       await updateAppointment(pendingApproveAppointment.id, { status: newStatus });
       toast.success(`Appointment for ${pendingApproveAppointment.patientName} approved`);
       // Refresh notifications to show the new status change notification
-      refreshAppointments();
+      refreshAppointmentLists();
       // Also refresh notifications from NotificationPage context if available
       setTimeout(() => {
         window.dispatchEvent(new Event('refreshNotifications'));
@@ -282,7 +595,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       await updateAppointment(pendingRejectAppointment.id, { status: "cancelled" });
       toast.success(`Appointment for ${pendingRejectAppointment.patientName} rejected`);
       // Refresh notifications to show the new status change notification
-      refreshAppointments();
+      refreshAppointmentLists();
       // Also refresh notifications from NotificationPage context if available
       setTimeout(() => {
         window.dispatchEvent(new Event('refreshNotifications'));
@@ -310,7 +623,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       await updateAppointment(appointmentId, { paymentStatus: newPaymentStatus as any });
       toast.success(`Payment status updated successfully`);
       // Refresh appointments and notifications to show the new payment status change notification
-      refreshAppointments();
+      refreshAppointmentLists();
       // Also refresh notifications from NotificationPage context if available
       setTimeout(() => {
         window.dispatchEvent(new Event('refreshNotifications'));
@@ -329,7 +642,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     try {
       await updateAppointment(appointmentId, { status: newStatus as any });
       toast.success(`Status updated to ${newStatus}`);
-      refreshAppointments();
+      refreshAppointmentLists();
       setTimeout(() => {
         window.dispatchEvent(new Event('refreshNotifications'));
       }, 500);
@@ -346,7 +659,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       await updateAppointment(appointment.id, { status: newStatus });
       toast.success(`Status for ${appointment.patientName} updated to ${newStatus}`);
       // Refresh appointments and notifications to show the new status change notification
-      refreshAppointments();
+      refreshAppointmentLists();
       // Also refresh notifications from NotificationPage context if available
       setTimeout(() => {
         window.dispatchEvent(new Event('refreshNotifications'));
@@ -390,6 +703,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   };
 
   const handlePendingSort = (column: string) => {
+    setRequestCurrentPage(1);
     if (pendingSortColumn === column) {
       setPendingSortDirection(pendingSortDirection === "asc" ? "desc" : "asc");
     } else {
@@ -399,6 +713,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   };
 
   const handleHistorySort = (column: string) => {
+    setHistoryCurrentPage(1);
     if (historySortColumn === column) {
       setHistorySortDirection(historySortDirection === "asc" ? "desc" : "asc");
     } else {
@@ -417,107 +732,14 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     return <ArrowUpDown className="h-4 w-4 opacity-40" />;
   };
 
-  const sortedRequests = useMemo(() => {
-    let sorted = [...requests];
-    
-    if (pendingSortColumn) {
-      sorted.sort((a, b) => {
-        let aVal, bVal;
-        
-        switch (pendingSortColumn) {
-          case "date":
-            aVal = new Date(`${a.date}T${a.time}`).getTime();
-            bVal = new Date(`${b.date}T${b.time}`).getTime();
-            break;
-          case "patient":
-            aVal = a.patientName.toLowerCase();
-            bVal = b.patientName.toLowerCase();
-            break;
-          case "service":
-            aVal = getAppointmentTypeName(a.type, a.customType).toLowerCase();
-            bVal = getAppointmentTypeName(b.type, b.customType).toLowerCase();
-            break;
-          case "doctor":
-            aVal = a.doctor.toLowerCase();
-            bVal = b.doctor.toLowerCase();
-            break;
-          case "status":
-            aVal = canonicalStatus(a.status);
-            bVal = canonicalStatus(b.status);
-            break;
-          case "payment":
-            aVal = canonicalStatus(a.paymentStatus || "unpaid");
-            bVal = canonicalStatus(b.paymentStatus || "unpaid");
-            break;
-          case "booked":
-            aVal = a.createdAt ? new Date(a.createdAt).getTime() : Number.MIN_VALUE;
-            bVal = b.createdAt ? new Date(b.createdAt).getTime() : Number.MIN_VALUE;
-            break;
-          case "updated":
-            aVal = a.updatedAt ? new Date(a.updatedAt).getTime() : Number.MIN_VALUE;
-            bVal = b.updatedAt ? new Date(b.updatedAt).getTime() : Number.MIN_VALUE;
-            break;
-          default:
-            return 0;
-        }
-        
-        if (aVal < bVal) return pendingSortDirection === "asc" ? -1 : 1;
-        if (aVal > bVal) return pendingSortDirection === "asc" ? 1 : -1;
-        return 0;
-      });
-    }
-    
-    return sorted;
-  }, [requests, pendingSortColumn, pendingSortDirection]);
+  const sortedRequests = requests;
+  const sortedHistory = history;
 
-  const sortedHistory = useMemo(() => {
-    let sorted = [...history];
-    
-    if (historySortColumn) {
-      sorted.sort((a, b) => {
-        let aVal, bVal;
-        
-        switch (historySortColumn) {
-          case "patient":
-            aVal = a.patientName.toLowerCase();
-            bVal = b.patientName.toLowerCase();
-            break;
-          case "service":
-            aVal = getAppointmentTypeName(a.type, a.customType).toLowerCase();
-            bVal = getAppointmentTypeName(b.type, b.customType).toLowerCase();
-            break;
-          case "date":
-            aVal = new Date(`${a.date}T${a.time}`).getTime();
-            bVal = new Date(`${b.date}T${b.time}`).getTime();
-            break;
-          case "status":
-            aVal = canonicalStatus(a.status);
-            bVal = canonicalStatus(b.status);
-            break;
-          case "payment":
-            aVal = canonicalStatus(a.paymentStatus || "unpaid");
-            bVal = canonicalStatus(b.paymentStatus || "unpaid");
-            break;
-          case "booked":
-            aVal = a.createdAt ? new Date(a.createdAt).getTime() : Number.MIN_VALUE;
-            bVal = b.createdAt ? new Date(b.createdAt).getTime() : Number.MIN_VALUE;
-            break;
-          case "updated":
-            aVal = a.updatedAt ? new Date(a.updatedAt).getTime() : Number.MIN_VALUE;
-            bVal = b.updatedAt ? new Date(b.updatedAt).getTime() : Number.MIN_VALUE;
-            break;
-          default:
-            return 0;
-        }
-        
-        if (aVal < bVal) return historySortDirection === "asc" ? -1 : 1;
-        if (aVal > bVal) return historySortDirection === "asc" ? 1 : -1;
-        return 0;
-      });
-    }
-    
-    return sorted;
-  }, [history, historySortColumn, historySortDirection]);
+  const requestDoctorOptions = useMemo(() => {
+    return Array.from(new Set([...appointments, ...requests].map((appointment) => appointment.doctor).filter(Boolean))).sort();
+  }, [appointments, requests]);
+  const pendingRequestColumnCount = doctorFilter ? 8 : 9;
+  const historyColumnCount = 8;
 
   return (
     <div className="p-6 max-w-[1600px] mx-auto space-y-6">
@@ -535,7 +757,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         <TabsList className="bg-white border p-1 rounded-xl shadow-sm">
           <TabsTrigger value="requests" className="rounded-lg px-6 py-2.5 data-[state=active]:bg-violet-600 data-[state=active]:text-white font-bold transition-all duration-300">
             Requests
-            <Badge className="ml-2 bg-violet-100 text-violet-700 border-none">{requests.length}</Badge>
+            <Badge className="ml-2 bg-violet-100 text-violet-700 border-none">{requestTotal}</Badge>
           </TabsTrigger>
           <TabsTrigger value="history" className="rounded-lg px-6 py-2.5 data-[state=active]:bg-violet-600 data-[state=active]:text-white font-bold transition-all duration-300">
             History
@@ -563,11 +785,20 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                       placeholder="Search patient or service..." 
                       className="pl-10 w-64 bg-gray-50 border-gray-100 rounded-xl text-sm"
                       value={pendingSearchTerm}
-                      onChange={(e) => setPendingSearchTerm(e.target.value)}
+                      onChange={(e) => {
+                        setPendingSearchTerm(e.target.value);
+                        setRequestCurrentPage(1);
+                      }}
                     />
                   </div>
                   
-                  <Select value={pendingStatusFilter} onValueChange={setPendingStatusFilter}>
+                  <Select
+                    value={pendingStatusFilter}
+                    onValueChange={(value) => {
+                      setPendingStatusFilter(value);
+                      setRequestCurrentPage(1);
+                    }}
+                  >
                     <SelectTrigger className="w-[160px] bg-gray-50 border-gray-100 rounded-xl text-sm">
                       <div className="flex items-center gap-2">
                         <Filter className="h-3.5 w-3.5 text-gray-400" />
@@ -583,7 +814,13 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                   </Select>
 
                   {!doctorFilter && (
-                    <Select value={pendingDoctorFilter} onValueChange={setPendingDoctorFilter}>
+                    <Select
+                      value={pendingDoctorFilter}
+                      onValueChange={(value) => {
+                        setPendingDoctorFilter(value);
+                        setRequestCurrentPage(1);
+                      }}
+                    >
                       <SelectTrigger className="w-[160px] bg-gray-50 border-gray-100 rounded-xl text-sm">
                         <div className="flex items-center gap-2">
                           <User className="h-3.5 w-3.5 text-gray-400" />
@@ -592,7 +829,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">All Doctors</SelectItem>
-                        {Array.from(new Set(appointments.map(a => a.doctor))).map((doc: any) => (
+                        {requestDoctorOptions.map((doc: any) => (
                           <SelectItem key={doc} value={doc}>{doc}</SelectItem>
                         ))}
                       </SelectContent>
@@ -604,6 +841,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     setPendingStatusFilter("all");
                     setPendingDoctorFilter("all");
                     setPendingDateFilter("");
+                    setRequestCurrentPage(1);
                   }}>
                     <RotateCcw className="h-4 w-4 text-gray-500" />
                   </Button>
@@ -661,15 +899,15 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {isLoading ? (
+                    {isRequestsLoading ? (
                       <TableRow>
-                        <TableCell colSpan={8} className="h-32 text-center text-gray-500 font-medium">
+                        <TableCell colSpan={pendingRequestColumnCount} className="h-32 text-center text-gray-500 font-medium">
                           Loading requests...
                         </TableCell>
                       </TableRow>
                     ) : sortedRequests.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={8} className="h-64 text-center">
+                        <TableCell colSpan={pendingRequestColumnCount} className="h-64 text-center">
                           <div className="flex flex-col items-center justify-center py-12">
                             <div className="p-4 bg-gray-50 rounded-full mb-4">
                               <ClipboardList className="h-10 w-10 text-gray-300" />
@@ -787,7 +1025,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                                 variant="ghost" 
                                 className="h-9 w-9 p-0 text-violet-600 hover:bg-violet-50 rounded-xl"
                                 onClick={() => {
-                                  openEditModal(request);
+                                  handleViewAppointment(request);
                                 }}
                               >
                                 <Eye className="h-5 w-5" />
@@ -799,6 +1037,31 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     )}
                   </TableBody>
                 </Table>
+              </div>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-6 py-4 border-t border-gray-100 bg-white">
+                <p className="text-sm text-gray-500 font-medium">
+                  Page {requestCurrentPage} of {requestTotalPages || 1} | Showing {requests.length} of {requestTotal} requests
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-lg"
+                    onClick={() => setRequestCurrentPage((page) => Math.max(1, page - 1))}
+                    disabled={isRequestsLoading || requestCurrentPage === 1}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-lg"
+                    onClick={() => setRequestCurrentPage((page) => Math.min(requestTotalPages, page + 1))}
+                    disabled={isRequestsLoading || requestCurrentPage >= requestTotalPages || requestTotalPages === 0}
+                  >
+                    Next
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -825,11 +1088,20 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                       placeholder="Search history..." 
                       className="pl-10 w-64 bg-gray-50 border-gray-100 rounded-xl text-sm"
                       value={historySearchTerm}
-                      onChange={(e) => setHistorySearchTerm(e.target.value)}
+                      onChange={(e) => {
+                        setHistorySearchTerm(e.target.value);
+                        setHistoryCurrentPage(1);
+                      }}
                     />
                   </div>
                   
-                  <Select value={historyStatusFilter} onValueChange={setHistoryStatusFilter}>
+                  <Select
+                    value={historyStatusFilter}
+                    onValueChange={(value) => {
+                      setHistoryStatusFilter(value);
+                      setHistoryCurrentPage(1);
+                    }}
+                  >
                     <SelectTrigger className="w-[160px] bg-gray-50 border-gray-100 rounded-xl text-sm">
                       <div className="flex items-center gap-2">
                         <Filter className="h-3.5 w-3.5 text-gray-400" />
@@ -848,6 +1120,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     setHistorySearchTerm("");
                     setHistoryStatusFilter("all");
                     setHistoryDateFilter("");
+                    setHistoryCurrentPage(1);
                   }}>
                     <RotateCcw className="h-4 w-4 text-gray-500" />
                   </Button>
@@ -898,9 +1171,15 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {sortedHistory.length === 0 ? (
+                    {isHistoryLoading ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="h-64 text-center">
+                        <TableCell colSpan={historyColumnCount} className="h-32 text-center text-gray-500 font-medium">
+                          Loading history...
+                        </TableCell>
+                      </TableRow>
+                    ) : sortedHistory.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={historyColumnCount} className="h-64 text-center">
                           <div className="flex flex-col items-center justify-center py-12">
                             <div className="p-4 bg-gray-50 rounded-full mb-4">
                               <History className="h-10 w-10 text-gray-300" />
@@ -987,7 +1266,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                               variant="ghost" 
                               className="h-9 w-9 p-0 text-violet-600 hover:bg-violet-50 rounded-xl"
                               onClick={() => {
-                                openEditModal(item);
+                                handleViewAppointment(item);
                               }}
                             >
                               <Eye className="h-5 w-5" />
@@ -998,6 +1277,31 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     )}
                   </TableBody>
                 </Table>
+              </div>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-6 py-4 border-t border-gray-100 bg-white">
+                <p className="text-sm text-gray-500 font-medium">
+                  Page {historyCurrentPage} of {historyTotalPages || 1} | Showing {history.length} of {historyTotal} history items
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-lg"
+                    onClick={() => setHistoryCurrentPage((page) => Math.max(1, page - 1))}
+                    disabled={isHistoryLoading || historyCurrentPage === 1}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-lg"
+                    onClick={() => setHistoryCurrentPage((page) => Math.min(historyTotalPages, page + 1))}
+                    disabled={isHistoryLoading || historyCurrentPage >= historyTotalPages || historyTotalPages === 0}
+                  >
+                    Next
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -1100,6 +1404,19 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <AppointmentHistoryView
+        open={isAppointmentHistoryOpen}
+        onOpenChange={(open) => {
+          setIsAppointmentHistoryOpen(open);
+          if (!open) resetAppointmentSnapshot();
+        }}
+        appointmentSnapshot={appointmentSnapshot}
+        logDate={appointmentSnapshotLogDate}
+        onViewCurrent={handleViewCurrentSnapshot}
+        onOpenAppointment={handleOpenSnapshotAppointment}
+        isAppointmentOpen={isSnapshotAppointmentOpen}
+        isHistorical={appointmentSnapshotIsHistorical}
+      />
 
       <AlertDialog open={isRejectConfirmOpen} onOpenChange={setIsRejectConfirmOpen}>
         <AlertDialogContent 

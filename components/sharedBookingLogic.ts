@@ -184,12 +184,63 @@ export function getBookingAppointmentTypeIndex(typeName: string): number {
 
 export function formatBookingDoctorName(name?: string): string {
   if (!name || name === "—" || name === "â€”") return "—";
-  const cleanName = name.replace(/^Dr\.\s+/i, "");
+  const cleanName = name.replace(/^Dr\.\s+/i, "").trim();
+  if (/^(none|null|undefined|unassigned|no doctor assigned)$/i.test(cleanName)) return "No doctor assigned";
   return `Dr. ${cleanName}`;
 }
 
 export function normalizeBookingDoctorName(name?: string) {
-  return (name || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim();
+  const cleanName = (name || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim();
+  return /^(none|null|undefined|unassigned|no doctor assigned)$/.test(cleanName) ? "" : cleanName;
+}
+
+export function normalizeBookingHistoryStatus(value?: unknown) {
+  const normalized = String(value ?? "").toLowerCase().trim();
+  return /^(|none|null|undefined)$/.test(normalized) ? "" : normalized;
+}
+
+export function formatBookingHistoryStatusLabel(value?: unknown) {
+  const normalized = normalizeBookingHistoryStatus(value);
+  if (!normalized) return "Updated";
+
+  const labels: Record<string, string> = {
+    "add-to-cart": "Add to Cart",
+    "half-paid": "Half Paid",
+    "paid": "Fully Paid",
+    "pay-at-clinic": "Pay at Clinic",
+    "tbd": "TBD",
+  };
+
+  if (labels[normalized]) return labels[normalized];
+
+  return normalized
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+export function getBookingHistoryPaymentStatusChange(log: any) {
+  const previousStatus = normalizeBookingHistoryStatus(log?.previousState?.paymentStatus);
+  const nextStatus = normalizeBookingHistoryStatus(log?.newState?.paymentStatus || log?.paymentStatus);
+
+  return {
+    previousStatus,
+    nextStatus,
+    changed: Boolean(previousStatus && nextStatus && previousStatus !== nextStatus),
+  };
+}
+
+export function isSignificantBookingPaymentStatus(value?: unknown) {
+  const normalized = normalizeBookingHistoryStatus(value);
+  return /^(paid|fully-paid|half-paid|partial|partially-paid)$/.test(normalized);
+}
+
+export function shouldShowBookingHistoryLog(log: any) {
+  if (log?.logType !== "payment") return true;
+
+  const { nextStatus } = getBookingHistoryPaymentStatusChange(log);
+  return Number(log?.amount || 0) > 0 || isSignificantBookingPaymentStatus(nextStatus);
 }
 
 export function getBookingDoctorInitials(name?: string) {
@@ -602,11 +653,13 @@ export async function findNextAvailableBookingSlot({
 export function getBookingActor({
   userRole,
   bookingMode = 'standard',
+  isEditing = false,
 }: {
   userRole?: string | null;
   bookingMode?: BookingMode;
+  isEditing?: boolean;
 }) {
-  const isPublicBookingMode = bookingMode === 'public' && !userRole;
+  const isPublicBookingMode = bookingMode === 'public';
   const effectiveRole = (isPublicBookingMode ? 'public' : userRole || '') as BookingActorRole;
   const isStaffBookingMode = effectiveRole === 'admin' || effectiveRole === 'doctor';
   const isPatientLevelBookingMode = effectiveRole === 'patient' || effectiveRole === 'public';
@@ -620,7 +673,7 @@ export function getBookingActor({
     canCreatePatients: isStaffBookingMode || effectiveRole === 'public',
     canManagePricing: isStaffBookingMode,
     canManageStatuses,
-    isDoctorSelectionLocked: userRole === 'doctor',
+    isDoctorSelectionLocked: userRole === 'doctor' && !isEditing,
   };
 }
 

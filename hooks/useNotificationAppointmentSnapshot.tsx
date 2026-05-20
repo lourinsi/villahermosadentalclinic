@@ -80,6 +80,15 @@ export function useNotificationAppointmentSnapshot(appointments: AppointmentSnap
     }
   };
 
+  const handleViewAppointment = (appointment: AppointmentSnapshotCandidate) => {
+    if (!appointment) return;
+
+    setAppointmentSnapshot(appointment);
+    setAppointmentSnapshotLogDate(appointment.updatedAt || appointment.createdAt || new Date().toISOString());
+    setAppointmentSnapshotIsHistorical(false);
+    setIsAppointmentHistoryOpen(true);
+  };
+
   const handleViewAppointmentSnapshot = async (appointmentId: string, notification: Notification) => {
     if (!appointmentId) {
       toast.error("No appointment is linked to this notification");
@@ -139,6 +148,7 @@ export function useNotificationAppointmentSnapshot(appointments: AppointmentSnap
     appointmentSnapshotIsHistorical,
     handleViewCurrentSnapshot,
     handleViewAppointmentSnapshot,
+    handleViewAppointment,
     resetAppointmentSnapshot,
   };
 }

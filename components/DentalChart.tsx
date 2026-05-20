@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "./ui/button";
+import { Calendar as CalendarPicker } from "./ui/calendar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./ui/dropdown-menu";
-import { Eraser, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Plus, Trash2, MoreVertical } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { Eraser, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Plus, Trash2, MoreVertical, CalendarDays } from "lucide-react";
 import { toast } from "sonner";
 import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
 import ConfirmDialog from "./ConfirmDialog";
@@ -28,6 +30,32 @@ const upperRightPrimary = [55, 54, 53, 52, 51];
 const upperLeftPrimary = [61, 62, 63, 64, 65];
 const lowerRightPrimary = [85, 84, 83, 82, 81];
 const lowerLeftPrimary = [71, 72, 73, 74, 75];
+
+const chartDatePickerClassNames = {
+  root: "relative p-0",
+  months: "flex flex-col",
+  month: "w-full space-y-3",
+  month_caption: "flex h-10 items-center justify-center",
+  caption_label: "flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 shadow-sm",
+  dropdowns: "flex items-center justify-center gap-2",
+  dropdown_root: "relative inline-flex",
+  dropdown: "absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0",
+  nav: "pointer-events-none absolute left-0 right-0 top-1 flex items-center justify-between",
+  button_previous: "pointer-events-auto inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors hover:bg-violet-50 hover:text-violet-700",
+  button_next: "pointer-events-auto inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors hover:bg-violet-50 hover:text-violet-700",
+  chevron: "h-4 w-4",
+  month_grid: "w-full border-collapse",
+  weekdays: "grid grid-cols-7",
+  weekday: "flex h-8 w-9 items-center justify-center text-[11px] font-black uppercase tracking-wide text-slate-400",
+  week: "grid grid-cols-7",
+  day: "h-9 w-9 p-0 text-center",
+  day_button: "inline-flex h-9 w-9 items-center justify-center rounded-lg text-sm font-semibold text-slate-600 transition-colors hover:bg-violet-50 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300",
+  selected: "bg-violet-600 text-white shadow-md shadow-violet-200 hover:bg-violet-600 hover:text-white focus:bg-violet-600 focus:text-white",
+  today: "bg-slate-100 text-slate-900",
+  outside: "text-slate-300 opacity-60",
+  disabled: "text-slate-300 opacity-40",
+  hidden: "invisible",
+};
 
 interface DentalChartProps {
   records: ChartRecord[];
@@ -81,6 +109,7 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
+  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
 
   // Load teeth state when index or records change
   useEffect(() => {
@@ -258,6 +287,32 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
     setIsConfirmDeleteEmptyChartsOpen(true); // Open the confirmation modal
   };
 
+  const handleChartDateSelect = (date: Date | undefined) => {
+    if (!date) return;
+
+    const updatedRecords = [...localRecords];
+    const currentRecord = updatedRecords[currentIndex];
+
+    if (!currentRecord) return;
+
+    const nextDate = formatDateToYYYYMMDD(date);
+
+    if (currentRecord.date === nextDate) {
+      setIsDatePickerOpen(false);
+      return;
+    }
+
+    updatedRecords[currentIndex] = {
+      ...currentRecord,
+      date: nextDate,
+    };
+
+    setCurrentDate(nextDate);
+    setLocalRecords(updatedRecords);
+    onSaveRecords(updatedRecords);
+    setIsDatePickerOpen(false);
+  };
+
   const confirmDeleteEmptyCharts = () => {
     const cleanedRecords = localRecords.filter(record => {
       return !record.isEmpty;
@@ -320,6 +375,7 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
 
   const canGoPrevious = currentIndex > 0;
   const canGoNext = currentIndex < localRecords.length - 1;
+  const selectedChartDate = currentDate ? parseBackendDateToLocal(currentDate) : new Date();
 
   return (
     <div className="space-y-4">
@@ -511,9 +567,39 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
                   </Button>
                   
 
-                  <div className="px-4 text-sm font-medium text-gray-600">
-                    {parseBackendDateToLocal(currentDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                  </div>
+                  <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="h-8 min-w-[150px] justify-center gap-2 px-4 text-sm font-medium text-gray-600 hover:bg-violet-50 hover:text-violet-700"
+                      >
+                        <CalendarDays className="h-4 w-4 text-gray-400" />
+                        {selectedChartDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="z-[60] w-[318px] overflow-hidden rounded-2xl border border-slate-200 bg-white p-0 shadow-2xl shadow-slate-200/80 ring-1 ring-slate-100" align="center" side="top" sideOffset={10}>
+                      <div className="border-b border-slate-100 bg-slate-50/80 px-4 py-3">
+                        <div className="text-[11px] font-black uppercase tracking-widest text-slate-400">Chart Date</div>
+                        <div className="mt-0.5 text-sm font-bold text-slate-900">
+                          {selectedChartDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                        </div>
+                      </div>
+                      <div className="p-4">
+                        <CalendarPicker
+                          mode="single"
+                          selected={selectedChartDate}
+                          defaultMonth={selectedChartDate}
+                          onSelect={handleChartDateSelect}
+                          captionLayout="dropdown"
+                          startMonth={new Date(1900, 0)}
+                          endMonth={new Date(2100, 11)}
+                          className="rounded-none border-0"
+                          classNames={chartDatePickerClassNames}
+                        />
+                      </div>
+                    </PopoverContent>
+                  </Popover>
 
                   <Button
                     variant="ghost"
@@ -528,7 +614,7 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8 text-gray-400"
-                    onClick={() => setCurrentIndex(records.length - 1)} // Use records.length
+                    onClick={() => setCurrentIndex(localRecords.length - 1)}
                     disabled={!canGoNext}
                   >
                     <ChevronsRight className="h-4 w-4" />
