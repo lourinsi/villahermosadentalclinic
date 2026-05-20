@@ -3,7 +3,7 @@ export type {
   NotificationType,
   NotificationTypeOption,
   NotificationTypeValue,
-} from '../../shared/notificationStatuses';
+} from "../shared/notificationStatuses";
 
 export {
   NOTIFICATION_TYPES,
@@ -12,7 +12,7 @@ export {
   getNotificationTypeDescription,
   VALID_NOTIFICATION_TYPES,
   isValidNotificationType,
-} from '../../shared/notificationStatuses';
+} from "../shared/notificationStatuses";
 
 export interface Notification {
   id: string;

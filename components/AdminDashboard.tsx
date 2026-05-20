@@ -15,6 +15,7 @@ import { NextAppointmentCard } from "./NextAppointmentCard";
 import { isCartAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
+import { apiUrl } from "@/lib/api";
 
 const revenueData = [
   { month: "Jan", revenue: 42000, appointments: 180 },
@@ -51,7 +52,7 @@ export function Dashboard({ portal }: { portal?: string }) {
   useEffect(() => {
     const fetchPatientCount = async () => {
       try {
-        const response = await fetch("http://localhost:3001/api/patients?page=1&limit=1", { credentials: 'include' });
+        const response = await fetch(apiUrl("/api/patients?page=1&limit=1"), { credentials: 'include' });
         const result = await response.json();
         if (result.success) {
           const total = result.meta?.total ?? (Array.isArray(result.data) ? result.data.length : 0);
