@@ -18,6 +18,7 @@ import { formatDateToYYYYMMDD } from "../lib/utils";
 import { APPOINTMENT_TYPES } from "../lib/appointment-types";
 import { Appointment } from "@/hooks/useAppointments";
 import { DoctorCalendar } from "./DoctorCalendar";
+import { ALLOWED_BOOKING_DURATIONS, normalizeBookingDuration } from "./sharedBookingLogic";
 import { isCartAppointmentStatus, isReservedAppointmentStatus } from "@/lib/appointment-status";
 
 export function ScheduleAppointmentModal() {
@@ -39,7 +40,7 @@ export function ScheduleAppointmentModal() {
   const [patients, setPatients] = useState<Array<{ id: string; name: string }>>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [dateError, setDateError] = useState("");
-  const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors();
+  const { doctors, isLoadingDoctors, reloadDoctors } = useDoctors(undefined, { enabled: isScheduleModalOpen });
 
   const [formData, setFormData] = useState({
     date: "",
@@ -124,7 +125,7 @@ export function ScheduleAppointmentModal() {
       
       const [aptHours, aptMinutes] = apt.time.split(':').map(Number);
       const aptStart = aptHours * 60 + aptMinutes;
-      const aptDuration = apt.duration || 30;
+      const aptDuration = normalizeBookingDuration(apt.duration);
       const aptEnd = aptStart + aptDuration;
 
       return (newStart < aptEnd) && (newEnd > aptStart);
@@ -176,7 +177,7 @@ export function ScheduleAppointmentModal() {
         patientId: String(formData.patientId),
         date: formData.date,
         time: formData.time,
-        duration: parseInt(formData.duration),
+        duration: normalizeBookingDuration(formData.duration),
         type: formData.type,
         customType: formData.customType,
         doctor: formData.doctor,
@@ -246,7 +247,7 @@ export function ScheduleAppointmentModal() {
 
                 <div className="max-h-64 overflow-auto space-y-2">
                   {TIME_SLOTS.map(slot => {
-                    const busy = formData.date ? isSlotBusy(slot, parseInt(formData.duration)) : false;
+                    const busy = formData.date ? isSlotBusy(slot, normalizeBookingDuration(formData.duration)) : false;
 
                     // Determine if the slot is in the past relative to selected date
                     const dateStr = formData.date || formatDateToYYYYMMDD(new Date());
@@ -388,7 +389,7 @@ export function ScheduleAppointmentModal() {
                 </SelectTrigger>
                 <SelectContent>
                   {TIME_SLOTS.map((slot, index) => {
-                    const busy = isSlotBusy(slot, parseInt(formData.duration));
+                    const busy = isSlotBusy(slot, normalizeBookingDuration(formData.duration));
                     return (
                       <SelectItem key={slot} value={index.toString()} disabled={busy}>
                         {formatTimeTo12h(slot)} {busy && "(Occupied)"}
@@ -404,13 +405,13 @@ export function ScheduleAppointmentModal() {
             <Label>Duration</Label>
             <Select
               value={formData.duration}
-              onValueChange={(value) => setFormData(prev => ({ ...prev, duration: value }))}
+              onValueChange={(value) => setFormData(prev => ({ ...prev, duration: String(normalizeBookingDuration(value)) }))}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Select duration" />
               </SelectTrigger>
               <SelectContent>
-                {[15, 30, 45, 60, 90, 120].map((mins) => {
+                {ALLOWED_BOOKING_DURATIONS.map((mins) => {
                   const busy = formData.time ? isSlotBusy(formData.time, mins) : false;
                   return (
                     <SelectItem key={mins} value={String(mins)} disabled={busy}>

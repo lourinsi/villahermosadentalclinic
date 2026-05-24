@@ -128,7 +128,25 @@ export const DEFAULT_PAYMENT_STATUS_OPTIONS: BookingStatusOption[] = [
   { key: 5, value: "pay-at-clinic", label: "Pay at Clinic", description: "Payment to be made at clinic", bgColor: "bg-blue-50", textColor: "text-blue-700" },
 ];
 
-type AppointmentTypeDurations = Record<string, number>;
+export const ALLOWED_BOOKING_DURATIONS = [30, 60, 90, 120] as const;
+export type BookingDuration = typeof ALLOWED_BOOKING_DURATIONS[number];
+
+const ALLOWED_BOOKING_DURATION_SET = new Set<number>(ALLOWED_BOOKING_DURATIONS);
+
+export function isAllowedBookingDuration(value?: unknown) {
+  const duration = Number(value);
+  return Number.isInteger(duration) && ALLOWED_BOOKING_DURATION_SET.has(duration);
+}
+
+export function normalizeBookingDuration(
+  value?: unknown,
+  fallback: BookingDuration = 30
+): BookingDuration {
+  const duration = Number(value);
+  return isAllowedBookingDuration(duration) ? (duration as BookingDuration) : fallback;
+}
+
+type AppointmentTypeDurations = Record<string, BookingDuration>;
 
 export const DEFAULT_APPOINTMENT_TYPE_DURATIONS: AppointmentTypeDurations = {
   "Routine Cleaning": 30,
@@ -241,6 +259,32 @@ export function shouldShowBookingHistoryLog(log: any) {
 
   const { nextStatus } = getBookingHistoryPaymentStatusChange(log);
   return Number(log?.amount || 0) > 0 || isSignificantBookingPaymentStatus(nextStatus);
+}
+
+const hasHistoryNotesField = (state?: any) =>
+  Boolean(state && Object.prototype.hasOwnProperty.call(state, "notes"));
+
+const normalizeBookingHistoryNotes = (value?: unknown) => {
+  const text = String(value ?? "").trim();
+  if (!text || /^(?:-|none|null|undefined)$/i.test(text)) return "";
+  return text;
+};
+
+export function getBookingHistoryNotes(log: any) {
+  if (!log) return "";
+
+  if (hasHistoryNotesField(log.newState)) {
+    return normalizeBookingHistoryNotes(log.newState.notes);
+  }
+
+  const topLevelNotes = normalizeBookingHistoryNotes(log.notes);
+  if (topLevelNotes) return topLevelNotes;
+
+  if (hasHistoryNotesField(log.previousState)) {
+    return normalizeBookingHistoryNotes(log.previousState.notes);
+  }
+
+  return "";
 }
 
 export function getBookingDoctorInitials(name?: string) {
@@ -504,7 +548,7 @@ export function getBookingAutoPreselectConfig({
   }
 
   const selectedAppointmentType = appointmentType || defaultAppointmentType;
-  const durationToSearch = String(appointmentTypeDurations[selectedAppointmentType] || 30);
+  const durationToSearch = String(normalizeBookingDuration(appointmentTypeDurations[selectedAppointmentType]));
 
   return {
     type: "search",
@@ -532,9 +576,9 @@ export async function findNextAvailableBookingSlot({
   maxDaysToCheck?: number;
   logPrefix?: string;
 }): Promise<BookingSlot | null> {
-  if (!doctorToCheck || !durationToCheck) return null;
+  if (!doctorToCheck) return null;
 
-  const durationMins = parseInt(durationToCheck, 10) || 30;
+  const durationMins = normalizeBookingDuration(durationToCheck);
   const start = parseLocalDateOnly(startDate) ?? new Date();
 
   const getSlotsForDate = async (date: Date) => {
@@ -599,7 +643,7 @@ export async function findNextAvailableBookingSlot({
           if (isCartAppointmentStatus(appointment.status)) continue;
 
           const appointmentStart = bookingTimeToMinutes(appointment.time);
-          const appointmentEnd = appointmentStart + (appointment.duration || 30);
+          const appointmentEnd = appointmentStart + normalizeBookingDuration(appointment.duration);
           if (slotMinutes < appointmentEnd && slotEndMinutes > appointmentStart) {
             isConflict = true;
             break;
@@ -612,7 +656,7 @@ export async function findNextAvailableBookingSlot({
             if (isCartAppointmentStatus(appointment.status)) continue;
 
             const appointmentStart = bookingTimeToMinutes(appointment.time);
-            const appointmentEnd = appointmentStart + (appointment.duration || 30);
+            const appointmentEnd = appointmentStart + normalizeBookingDuration(appointment.duration);
             if (slotMinutes < appointmentEnd && slotEndMinutes > appointmentStart) {
               isConflict = true;
               break;
@@ -673,7 +717,10 @@ export function getBookingActor({
     canCreatePatients: isStaffBookingMode || effectiveRole === 'public',
     canManagePricing: isStaffBookingMode,
     canManageStatuses,
-    isDoctorSelectionLocked: userRole === 'doctor' && !isEditing,
+    // Doctors should have the doctor selection locked in the doctor portal
+    // (they should not be able to pick other doctors). Keep this true
+    // regardless of editing mode so the doctor step is hidden for doctors.
+    isDoctorSelectionLocked: userRole === 'doctor',
   };
 }
 
@@ -724,7 +771,7 @@ export function getBookingConflictWarnings({
   duration?: string | number | null;
 }): BookingConflictWarning[] {
   const warnings: BookingConflictWarning[] = [];
-  const durationLabel = duration ? `${duration} minute duration` : 'Selected duration';
+  const durationLabel = duration ? `${normalizeBookingDuration(duration)} minute duration` : 'Selected duration';
 
   if (durationConflict) {
     warnings.push({

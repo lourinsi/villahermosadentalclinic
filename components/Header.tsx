@@ -147,7 +147,7 @@ export function Header({
     <header className="sticky top-0 z-50 border-b border-gray-100 bg-white/95 shadow-sm backdrop-blur">
       <div className="mx-auto max-w-[1500px] px-4 sm:px-6 lg:px-8">
         <div className="flex h-20 items-center justify-between gap-5">
-          <Link href="/" className="flex min-w-fit items-center">
+          <Link href="/" prefetch={false} className="flex min-w-fit items-center">
             <h1 className="text-2xl font-black tracking-tight text-primary lg:text-[1.65rem]">
               Villahermosa Dental
             </h1>
@@ -158,6 +158,7 @@ export function Header({
               <Link
                 key={link.href}
                 href={link.href}
+                prefetch={false}
                 className="text-sm font-semibold text-gray-900 transition-colors hover:text-primary"
               >
                 {link.label}
@@ -235,7 +236,7 @@ export function Header({
               <DropdownMenuContent align="end" className="w-72 p-2">
                 {navLinks.map((link) => (
                   <DropdownMenuItem key={link.href} asChild>
-                    <Link href={link.href}>{link.label}</Link>
+                    <Link href={link.href} prefetch={false}>{link.label}</Link>
                   </DropdownMenuItem>
                 ))}
                 <DropdownMenuSeparator />

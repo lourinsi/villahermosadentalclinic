@@ -24,6 +24,7 @@ interface PaymentModalContextType {
   appointments: Appointment[];
   paymentId: string | null;
   paymentData: Payment | null;
+  initialRecord: Partial<Payment> | null;
   openPaymentModal: (patientId: string, patientName: string, appointments: Appointment[], appointmentId?: string | null) => void;
   // Open the payment modal for a single appointment (admin-facing helper)
   openPaymentFor: (appointment?: Appointment | null, patientId?: string | null, patientName?: string | null) => void;
@@ -44,14 +45,16 @@ export const PaymentModalProvider = ({ children }: { children: ReactNode }) => {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [paymentId, setPaymentId] = useState<string | null>(null);
   const [paymentData, setPaymentData] = useState<Payment | null>(null);
+  const [initialRecord, setInitialRecord] = useState<Partial<Payment> | null>(null);
 
-  const openPaymentModal = useCallback((pId: string, pName: string, apts: Appointment[], aptId: string | null = null) => {
+  const openPaymentModal = useCallback((pId: string, pName: string, apts: Appointment[], aptId: string | null = null, initRecord: Partial<Payment> | null = null) => {
     setPatientId(pId);
     setPatientName(pName);
     setAppointments(apts);
-    setAppointmentId(aptId);
+    setAppointmentId(aptId != null ? String(aptId) : null);
     setPaymentId(null);
     setPaymentData(null);
+    setInitialRecord(initRecord || null);
     setPaymentModalOpen(true);
   }, []);
 
@@ -59,7 +62,7 @@ export const PaymentModalProvider = ({ children }: { children: ReactNode }) => {
     setPatientId(pId || null);
     setPatientName(pName || null);
     setAppointments(appointment ? [appointment] : []);
-    setAppointmentId(appointment?.id || null);
+    setAppointmentId(appointment?.id != null ? String(appointment.id) : null);
     setPaymentId(null);
     setPaymentData(null);
     setPaymentModalOpen(true);
@@ -68,18 +71,24 @@ export const PaymentModalProvider = ({ children }: { children: ReactNode }) => {
   const openPatientPaymentFor = useCallback((appointment?: Appointment | null) => {
     // Prefer passing a single appointment to the modal to avoid races with global refresh
     setAppointments(appointment ? [appointment] : []);
-    setAppointmentId(appointment?.id || null);
+    setAppointmentId(appointment?.id != null ? String(appointment.id) : null);
     setPatientPaymentModalOpen(true);
   }, []);
 
   const openEditPaymentModal = useCallback((pId: string, pData: any, pIdParam?: string | null, apts?: Appointment[]) => {
-    setPaymentId(pId);
+    // Debug: trace edit modal opens
+    try {
+      // eslint-disable-next-line no-console
+      console.log("[usePaymentModal] openEditPaymentModal", { pId, pData, pIdParam, aptsLength: apts?.length });
+    } catch (e) {}
+    setPaymentId(pId != null ? String(pId) : null);
     setPaymentData(pData);
-    setAppointmentId(pData.appointmentId || null);
-    setPatientId(pIdParam || pData.patientId || null);
+    setAppointmentId(pData?.appointmentId != null ? String(pData.appointmentId) : null);
+    setPatientId(pIdParam || (pData?.patientId != null ? String(pData.patientId) : null) || null);
     setPatientName(null);
     setAppointments(apts || []);
-    setPaymentModalOpen(true);
+    // Open modal on next tick to ensure paymentId/paymentData state is flushed
+    setTimeout(() => setPaymentModalOpen(true), 0);
   }, []);
 
   const closePaymentModal = useCallback(() => {
@@ -91,6 +100,7 @@ export const PaymentModalProvider = ({ children }: { children: ReactNode }) => {
     setAppointments([]);
     setPaymentId(null);
     setPaymentData(null);
+    setInitialRecord(null);
   }, []);
 
   const value = useMemo(() => ({
@@ -102,6 +112,7 @@ export const PaymentModalProvider = ({ children }: { children: ReactNode }) => {
     appointments,
     paymentId,
     paymentData,
+    initialRecord,
     openPaymentModal,
   openPaymentFor,
     openEditPaymentModal,
@@ -116,6 +127,7 @@ export const PaymentModalProvider = ({ children }: { children: ReactNode }) => {
     appointments,
     paymentId,
     paymentData,
+    initialRecord,
     openPaymentModal,
   openPaymentFor,
   openPatientPaymentFor,

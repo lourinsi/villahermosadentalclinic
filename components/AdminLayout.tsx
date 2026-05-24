@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth.tsx";
 import { useBookingModalMode } from "@/hooks/useBookingModalMode";
 import { Button } from "@/components/ui/button";
-import { LogOut, User, LayoutDashboard, Users, Calendar, Shield, Bell, ClipboardList, Stethoscope, DollarSign } from "lucide-react";
+import { LogOut, User, LayoutDashboard, Users, Calendar, Shield, Bell, ClipboardList, Stethoscope, DollarSign, Settings } from "lucide-react";
 import { toast } from "sonner";
 import NotificationsOpened from "./notificationsOpened";
 import BookingModalWrapper from "./BookingModalWrapper";
@@ -34,6 +34,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
     selectedAppointment,
     newAppointmentDate,
     newAppointmentTime
+    , newAppointmentCreationMode
   } = useAppointmentModal();
   const {
     isAppointmentHistoryOpen,
@@ -48,6 +49,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   } = useNotificationAppointmentSnapshot(appointments);
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
+  const isBookingModalOpen = isEditModalOpen || isCreateModalOpen;
 
   const handleUpdateAppointmentStatus = async (appointmentId: string, status: string, notificationId: string) => {
     try {
@@ -105,6 +107,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
     { href: "/admin/finance", label: "Finance", icon: DollarSign },
     { href: "/admin/staff", label: "Staff", icon: Shield },
     { href: "/admin/notifications", label: "Notifications", icon: Bell },
+    { href: "/admin/settings", label: "Settings", icon: Settings },
   ];
 
   return (
@@ -120,6 +123,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
                 <li key={item.href}>
                   <Link
                     href={item.href}
+                    prefetch={false}
                     className={`flex items-center gap-3 px-4 py-3 mx-2 rounded-lg transition-colors ${
                       isActive
                         ? "bg-blue-950 text-white"
@@ -194,18 +198,21 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
         />
         
         {/* Support editing appointments from notifications */}
-        <BookingModalWrapper 
-          open={isEditModalOpen || isCreateModalOpen} 
-          onOpenChange={(open) => {
-            if (!open) {
-              closeEditModal();
-              closeCreateModal();
-            }
-          }}
-          appointmentToEdit={selectedAppointment}
-          defaultDate={newAppointmentDate}
-          defaultTime={newAppointmentTime}
-        />
+        {isBookingModalOpen && (
+          <BookingModalWrapper
+            open={isBookingModalOpen}
+            onOpenChange={(open) => {
+              if (!open) {
+                closeEditModal();
+                closeCreateModal();
+              }
+            }}
+            appointmentToEdit={selectedAppointment}
+            defaultDate={newAppointmentDate}
+            defaultTime={newAppointmentTime}
+            appointmentCreationMode={newAppointmentCreationMode}
+          />
+        )}
       </div>
     </div>
   );

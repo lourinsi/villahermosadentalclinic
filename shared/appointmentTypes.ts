@@ -27,9 +27,9 @@ export const APPOINTMENT_PRICES: Record<string, number> = {
 export const APPOINTMENT_TYPE_DURATIONS: Record<string, number> = {
   "Routine Cleaning": 30,
   "Checkup": 30,
-  "Filling": 45,
-  "Root Canal": 60,
-  "Extraction": 45,
+  "Filling": 60,
+  "Root Canal": 90,
+  "Extraction": 60,
   "Whitening": 60,
   "Other": 30,
 };

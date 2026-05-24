@@ -47,12 +47,28 @@ export interface AppointmentFilters {
   includeUnpaid?: boolean;
 }
 
-export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFilters) => {
+interface UseAppointmentsOptions {
+  enabled?: boolean;
+}
+
+export const useAppointments = (
+  refreshTrigger?: number,
+  filters?: AppointmentFilters,
+  options?: UseAppointmentsOptions
+) => {
+  const enabled = options?.enabled ?? true;
   const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(enabled);
 
   // Load appointments from backend on mount and when refreshTrigger or filters change
   useEffect(() => {
+    if (!enabled) {
+      setIsLoading(false);
+      return;
+    }
+
+    let isMounted = true;
+
     const loadAppointments = async () => {
       try {
         setIsLoading(true);
@@ -69,9 +85,6 @@ export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFi
         if (filters?.includeUnpaid) queryParams.append("includeUnpaid", "true");
 
         const url = queryParams.toString() ? `${API_URL}?${queryParams.toString()}` : API_URL;
-        try {
-          console.debug("useAppointments: fetching appointments URL:", url);
-        } catch (e) {}
         
         // Get auth token from localStorage
         const token = typeof window !== 'undefined' ? localStorage.getItem("authToken") : null;
@@ -84,7 +97,7 @@ export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFi
         
         const response = await fetch(url, { headers, credentials: "include" });
         const result = await response.json();
-        if (result.success && result.data) {
+        if (isMounted && result.success && result.data) {
           setAppointments(
             result.data.map((appointment: Appointment) => ({
               ...appointment,
@@ -95,14 +108,18 @@ export const useAppointments = (refreshTrigger?: number, filters?: AppointmentFi
       } catch (error) {
         console.error("Error loading appointments from backend:", error);
         // Fallback to empty list if backend is unavailable
-        setAppointments([]);
+        if (isMounted) setAppointments([]);
       } finally {
-        setIsLoading(false);
+        if (isMounted) setIsLoading(false);
       }
     };
 
     loadAppointments();
-  }, [refreshTrigger, filters?.startDate, filters?.endDate, filters?.search, filters?.doctor, filters?.type, filters?.status, filters?.patientId, filters?.parentId, filters?.anonymize, filters?.includeUnpaid]);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [enabled, refreshTrigger, filters?.startDate, filters?.endDate, filters?.search, filters?.doctor, filters?.type, filters?.status, filters?.patientId, filters?.parentId, filters?.anonymize, filters?.includeUnpaid]);
 
   const addAppointment = async (appointment: Omit<Appointment, "id" | "createdAt">) => {
     try {

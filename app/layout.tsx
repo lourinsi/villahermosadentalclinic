@@ -8,7 +8,7 @@ import "./globals.css";
 import { Toaster } from "sonner";
 import { ScheduleAppointmentModal } from "@/components/ScheduleAppointmentModal";
 import { AddPatientModal } from "@/components/AddPatientModal";
-import { RecordPaymentModal } from "@/components/RecordPaymentModal";
+import { PaymentModal } from "@/components/PaymentModal";
 import { PatientPaymentModal } from "@/components/PatientPaymentModal";
 import { GlobalBookingModalWrapper } from "@/components/GlobalBookingModalWrapper";
 
@@ -46,7 +46,7 @@ export default function RootLayout({
                 <ScheduleAppointmentModal />
                 <AddPatientModal />
                 <GlobalBookingModalWrapper />
-                <RecordPaymentModal />
+                <PaymentModal />
                 <PatientPaymentModal />
               </PaymentModalProvider>
             </AppointmentModalProvider>

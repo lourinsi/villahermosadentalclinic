@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel, SelectSeparator } from "./ui/select";
 import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
 import { usePaymentStatuses } from "@/hooks/usePaymentStatuses";
 import {
@@ -45,8 +45,11 @@ import {
   HeartPulse,
   Info,
   Calendar,
+  ChevronDown,
   ChevronRight,
-  UserPlus
+  ChevronUp,
+  UserPlus,
+  Search
 } from "lucide-react";
 
 import {
@@ -58,6 +61,7 @@ import {
 
 import ConfirmDialog from "./ConfirmDialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useDoctors } from "@/hooks/useDoctors";
 import { Appointment } from "../hooks/useAppointments";
 import { RecentTransaction } from "../lib/finance-types";
 import { DentalChart } from "./DentalChart";
@@ -100,6 +104,35 @@ export interface Patient {
   dentalCharts?: { date: string; data: string; isEmpty: boolean }[];
 }
 
+const resolveImageSource = (source?: string) => {
+  if (!source) return undefined;
+  if (source.startsWith("http") || source.startsWith("data:") || source.startsWith("blob:")) return source;
+  return apiUrl(source);
+};
+
+const getDoctorImageFromSnapshot = (s?: any) => {
+  if (!s) return undefined;
+  return (
+    resolveImageSource(s.doctorProfile) ||
+    resolveImageSource(s.doctorProfilePicture) ||
+    resolveImageSource(s.doctorPhoto) ||
+    resolveImageSource(s.doctorImage) ||
+    (s.doctor && resolveImageSource(s.doctor.profilePicture)) ||
+    undefined
+  );
+};
+
+const getInitials = (name?: string) => {
+  if (!name) return "?";
+  return name
+    .split(" ")
+    .filter(Boolean)
+    .map((p) => p[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+};
+
 export type PatientDetailsRef = {
   save: () => Promise<boolean>;
   changedFields: Record<string, { old: any; new: any }>;
@@ -131,6 +164,7 @@ export function PatientDetailsModal({
   onOpenBookingModal,
 }: PatientDetailsModalProps) {
   const [isHeaderSaving, setIsHeaderSaving] = useState(false);
+  const [serverPatient, setServerPatient] = useState<Patient | null>(null);
   const patientDisplayName = patient?.name || [patient?.firstName, patient?.lastName].filter(Boolean).join(" ") || "Patient";
   const patientInitials = patientDisplayName
     .split(" ")
@@ -139,6 +173,10 @@ export function PatientDetailsModal({
     .join("")
     .slice(0, 2)
     .toUpperCase() || "P";
+
+  const { refreshTrigger } = useAppointmentModal();
+  const displayedBalance = serverPatient?.balance ?? patient?.balance ?? 0;
+  const displayedStatus = serverPatient?.status ?? patient?.status ?? "active";
 
   const handleSave = async () => {
     const refObject = detailsRef && typeof detailsRef === "object" && "current" in detailsRef ? detailsRef : null;
@@ -151,6 +189,34 @@ export function PatientDetailsModal({
       setIsHeaderSaving(false);
     }
   };
+
+  // When the modal opens, fetch the authoritative patient record so the
+  // displayed status reflects server-side computation (which considers
+  // appointment paymentStatus values). Fall back to the provided `patient`
+  // prop if the fetch fails.
+  useEffect(() => {
+    let mounted = true;
+    const loadPatient = async () => {
+      if (!open || !patient?.id) {
+        setServerPatient(null);
+        return;
+      }
+
+      try {
+        const res = await fetch(apiUrl(`/api/patients/${encodeURIComponent(String(patient.id))}`), { credentials: 'include' });
+        const json = await res.json();
+        if (mounted && json && json.success && json.data) {
+          setServerPatient(json.data as Patient);
+        }
+      } catch (err) {
+        console.warn('Failed to fetch authoritative patient record:', err);
+        setServerPatient(null);
+      }
+    };
+
+    loadPatient();
+    return () => { mounted = false; };
+  }, [open, patient?.id, refreshTrigger]);
 
   const getStatusBadge = (status: string | undefined) => {
     const s = status?.toLowerCase() || "active";
@@ -184,14 +250,14 @@ export function PatientDetailsModal({
                     {patientInitials}
                   </AvatarFallback>
                 </Avatar>
-                <div className={`absolute bottom-0 right-0 h-5 w-5 rounded-full border-2 border-white shadow-sm ${patient?.status === 'inactive' ? 'bg-slate-300' : 'bg-emerald-500'}`} />
+                <div className={`absolute bottom-0 right-0 h-5 w-5 rounded-full border-2 border-white shadow-sm ${(serverPatient?.status ?? patient?.status) === 'inactive' ? 'bg-slate-300' : 'bg-emerald-500'}`} />
               </div>
               <div className="min-w-0 space-y-1.5">
                 <div className="flex flex-wrap items-center gap-3">
                   <DialogTitle className="text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl">
                     {patientDisplayName}
                   </DialogTitle>
-                  {getStatusBadge(patient?.status)}
+                  {getStatusBadge(serverPatient?.status ?? patient?.status)}
                 </div>
                 <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 text-sm font-semibold text-slate-500">
                   {patient?.email ? (
@@ -253,18 +319,18 @@ export function PatientDetailsModal({
               <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(185px,1fr))]">
                 <div className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
                   <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Account Status</span>
-                  <div className="flex items-center pt-0.5">{getStatusBadge(patient.status)}</div>
+                  <div className="flex items-center pt-0.5">{getStatusBadge(displayedStatus)}</div>
                 </div>
                 <div className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
                   <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Outstanding Balance</span>
-                  <span className={`truncate text-xl font-black leading-tight ${(patient.balance || 0) > 0 ? "text-red-600" : "text-emerald-600"}`}>
-                    PHP {Number(patient.balance || 0).toLocaleString()}
+                  <span className={`truncate text-xl font-black leading-tight ${(displayedBalance || 0) > 0 ? "text-red-600" : "text-emerald-600"}`}>
+                    PHP {Number(displayedBalance || 0).toLocaleString()}
                   </span>
                 </div>
                 <div className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
                   <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Patient Since</span>
                   <span className="truncate text-base font-extrabold leading-tight text-slate-700">
-                    {patient.createdAt ? new Date(patient.createdAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'N/A'}
+                    { (serverPatient?.createdAt || patient.createdAt) ? new Date((serverPatient?.createdAt || patient.createdAt) as string).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'N/A' }
                   </span>
                 </div>
                 <div className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -306,7 +372,36 @@ type PaymentRow = RecentTransaction & {
   deleted?: boolean;
 };
 
+type PaymentLogRow = {
+  id?: string;
+  appointmentId?: string;
+  amount?: number;
+  paymentMethod?: string;
+  paymentStatus?: string;
+  changedBy?: string;
+  changedByName?: string;
+  changedAt?: string | Date;
+  previousBalance?: number;
+  newBalance?: number;
+};
+
+type AppointmentLogRow = {
+  id?: string;
+  appointmentId?: string;
+  previousState?: any;
+  newState?: any;
+  changedBy?: string;
+  changedByName?: string;
+  changedAt?: string | Date;
+  changeType?: string;
+  amount?: number;
+  notes?: string;
+};
+
 const isLegacyPaymentRow = (txn: RecentTransaction) => String(txn.id || "").startsWith("legacy-");
+const isStoredPaymentLogRow = (txn: RecentTransaction) =>
+  String((txn as any).source || "") === "payment-log" || String(txn.id || "").startsWith("payment-log-");
+const isReadOnlyPaymentRow = (txn: RecentTransaction) => isLegacyPaymentRow(txn) || isStoredPaymentLogRow(txn);
 
 const toDateOnly = (value?: string | Date) => {
   if (!value) return "";
@@ -326,6 +421,58 @@ const parsePaymentTimestamp = (value?: string | Date) => {
   const parsed = new Date(normalized).getTime();
 
   return Number.isNaN(parsed) ? 0 : parsed;
+};
+
+const getPaymentEventTimestamps = (txn: RecentTransaction) => {
+  const row = txn as PaymentRow;
+
+  return [row.createdAt, row.updatedAt, txn.date]
+    .map(parsePaymentTimestamp)
+    .filter((timestamp, index, timestamps) => timestamp > 0 && timestamps.indexOf(timestamp) === index);
+};
+
+const getPaymentEventDateKey = (txn: RecentTransaction) => {
+  const row = txn as PaymentRow;
+
+  return toDateOnly(row.createdAt) || toDateOnly(row.updatedAt) || toDateOnly(txn.date);
+};
+
+const hasClosePaymentTimestamp = (a: RecentTransaction, b: RecentTransaction) =>
+  getPaymentEventTimestamps(a).some((aTime) =>
+    getPaymentEventTimestamps(b).some((bTime) => Math.abs(aTime - bTime) <= 10_000)
+  );
+
+const isSamePaymentEvent = (a: RecentTransaction, b: RecentTransaction) => {
+  if (!a.appointmentId || !b.appointmentId) return false;
+  if (String(a.appointmentId) !== String(b.appointmentId)) return false;
+
+  const aSource = String((a as any).source || "");
+  const bSource = String((b as any).source || "");
+  const hasCollectionPayment = aSource === "payment" || bSource === "payment";
+  const hasPaymentLog = aSource === "payment-log" || bSource === "payment-log";
+  const hasCloseTimestamp = hasClosePaymentTimestamp(a, b);
+
+  if (hasCollectionPayment && hasPaymentLog && hasCloseTimestamp) return true;
+
+  if (Math.abs(Number(a.amount || 0) - Number(b.amount || 0)) > 0.01) return false;
+  if (hasCloseTimestamp) return true;
+
+  return getPaymentEventDateKey(a) === getPaymentEventDateKey(b);
+};
+
+const findMatchingAppointmentPaymentLog = (paymentLog: PaymentLogRow, appointmentLogs: AppointmentLogRow[]) => {
+  const paymentAmount = Number(paymentLog.amount || 0);
+  const paymentTime = parsePaymentTimestamp(paymentLog.changedAt);
+
+  return appointmentLogs.find((appointmentLog) => {
+    if (String(appointmentLog.appointmentId || "") !== String(paymentLog.appointmentId || "")) return false;
+    if (Math.abs(Number(appointmentLog.amount || 0) - paymentAmount) > 0.01) return false;
+
+    const appointmentLogTime = parsePaymentTimestamp(appointmentLog.changedAt);
+    if (paymentTime && appointmentLogTime) return Math.abs(paymentTime - appointmentLogTime) <= 10_000;
+
+    return toDateOnly(appointmentLog.changedAt) === toDateOnly(paymentLog.changedAt);
+  });
 };
 
 const comparePaymentTransactionsDesc = (a: RecentTransaction, b: RecentTransaction) => {
@@ -417,6 +564,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 }, ref) => {
   const { refreshPatients, appointments } = useAppointmentModal();
   const { openPaymentModal, openEditPaymentModal } = usePaymentModal();
+  const { doctors } = useDoctors(undefined, { enabled: true });
   const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
   const { statuses: PAYMENT_STATUSES } = usePaymentStatuses();
   const [formData, setFormData] = useState({
@@ -528,9 +676,11 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     };
   }, [getHistoryAppointmentType]);
 
-  const buildPatientTransactions = React.useCallback((history: Appointment[], payments: PaymentRow[] = []) => {
+  const buildPatientTransactions = React.useCallback((history: Appointment[], payments: PaymentRow[] = [], paymentLogs: PaymentLogRow[] = [], appointmentLogs: AppointmentLogRow[] = []) => {
     const appointmentById = new Map(history.map((apt) => [apt.id, apt]));
-    const realRows = payments
+
+    // Normalize payments coming from the payments collection
+    const paymentsFromCollection = payments
       .filter((payment) => !payment.deleted)
       .map((payment) => {
         const appointment = payment.appointmentId ? appointmentById.get(payment.appointmentId) : undefined;
@@ -545,6 +695,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           amount: Number(payment.amount || 0),
           type: payment.type || "payment",
           method: payment.method || "Unknown",
+          source: (payment as any).source || "payment",
           appointmentId: payment.appointmentId,
           appointmentType,
           appointmentDate,
@@ -553,13 +704,110 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         } as RecentTransaction;
       });
 
-    const realAppointmentIds = new Set(realRows.map((row) => row.appointmentId).filter(Boolean));
+    // Also include any per-appointment embedded `transactions` (legacy storage) as individual rows
+    const keys = new Set(paymentsFromCollection.map(getPaymentTransactionKey));
+    const historyRows: RecentTransaction[] = [];
+    history.forEach((apt) => {
+      const txns = Array.isArray(apt.transactions) ? apt.transactions : [];
+      txns.forEach((rawTxn: any) => {
+        const appointmentType = rawTxn.appointmentType || getHistoryAppointmentType(apt);
+        const appointmentDate = rawTxn.appointmentDate || String(apt.date || "");
+        const txn: RecentTransaction = {
+          ...rawTxn,
+          id: rawTxn.id || rawTxn.transactionId || `apt-${apt.id}-txn-${rawTxn.date || ''}-${rawTxn.method || ''}-${rawTxn.amount || 0}`,
+          date: toDateOnly(rawTxn.date) || toDateOnly(rawTxn.createdAt) || toDateOnly(apt.updatedAt) || toDateOnly(apt.createdAt),
+          description: rawTxn.description || rawTxn.notes || `Payment for ${appointmentType}`,
+          amount: Number(rawTxn.amount || 0),
+          type: rawTxn.type || "payment",
+          method: rawTxn.method || rawTxn.paymentMethod || "Recorded",
+          source: (rawTxn as any).source || "appointment-transaction",
+          appointmentId: apt.id,
+          appointmentType,
+          appointmentDate,
+          doctor: rawTxn.doctor || apt.doctor || "",
+          status: rawTxn.status || "completed",
+        } as RecentTransaction;
+
+        const key = getPaymentTransactionKey(txn);
+        if (!keys.has(key) && Number(txn.amount || 0) > 0) {
+          historyRows.push(txn);
+          keys.add(key);
+        }
+      });
+    });
+
+    const representedRows = [...paymentsFromCollection, ...historyRows];
+    const paymentLogRows: RecentTransaction[] = paymentLogs
+      .filter((log) => Boolean(log.appointmentId) && Number(log.amount || 0) > 0)
+      .map((log) => {
+        const appointment = log.appointmentId ? appointmentById.get(log.appointmentId) : undefined;
+        const appointmentType = appointment ? getHistoryAppointmentType(appointment) : "Appointment Payment";
+        const appointmentDate = appointment ? String(appointment.date || "") : "";
+        const changedAt = log.changedAt || new Date().toISOString();
+        const matchingAppointmentLog = findMatchingAppointmentPaymentLog(log, appointmentLogs);
+        const appointmentSnapshot = matchingAppointmentLog?.newState && typeof matchingAppointmentLog.newState === "object"
+          ? {
+              ...(matchingAppointmentLog.newState || {}),
+              id: matchingAppointmentLog.newState?.id || log.appointmentId,
+              appointmentId: log.appointmentId,
+              logType: "payment",
+              changeType: matchingAppointmentLog.changeType || "payment",
+              changedAt: matchingAppointmentLog.changedAt || changedAt,
+              changedBy: matchingAppointmentLog.changedBy || log.changedBy,
+              changedByName: matchingAppointmentLog.changedByName || log.changedByName,
+              amount: Number(log.amount || 0),
+              paymentAmount: Number(log.amount || 0),
+              paymentMethod: log.paymentMethod,
+              paymentStatus: log.paymentStatus,
+              previousBalance: log.previousBalance,
+              newBalance: log.newBalance,
+            }
+          : undefined;
+
+        return {
+          id: `payment-log-${log.id || `${log.appointmentId}-${String(changedAt)}-${log.amount}`}`,
+          appointmentId: log.appointmentId,
+          appointmentType,
+          appointmentDate,
+          doctor: appointment?.doctor || "",
+          date: toDateOnly(changedAt) || toDateOnly(appointmentDate),
+          description: `Payment for ${appointmentType}`,
+          amount: Number(log.amount || 0),
+          type: "payment",
+          method: log.paymentMethod || "Payment log",
+          transactionId: log.id || `LOG-${log.appointmentId}`,
+          notes: log.changedByName ? `Recorded by ${log.changedByName}` : undefined,
+          status: log.paymentStatus || "completed",
+          source: "payment-log",
+          appointmentSnapshot,
+          changedAt,
+          changedBy: log.changedBy,
+          changedByName: log.changedByName,
+          previousBalance: log.previousBalance,
+          newBalance: log.newBalance,
+          createdAt: changedAt,
+          updatedAt: changedAt,
+        } as RecentTransaction;
+      })
+      .filter((txn) => {
+        const key = getPaymentTransactionKey(txn);
+        if (keys.has(key)) return false;
+        if (representedRows.some((row) => isSamePaymentEvent(txn, row))) return false;
+
+        keys.add(key);
+        return true;
+      });
+
+    const realAppointmentIds = new Set(
+      [...paymentsFromCollection, ...historyRows, ...paymentLogRows].map((row) => row.appointmentId).filter(Boolean)
+    );
+
     const legacyRows = history
       .filter((apt) => !realAppointmentIds.has(apt.id))
       .map(createLegacyPaymentRow)
       .filter(Boolean) as RecentTransaction[];
 
-    return [...realRows, ...legacyRows]
+    return [...paymentsFromCollection, ...historyRows, ...paymentLogRows, ...legacyRows]
       .filter((txn) => Number(txn.amount || 0) > 0)
       .sort(comparePaymentTransactionsDesc);
   }, [createLegacyPaymentRow, getHistoryAppointmentType]);
@@ -618,13 +866,16 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const [pdConfirmMessage, setPdConfirmMessage] = useState<string>("");
 
   // New state for filters
-  const [historyStatusFilter, setHistoryStatusFilter] = useState('all');
+  const [historyPaymentStatusFilter, setHistoryPaymentStatusFilter] = useState('all');
+  const [historyAppointmentStatusFilter, setHistoryAppointmentStatusFilter] = useState('all');
   const [historyDoctorFilter, setHistoryDoctorFilter] = useState('all');
   const [historyProcedureFilter, setHistoryProcedureFilter] = useState('all');
+  const [historySearchFilter, setHistorySearchFilter] = useState('');
 
   // Snapshot states
   const [isSnapshotOpen, setIsSnapshotOpen] = useState(false);
   const [selectedSnapshot, setSelectedSnapshot] = useState<any>(null);
+  const [selectedSnapshotIsHistorical, setSelectedSnapshotIsHistorical] = useState(false);
   const [snapshotLogDate, setSnapshotLogDate] = useState("");
   const selectedSnapshotAppointmentId = selectedSnapshot?.id || selectedSnapshot?.appointmentId || "";
   const isSelectedSnapshotAppointmentOpen = Boolean(
@@ -633,38 +884,105 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     String(openBookingAppointmentId) === String(selectedSnapshotAppointmentId)
   );
 
-  const isPaymentLogTransaction = React.useCallback((transaction: RecentTransaction) => {
-    if (isLegacyPaymentRow(transaction) || !transaction.appointmentId) return false;
+  const isLatestPaymentTransaction = React.useCallback((transaction: RecentTransaction) => {
+    if (!transaction.appointmentId) return true;
 
     const matchingTransactions = allTransactions.filter((txn) =>
       !isLegacyPaymentRow(txn) &&
       String(txn.appointmentId || "") === String(transaction.appointmentId || "")
     );
 
-    if (matchingTransactions.length <= 1) return false;
+    if (matchingTransactions.length <= 1) return true;
 
     const latestTransaction = [...matchingTransactions].sort(comparePaymentTransactionsDesc)[0];
 
-    return getPaymentTransactionKey(latestTransaction) !== getPaymentTransactionKey(transaction);
+    return getPaymentTransactionKey(latestTransaction) === getPaymentTransactionKey(transaction);
   }, [allTransactions]);
 
+  const isPaymentLogTransaction = React.useCallback((transaction: RecentTransaction) => {
+    if (isLegacyPaymentRow(transaction) || !transaction.appointmentId) return false;
+
+    return !isLatestPaymentTransaction(transaction);
+  }, [isLatestPaymentTransaction]);
+
+  const toggleExpandTransactions = (id: string) => {
+    setExpandedTransactions((prev) => {
+      const copy = new Set(prev);
+      if (copy.has(id)) copy.delete(id);
+      else copy.add(id);
+      return copy;
+    });
+  };
+
   const handleOpenSnapshot = (appointment: Appointment | HistoryAppointment, transaction?: RecentTransaction) => {
+    try {
+      console.log("[PatientDetailsModal] handleOpenSnapshot called", { appointmentId: appointment?.id, doctor: appointment?.doctor, transactionId: transaction?.id });
+    } catch (e) {}
     const originalAppointment = patientAppointments.find((apt: Appointment) => String(apt.id) === String(appointment.id));
-    const displayDate = toDateOnly(originalAppointment?.date || appointment.date);
-    const displayTime = originalAppointment?.time || appointment.time || String(appointment.date || "").split(" ")[1] || "";
-    const price = Number(appointment.price ?? originalAppointment?.price ?? 0);
-    const totalPaid = Number(appointment.totalPaid ?? originalAppointment?.totalPaid ?? 0);
-    const balance = Math.max(0, price - totalPaid);
-    const logDate = transaction?.date || appointment.updatedAt || originalAppointment?.updatedAt || appointment.createdAt || originalAppointment?.createdAt || new Date().toISOString();
+    const transactionRow = transaction as (RecentTransaction & Record<string, any>) | undefined;
+    const transactionSnapshot = transactionRow?.appointmentSnapshot && typeof transactionRow.appointmentSnapshot === "object"
+      ? transactionRow.appointmentSnapshot
+      : undefined;
+    const isHistoricalPaymentSnapshot = Boolean(transaction && isPaymentLogTransaction(transaction));
+    const snapshotBase = {
+      ...(originalAppointment || {}),
+      ...appointment,
+      ...(isHistoricalPaymentSnapshot && transactionSnapshot ? transactionSnapshot : {}),
+    } as Appointment & Record<string, any>;
+    const displayDate = toDateOnly(snapshotBase.date);
+    const displayTime = snapshotBase.time || String(snapshotBase.date || "").split(" ")[1] || "";
+    const price = Number(snapshotBase.price ?? 0);
+    const transactionNewBalance = Number(transactionRow?.newBalance);
+    const hasTransactionBalance = isHistoricalPaymentSnapshot && Number.isFinite(transactionNewBalance);
+    const totalPaid = hasTransactionBalance
+      ? Math.max(0, price - transactionNewBalance)
+      : Number(snapshotBase.totalPaid ?? 0);
+    const balance = hasTransactionBalance ? transactionNewBalance : Math.max(0, price - totalPaid);
+    const logDate = transactionRow?.changedAt || transactionRow?.createdAt || transaction?.date || snapshotBase.updatedAt || snapshotBase.createdAt || new Date().toISOString();
     const patientDisplayName =
+      snapshotBase.patientName ||
       appointment.patientName ||
       originalAppointment?.patientName ||
       patient.name ||
       [patient.firstName, patient.lastName].filter(Boolean).join(" ");
 
+    const tryResolveFromSnapshot = (s: any) => {
+      if (!s) return undefined;
+      return (
+        resolveImageSource(s.doctorProfile) ||
+        resolveImageSource(s.doctorProfilePicture) ||
+        resolveImageSource(s.doctorPhoto) ||
+        resolveImageSource(s.doctorImage) ||
+        (s.doctor && resolveImageSource(s.doctor.profilePicture))
+      );
+    };
+
+    let doctorImage = tryResolveFromSnapshot(snapshotBase) || tryResolveFromSnapshot(appointment) || tryResolveFromSnapshot(originalAppointment);
+    if (!doctorImage && Array.isArray(doctors) && doctors.length) {
+      const doctorName = String(snapshotBase.doctor || snapshotBase.doctorName || appointment.doctor || (appointment as any).doctorName || "").toLowerCase().trim();
+      const matched = doctors.find((d) => (d.name || "").toLowerCase().trim() === doctorName) || doctors.find((d) => doctorName && (d.name || "").toLowerCase().includes(doctorName));
+      if (matched && matched.profilePicture) doctorImage = resolveImageSource(matched.profilePicture);
+    }
+
+    // Normalize doctor into an object with a `name` property so downstream views can resolve it
+    const rawDoctor = snapshotBase.doctor ?? (originalAppointment as any)?.doctor ?? (appointment as any).doctor ?? null;
+    const normalizedDoctor: Record<string, any> = typeof rawDoctor === "string" && rawDoctor
+      ? { name: rawDoctor }
+      : rawDoctor && typeof rawDoctor === "object"
+        ? rawDoctor
+        : {};
+    const doctorWithPicture = {
+      ...normalizedDoctor,
+      profilePicture: doctorImage || normalizedDoctor?.profilePicture || (appointment as any).doctorProfile || (originalAppointment as any)?.doctorProfile || "",
+    };
+
     setSelectedSnapshot({
-      ...(originalAppointment || {}),
-      ...appointment,
+      ...snapshotBase,
+      logType: isHistoricalPaymentSnapshot ? "payment" : snapshotBase.logType,
+      changeType: isHistoricalPaymentSnapshot ? "payment" : snapshotBase.changeType,
+      changedAt: logDate,
+      changedBy: transactionRow?.changedBy || snapshotBase.changedBy,
+      changedByName: transactionRow?.changedByName || snapshotBase.changedByName,
       patientName: patientDisplayName,
       patientProfile: formData.profilePicture || patient.profilePicture || "",
       patientProfilePicture: formData.profilePicture || patient.profilePicture || "",
@@ -675,12 +993,24 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         lastName: patient.lastName,
         profilePicture: formData.profilePicture || patient.profilePicture || "",
       },
+      // attach resolved doctor image info so UI can prefer it
+      doctorProfile: doctorWithPicture.profilePicture || (appointment as any).doctorProfile || (originalAppointment as any)?.doctorProfile || "",
+      doctorProfilePicture: doctorWithPicture.profilePicture || (appointment as any).doctorProfilePicture || (originalAppointment as any)?.doctorProfilePicture || "",
+      doctor: doctorWithPicture,
       date: displayDate,
       time: displayTime,
       price,
       totalPaid,
       balance,
+      amount: transaction?.amount,
+      paymentAmount: transaction?.amount,
+      paymentMethod: transaction?.method,
+      paymentStatus: transaction?.status || appointment.paymentStatus,
+      transactionId: transaction?.transactionId,
+      previousBalance: transactionRow?.previousBalance ?? snapshotBase.previousBalance,
+      newBalance: transactionRow?.newBalance ?? snapshotBase.newBalance,
     });
+    setSelectedSnapshotIsHistorical(isHistoricalPaymentSnapshot);
     setSnapshotLogDate(logDate);
     setIsSnapshotOpen(true);
   };
@@ -717,25 +1047,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       return { label: "Log", className: "bg-gray-100 text-gray-700 border-gray-200", isLog: true };
     }
 
-    const appointment = mockAppointmentHistoryLocal.find((apt: Appointment) => String(apt.id) === String(transaction.appointmentId))
-      || patientAppointments.find((apt: Appointment) => String(apt.id) === String(transaction.appointmentId));
-    const price = Number(appointment?.price || 0);
-    const totalPaid = Number(appointment?.totalPaid || 0);
-    const paymentStatus = String(appointment?.paymentStatus || transaction.status || "").toLowerCase();
-
-    if (paymentStatus === "paid" || paymentStatus === "over-paid" || (price > 0 && totalPaid >= price)) {
-      return { label: "fullypaid", className: "bg-green-50 text-green-700 border-green-200", isLog: false };
-    }
-
-    if (paymentStatus === "half-paid" || (price > 0 && totalPaid > 0 && totalPaid < price)) {
-      return { label: "halfpaid", className: "bg-amber-50 text-amber-700 border-amber-200", isLog: false };
-    }
-
-    return {
-      label: paymentStatus || "unpaid",
-      className: paymentStatus === "overdue" ? "bg-red-50 text-red-700 border-red-200" : "",
-      isLog: false,
-    };
+    return { label: "", className: "", isLog: false };
   };
 
   const uniqueDoctors = React.useMemo(() => {
@@ -760,12 +1072,23 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
   const filteredHistory = React.useMemo(() => {
     return mappedHistory.filter(apt => {
-        if (historyStatusFilter !== 'all' && apt.paymentStatus !== historyStatusFilter) return false;
+        if (historyPaymentStatusFilter !== 'all' && apt.paymentStatus !== historyPaymentStatusFilter) return false;
+        if (historyAppointmentStatusFilter !== 'all' && apt.status !== historyAppointmentStatusFilter) return false;
         if (historyDoctorFilter !== 'all' && apt.doctor !== historyDoctorFilter) return false;
         if (historyProcedureFilter !== 'all' && String(apt.type) !== historyProcedureFilter) return false;
+        
+        if (historySearchFilter) {
+          const search = historySearchFilter.toLowerCase();
+          const match = 
+            String(apt.type || '').toLowerCase().includes(search) ||
+            String(apt.doctor || '').toLowerCase().includes(search) ||
+            String(apt.notes || '').toLowerCase().includes(search);
+          if (!match) return false;
+        }
+
         return true;
     });
-  }, [mappedHistory, historyStatusFilter, historyDoctorFilter, historyProcedureFilter]);
+  }, [mappedHistory, historyPaymentStatusFilter, historyAppointmentStatusFilter, historyDoctorFilter, historyProcedureFilter, historySearchFilter]);
 
   // Filters for Payments tab
   const [paymentDoctorFilter, setPaymentDoctorFilter] = useState('all');
@@ -809,15 +1132,6 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     });
   }, [allTransactions, doctorFilter, paymentDoctorFilter, paymentMethodFilter, paymentProcedureFilter]);
 
-  const toggleExpandTransactions = (id: string) => {
-    setExpandedTransactions((prev) => {
-      const copy = new Set(prev);
-      if (copy.has(id)) copy.delete(id);
-      else copy.add(id);
-      return copy;
-    });
-  };
-
   const getPaymentMethodIcon = (method: string) => {
     switch ((method || '').toLowerCase()) {
       case 'cash':
@@ -829,6 +1143,15 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       default:
         return <DollarSign className="h-4 w-4" />;
     }
+  };
+
+  const normalizePaymentStatusValue = (value?: string | null) => {
+    const v = String(value || '').toLowerCase().trim();
+    if (!v) return '';
+    if (v === 'partial' || v === 'partially-paid' || v === 'partial-paid') return 'half-paid';
+    if (v === 'overpaid' || v === 'over-paid') return 'over-paid';
+    if (v === 'halfpaid' || v === 'half_paid') return 'half-paid';
+    return v;
   };
 
   const getAppointmentStatusBadge = (status: string) => {
@@ -1071,23 +1394,28 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         const totalPaid = apt.totalPaid != null ? apt.totalPaid : 0;
         const transactions = apt.transactions ? apt.transactions : [];
 
-        let paymentStatus: Appointment["paymentStatus"] | "over-paid";
+        let computedPaymentStatus: Appointment["paymentStatus"] | "over-paid";
         const oneWeekAgo = new Date();
         oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
         const aptDateStr = (apt.date || '').split(' ')[0];
         const appointmentDate = parseBackendDateToLocal(aptDateStr);
 
         if (totalPaid > cost && cost > 0) {
-          paymentStatus = 'over-paid';
+          computedPaymentStatus = 'over-paid';
         } else if (totalPaid > 0 && totalPaid < cost) {
-          paymentStatus = 'half-paid';
+          computedPaymentStatus = 'half-paid';
         } else if (totalPaid >= cost && cost > 0) {
-          paymentStatus = 'paid';
+          computedPaymentStatus = 'paid';
         } else if (totalPaid === 0 && cost > 0 && appointmentDate < oneWeekAgo) {
-          paymentStatus = 'overdue';
+          computedPaymentStatus = 'overdue';
         } else {
-          paymentStatus = 'unpaid';
+          computedPaymentStatus = 'unpaid';
         }
+
+        // Prefer the stored appointment.paymentStatus (server-authoritative) or any legacy snapshot
+        const storedStatusRaw = (apt as any).paymentStatus;
+        const storedStatus = normalizePaymentStatusValue(storedStatusRaw) || '';
+        const paymentStatus = storedStatus || (computedPaymentStatus as string);
 
         return {
             ...apt,
@@ -1104,8 +1432,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           } as Appointment;
       });
 
-      const applyTransactions = (payments: PaymentRow[] = []) => {
-        const normalized = buildPatientTransactions(mapped, payments);
+      const applyTransactions = (payments: PaymentRow[] = [], paymentLogs: PaymentLogRow[] = [], appointmentLogs: AppointmentLogRow[] = []) => {
+        const normalized = buildPatientTransactions(mapped, payments, paymentLogs, appointmentLogs);
         const paymentsByAppointment = new Map<string, RecentTransaction[]>();
 
         normalized.forEach((txn) => {
@@ -1121,29 +1449,37 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
             : Number(apt.totalPaid || 0);
 
           const price = Number(apt.price || 0);
-          let paymentStatus: Appointment["paymentStatus"] | "over-paid";
+          let computedPaymentStatus: Appointment["paymentStatus"] | "over-paid";
           const oneWeekAgo = new Date();
           oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
           const aptDateStr = (apt.date || '').split(' ')[0];
           const appointmentDate = parseBackendDateToLocal(aptDateStr);
 
           if (totalPaid > price && price > 0) {
-            paymentStatus = 'over-paid';
+            computedPaymentStatus = 'over-paid';
           } else if (totalPaid > 0 && totalPaid < price) {
-            paymentStatus = 'half-paid';
+            computedPaymentStatus = 'half-paid';
           } else if (totalPaid >= price && price > 0) {
-            paymentStatus = 'paid';
+            computedPaymentStatus = 'paid';
           } else if (totalPaid === 0 && price > 0 && appointmentDate < oneWeekAgo) {
-            paymentStatus = 'overdue';
+            computedPaymentStatus = 'overdue';
           } else {
-            paymentStatus = 'unpaid';
+            computedPaymentStatus = 'unpaid';
           }
+
+          // If any transaction includes an appointment snapshot with an explicit paymentStatus, prefer it
+          const snapshotTxn = transactions.find((t) => (t as any).appointmentSnapshot && (t as any).appointmentSnapshot.paymentStatus);
+          const snapshotStatus = snapshotTxn ? normalizePaymentStatusValue((snapshotTxn as any).appointmentSnapshot.paymentStatus) : '';
+
+          // Prefer stored appointment.paymentStatus (server) -> snapshot status from payment logs -> computed status
+          const storedStatus = normalizePaymentStatusValue((apt as any).paymentStatus);
+          const finalPaymentStatus = snapshotStatus || storedStatus || (computedPaymentStatus as string);
 
           return {
             ...apt,
             totalPaid,
             transactions,
-            paymentStatus: paymentStatus as Appointment["paymentStatus"],
+            paymentStatus: finalPaymentStatus as Appointment["paymentStatus"],
           } as Appointment;
         });
 
@@ -1153,20 +1489,101 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
       applyTransactions();
 
-      // Fetch payments from new payments collection and merge into history
-      if (patient?.id) {
-        fetch(apiUrl(`/api/payments/patient/${patient.id}`), {
-          headers: getAuthHeaders({ "Content-Type": "application/json" }),
-          credentials: 'include',
-        })
-          .then(res => res.json())
-          .then(json => {
-            if (json?.success && Array.isArray(json.data)) {
-              applyTransactions(json.data as PaymentRow[]);
+      const controller = new AbortController();
+      const loadPersistedTransactions = async () => {
+        const headers = getAuthHeaders({ "Content-Type": "application/json" });
+        const appointmentIds = Array.from(new Set(mapped.map((apt) => apt.id).filter(Boolean)));
+
+        const fetchPatientPayments = async (): Promise<PaymentRow[]> => {
+          if (!patient?.id) return [];
+
+          try {
+            const res = await fetch(apiUrl(`/api/payments/patient/${encodeURIComponent(String(patient.id))}`), {
+              headers,
+              credentials: 'include',
+              signal: controller.signal,
+            });
+            const json = await res.json().catch(() => null);
+
+            return json?.success && Array.isArray(json.data) ? json.data as PaymentRow[] : [];
+          } catch (err) {
+            if ((err as any)?.name !== "AbortError") {
+              console.warn('[Payments] Failed to fetch patient payments:', err);
             }
-          })
-          .catch(err => console.warn('[Payments] Failed to fetch patient payments:', err));
-      }
+            return [];
+          }
+        };
+
+        const fetchAppointmentPaymentLogs = async (): Promise<PaymentLogRow[]> => {
+          if (appointmentIds.length === 0) return [];
+
+          const logSets = await Promise.all(
+            appointmentIds.map(async (appointmentId) => {
+              try {
+                const res = await fetch(apiUrl(`/api/appointments/${encodeURIComponent(String(appointmentId))}/payments`), {
+                  headers,
+                  credentials: 'include',
+                  signal: controller.signal,
+                });
+                const json = await res.json().catch(() => null);
+
+                return res.ok && json?.success && Array.isArray(json.data) ? json.data as PaymentLogRow[] : [];
+              } catch (err) {
+                if ((err as any)?.name !== "AbortError") {
+                  console.warn(`[Payments] Failed to fetch appointment payment logs for ${appointmentId}:`, err);
+                }
+                return [];
+              }
+            })
+          );
+
+          return logSets.flat();
+        };
+
+        const fetchAppointmentLogs = async (): Promise<AppointmentLogRow[]> => {
+          if (appointmentIds.length === 0) return [];
+
+          const logSets = await Promise.all(
+            appointmentIds.map(async (appointmentId) => {
+              try {
+                const res = await fetch(apiUrl(`/api/appointments/${encodeURIComponent(String(appointmentId))}/logs`), {
+                  headers,
+                  credentials: 'include',
+                  signal: controller.signal,
+                });
+                const json = await res.json().catch(() => null);
+
+                return res.ok && json?.success && Array.isArray(json.data) ? json.data as AppointmentLogRow[] : [];
+              } catch (err) {
+                if ((err as any)?.name !== "AbortError") {
+                  console.warn(`[Payments] Failed to fetch appointment logs for ${appointmentId}:`, err);
+                }
+                return [];
+              }
+            })
+          );
+
+          return logSets.flat();
+        };
+
+        const [payments, paymentLogs, appointmentLogs] = await Promise.all([
+          fetchPatientPayments(),
+          fetchAppointmentPaymentLogs(),
+          fetchAppointmentLogs(),
+        ]);
+
+        if (!controller.signal.aborted) {
+          applyTransactions(payments, paymentLogs, appointmentLogs);
+        }
+      };
+
+      loadPersistedTransactions().catch((err) => {
+        if ((err as any)?.name !== "AbortError") {
+          console.warn('[Payments] Failed to load persisted payment history:', err);
+        }
+      });
+
+      return () => controller.abort();
     }, [buildPatientTransactions, patientAppointments, patient?.id]);
 
   const handleUpdatePatient = async () => {
@@ -1264,6 +1681,47 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     } catch (err) {
       console.error("Error deleting payment:", err);
       toast.error("Error deleting payment");
+    }
+  };
+
+  const handleDeleteLegacyPayment = async (appointmentId: string) => {
+    if (!appointmentId) return;
+    try {
+      setPdConfirmLoading(true);
+
+      const res = await fetch(apiUrl(`/api/appointments/${appointmentId}`), {
+        method: "PUT",
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        credentials: "include",
+        body: JSON.stringify({ totalPaid: 0 }),
+      });
+
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast.error(json?.message || "Failed to remove recorded total");
+        return;
+      }
+
+      // Update local state to remove legacy transaction rows for this appointment
+      setMockAppointmentHistoryLocal((prev) => prev.map((apt) => {
+        if (String(apt.id) !== String(appointmentId)) return apt;
+        return {
+          ...apt,
+          totalPaid: 0,
+          transactions: (apt.transactions || []).filter((t: RecentTransaction) => !String(t.id || "").startsWith("legacy-")),
+        };
+      }));
+
+      setAllTransactions((prev) => prev.filter((txn) => !(String(txn.appointmentId || "") === String(appointmentId) && String(txn.id || "").startsWith("legacy-"))));
+
+      // Refresh server-side view
+      refreshPatients();
+      toast.success("Recorded total removed");
+    } catch (err) {
+      console.error("Error removing recorded total:", err);
+      toast.error("Error removing recorded total");
+    } finally {
+      setPdConfirmLoading(false);
     }
   };
 
@@ -1769,60 +2227,81 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
               setFormData(prev => ({ ...prev, dentalCharts: updatedRecords }));
               setIsModified(true);
             }}
+            patientDateOfBirth={formData.dateOfBirth}
           />
         </TabsContent>
 
         <TabsContent value="history" className="mx-auto max-w-[1680px] space-y-4">
           <Card className={cardClass}>
             <CardHeader>
-                <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-center">
+                <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
                     <CardTitle>Appointment History</CardTitle>
-                    <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:w-auto">
-                        <Select value={historyStatusFilter} onValueChange={setHistoryStatusFilter}>
-                            <SelectTrigger className="w-full xl:w-[150px]">
-                                <SelectValue placeholder="Filter by status" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">All Statuses</SelectItem>
-                                {PAYMENT_STATUSES.map(status => (
-                                    <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
-                                ))}
-                                <SelectItem value="over-paid">Over-paid</SelectItem>
-                            </SelectContent>
-                        </Select>
-                        {/* Hide doctor filter when viewing as a doctor - they only see their own appointments */}
-                        {!doctorFilter && (
-                          <Select value={historyDoctorFilter} onValueChange={setHistoryDoctorFilter}>
-                              <SelectTrigger className="w-full xl:w-[180px]">
-                                  <SelectValue placeholder="Filter by doctor" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                  {uniqueDoctors.map(doctor => (
-                                      <SelectItem key={doctor} value={doctor}>{doctor === 'all' ? 'All Doctors' : doctor}</SelectItem>
-                                  ))}
-                              </SelectContent>
-                          </Select>
-                        )}
-                        <Select value={historyProcedureFilter} onValueChange={setHistoryProcedureFilter}>
-                            <SelectTrigger className="w-full xl:w-[180px]">
-                                <SelectValue placeholder="Filter by procedure" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {uniqueProcedures.map(proc => (
-                                    <SelectItem key={proc} value={proc}>{proc === 'all' ? 'All Procedures' : proc}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                        <PastAppointmentButton
-                          size="sm"
-                          doctorName={doctorFilter}
-                          patientId={patient?.id}
-                          onCreated={() => {
-                            // Optionally refresh patients or history if needed
-                            // refreshPatients is already called in PastAppointmentButton's onBooked
-                          }}
+                    <PastAppointmentButton
+                      size="sm"
+                      doctorName={doctorFilter}
+                      patientId={patient?.id}
+                      onCreated={() => {
+                        // Optionally refresh patients or history if needed
+                        // refreshPatients is already called in PastAppointmentButton's onBooked
+                      }}
+                    />
+                </div>
+                <div className="grid grid-cols-1 gap-2 pt-2 sm:grid-cols-2 lg:grid-cols-5 xl:flex xl:items-center">
+                    <div className="relative w-full xl:w-[250px]">
+                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <Input
+                            placeholder="Search history..."
+                            value={historySearchFilter}
+                            onChange={(e) => setHistorySearchFilter(e.target.value)}
+                            className="pl-9 h-10 border-gray-300 bg-white"
                         />
                     </div>
+                    <Select value={historyAppointmentStatusFilter} onValueChange={setHistoryAppointmentStatusFilter}>
+                        <SelectTrigger className="w-full xl:w-[150px]">
+                            <SelectValue placeholder="Appointment Status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">All Statuses</SelectItem>
+                            {APPOINTMENT_STATUSES.map(status => (
+                                <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                    <Select value={historyPaymentStatusFilter} onValueChange={setHistoryPaymentStatusFilter}>
+                        <SelectTrigger className="w-full xl:w-[150px]">
+                            <SelectValue placeholder="Payment Status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">All Payments</SelectItem>
+                            {PAYMENT_STATUSES.map(status => (
+                                <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                            ))}
+                            <SelectItem value="over-paid">Over-paid</SelectItem>
+                        </SelectContent>
+                    </Select>
+                    {/* Hide doctor filter when viewing as a doctor - they only see their own appointments */}
+                    {!doctorFilter && (
+                      <Select value={historyDoctorFilter} onValueChange={setHistoryDoctorFilter}>
+                          <SelectTrigger className="w-full xl:w-[180px]">
+                              <SelectValue placeholder="Filter by doctor" />
+                          </SelectTrigger>
+                          <SelectContent>
+                              {uniqueDoctors.map(doctor => (
+                                  <SelectItem key={doctor} value={doctor}>{doctor === 'all' ? 'All Doctors' : doctor}</SelectItem>
+                              ))}
+                          </SelectContent>
+                      </Select>
+                    )}
+                    <Select value={historyProcedureFilter} onValueChange={setHistoryProcedureFilter}>
+                        <SelectTrigger className="w-full xl:w-[180px]">
+                            <SelectValue placeholder="Filter by procedure" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {uniqueProcedures.map(proc => (
+                                <SelectItem key={proc} value={proc}>{proc === 'all' ? 'All Procedures' : proc}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
                 </div>
             </CardHeader>
             <CardContent>
@@ -1836,9 +2315,21 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                     {filteredHistory.map((appointment: HistoryAppointment, index: number) => {
                       const sortedTransactions = Array.from(new Map((appointment.transactions || []).map((t: RecentTransaction) => [t.id, t])).values())
                         .sort(comparePaymentTransactionsDesc);
-
                       const isExpanded = expandedTransactions.has(appointment.id);
                       const visibleTransactions = isExpanded ? sortedTransactions : sortedTransactions.slice(0, 1);
+
+                      // Resolve doctor image for this appointment entry (snapshot fields first, then staff list)
+                      const resolveDoctorImageFor = (apt: any) => {
+                        let img = getDoctorImageFromSnapshot(apt);
+                        if (!img && Array.isArray(doctors) && doctors.length) {
+                          const doctorName = String(apt.doctor || '').toLowerCase().trim();
+                          const matched = doctors.find((d) => (d.name || '').toLowerCase().trim() === doctorName) || doctors.find((d) => doctorName && (d.name || '').toLowerCase().includes(doctorName));
+                          if (matched && matched.profilePicture) img = resolveImageSource(matched.profilePicture);
+                        }
+                        return img;
+                      };
+
+                      const doctorImage = resolveDoctorImageFor(appointment as any);
 
                       return (
                         <div key={appointment.id || `apt-${index}`} className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
@@ -1854,9 +2345,20 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                   {getPaymentStatusBadge(String(appointment.paymentStatus || ''))}
                                 </div>
                               </div>
-                              <div className="text-sm">
-                                <div className="font-medium">{appointment.doctor}</div>
-                                <div className="text-muted-foreground">{appointment.notes}</div>
+                              <div className="text-sm flex items-center gap-3">
+                                <div className="flex-shrink-0">
+                                  <Avatar className="h-8 w-8 rounded-md overflow-hidden">
+                                    {doctorImage ? (
+                                      <AvatarImage src={doctorImage} alt={String(appointment.doctor || '')} className="object-cover" />
+                                    ) : (
+                                      <AvatarFallback className="bg-slate-100 text-slate-700 text-sm">{getInitials(String(appointment.doctor || ''))}</AvatarFallback>
+                                    )}
+                                  </Avatar>
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="font-medium truncate">{appointment.doctor}</div>
+                                  <div className="text-muted-foreground truncate">{appointment.notes}</div>
+                                </div>
                               </div>
                             </div>
                             <div className="space-y-2 md:text-right">
@@ -1892,15 +2394,31 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                             <div className="border-t pt-3 mt-3">
                               <div className="flex items-center justify-between mb-2">
                                 <div className="text-sm font-medium">Payment Transactions</div>
-                                {sortedTransactions.length > 1 &&
-                                  <button type="button" className="text-sm text-primary underline-offset-1 hover:underline" onClick={() => toggleExpandTransactions(appointment.id)}>
-                                    {isExpanded ? 'Less' : 'More'}
-                                  </button>
-                                }
+                                {sortedTransactions.length > 1 && (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 gap-1 px-2 text-sm text-slate-600 hover:text-slate-900"
+                                    onClick={() => toggleExpandTransactions(appointment.id)}
+                                  >
+                                    {isExpanded ? (
+                                      <>
+                                        <ChevronUp className="h-4 w-4" />
+                                        See less
+                                      </>
+                                    ) : (
+                                      <>
+                                        <ChevronDown className="h-4 w-4" />
+                                        See more
+                                      </>
+                                    )}
+                                  </Button>
+                                )}
                               </div>
                               <div className="space-y-2">
-                                {visibleTransactions.map((txn: RecentTransaction) => {
-                                  const isLog = isPaymentLogTransaction(txn);
+                                {visibleTransactions.map((txn: RecentTransaction, transactionIndex: number) => {
+                                  const isLatestPayment = transactionIndex === 0;
 
                                   return (
                                   <div key={txn.id} className="flex flex-col gap-2 rounded bg-gray-50 p-2 text-sm sm:flex-row sm:items-center sm:justify-between">
@@ -1909,9 +2427,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                       <div>
                                         <div className="flex items-center gap-2 font-medium">
                                           <span>{txn.method} - ${txn.amount}</span>
-                                          {isLog && (
-                                            <Badge variant="outline" className="bg-gray-100 text-gray-700 border-gray-200">
-                                              Log
+                                          {isLatestPayment && (
+                                            <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                                              Latest
                                             </Badge>
                                           )}
                                         </div>
@@ -1928,39 +2446,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                         <Eye className="h-4 w-4" />
                                         <span className="sr-only">View Appointment Snapshot</span>
                                       </Button>
-                                      {!isLegacyPaymentRow(txn) && (
-                                        <>
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            className="h-8 w-8 p-0"
-                                            onClick={() => {
-                                              if (txn.id && patient.id) openEditPaymentModal(txn.id, txn as any, String(patient.id), mockAppointmentHistoryLocal as any);
-                                            }}
-                                          >
-                                            <Edit className="h-4 w-4" />
-                                            <span className="sr-only">Edit Payment</span>
-                                          </Button>
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
-                                            onClick={() => {
-                                              if (txn.id && appointment.id) {
-                                                setPdConfirmTitle("Delete Payment");
-                                                setPdConfirmMessage(`Are you sure you want to delete this payment (${txn.method} - $${txn.amount})?`);
-                                                setPdConfirmAction(() => async () => {
-                                                  await handleDeletePayment(String(txn.id), String(appointment.id));
-                                                });
-                                                setPdIsConfirmOpen(true);
-                                              }
-                                            }}
-                                          >
-                                            <Trash className="h-4 w-4" />
-                                            <span className="sr-only">Delete Payment</span>
-                                          </Button>
-                                        </>
-                                      )}
+                                        {/* Hide edit/delete controls for now — keep view (eye) only */}
                                     </div>
                                   </div>
                                   );
@@ -2123,7 +2609,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                               <Eye className="h-4 w-4" />
                               <span className="sr-only">View Appointment Snapshot</span>
                             </Button>
-                            {!isLegacyPaymentRow(txn) && (
+                            {!isReadOnlyPaymentRow(txn) && (
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
                                   <Button
@@ -2137,6 +2623,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                                 <DropdownMenuContent align="end">
                                   <DropdownMenuItem
                                     onClick={() => {
+                                      try {
+                                        console.log("[PatientDetailsModal] edit payment clicked", { txnId: txn?.id, patientId: patient?.id, legacy: isLegacyPaymentRow(txn) });
+                                      } catch (e) {}
                                       if (patient.id && patient.name) {
                                         if (txn.id && patient.id) openEditPaymentModal(String(txn.id), txn as any, String(patient.id), mockAppointmentHistoryLocal as Appointment[]);
                                       }
@@ -2168,9 +2657,11 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                           <div className="text-muted-foreground">
                             ID: {txn.transactionId}
                           </div>
-                          <Badge variant="outline" className={paymentDisplay.className}>
-                            {paymentDisplay.label}
-                          </Badge>
+                          {paymentDisplay.label && (
+                            <Badge variant="outline" className={paymentDisplay.className}>
+                              {paymentDisplay.label}
+                            </Badge>
+                          )}
                         </div>
                         {txn.notes && (
                           <div className="text-sm text-muted-foreground mt-2 italic">
@@ -2225,6 +2716,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         logDate={snapshotLogDate}
         onOpenAppointment={onOpenBookingModal ? handleOpenSnapshotAppointment : undefined}
         isAppointmentOpen={isSelectedSnapshotAppointmentOpen}
+        isHistorical={selectedSnapshotIsHistorical}
       />
       </div>
     </div>

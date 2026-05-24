@@ -21,22 +21,24 @@ export default function PublicDoctorsPage() {
         <DoctorsGrid portal="public" />
       </main>
 
-      <BookingModalWrapper
-        open={isBookingModalOpen}
-        onOpenChange={setIsBookingModalOpen}
-        title="Book Your Appointment"
-        bookingMode="public"
-        onBooked={(appointment) => {
-          if (appointment?.id) {
-            cachePublicBookingAppointment(appointment as PublicBookingAppointment);
-          }
-        }}
-        onDeleted={(appointment) => {
-          if (appointment?.id) {
-            cachePublicBookingAppointment(appointment as PublicBookingAppointment);
-          }
-        }}
-      />
+      {isBookingModalOpen && (
+        <BookingModalWrapper
+          open={isBookingModalOpen}
+          onOpenChange={setIsBookingModalOpen}
+          title="Book Your Appointment"
+          bookingMode="public"
+          onBooked={(appointment) => {
+            if (appointment?.id) {
+              cachePublicBookingAppointment(appointment as PublicBookingAppointment);
+            }
+          }}
+          onDeleted={(appointment) => {
+            if (appointment?.id) {
+              cachePublicBookingAppointment(appointment as PublicBookingAppointment);
+            }
+          }}
+        />
+      )}
 
       <Footer />
     </div>

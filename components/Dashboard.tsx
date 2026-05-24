@@ -6,8 +6,8 @@ import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "./ui/button";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
-import { Appointment } from "../hooks/useAppointments";
-import { parseBackendDateToLocal } from "../lib/utils";
+import { Appointment, AppointmentFilters } from "../hooks/useAppointments";
+import { formatDateToYYYYMMDD, parseBackendDateToLocal } from "../lib/utils";
 import { useAuth } from "@/hooks/useAuth.tsx";
 import { NextAppointmentCard } from "./NextAppointmentCard";
 import { DashboardStats } from "./DashboardStats";
@@ -36,7 +36,7 @@ interface DashboardProps {
 
 export function Dashboard({ portal }: DashboardProps) {
   const router = useRouter();
-  const { openCreateModal, openAddPatientModal, appointments, refreshTrigger, openEditModal, isEditModalOpen, selectedAppointment } = useAppointmentModal();
+  const { openCreateModal, openAddPatientModal, appointments, refreshTrigger, refreshAppointments, openEditModal, isEditModalOpen, selectedAppointment } = useAppointmentModal();
   const { user } = useAuth();
   const [viewMode, setViewMode] = useState<"day" | "week" | "month">("day");
   const [totalPatients, setTotalPatients] = useState(0);
@@ -61,8 +61,36 @@ export function Dashboard({ portal }: DashboardProps) {
     }
   };
 
+  useEffect(() => {
+    if (portal === "doctor" && !user?.username) return;
+    if (portal === "patient" && !user?.patientId) return;
+
+    const today = new Date();
+    const start = new Date(today.getFullYear(), today.getMonth(), 1);
+    const end = new Date(today);
+    end.setDate(today.getDate() + 60);
+
+    const filters: AppointmentFilters = {
+      startDate: formatDateToYYYYMMDD(start),
+      endDate: formatDateToYYYYMMDD(end),
+      status: "all",
+    };
+
+    if (portal === "doctor" && user?.username) {
+      filters.doctor = user.username;
+    }
+
+    if (portal === "patient" && user?.patientId) {
+      filters.patientId = user.patientId;
+    }
+
+    refreshAppointments(filters);
+  }, [portal, refreshAppointments, user?.patientId, user?.username]);
+
   // Fetch total patients from backend
   useEffect(() => {
+    if (portal !== "admin") return;
+
     const fetchPatientCount = async () => {
       try {
         const response = await fetch(apiUrl("/api/patients?page=1&limit=1"), { credentials: 'include' });
@@ -77,7 +105,7 @@ export function Dashboard({ portal }: DashboardProps) {
       }
     };
     fetchPatientCount();
-  }, [refreshTrigger]);
+  }, [portal, refreshTrigger]);
 
   // Show loading when view mode changes
   useEffect(() => {

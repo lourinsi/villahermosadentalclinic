@@ -68,36 +68,38 @@ export default function PublicCalendarPage() {
         </div>
       </main>
 
-      <BookingModalWrapper
-        open={isBookingModalOpen}
-        onOpenChange={(open) => {
-          setIsBookingModalOpen(open);
-          if (!open) {
+      {isBookingModalOpen && (
+        <BookingModalWrapper
+          open={isBookingModalOpen}
+          onOpenChange={(open) => {
+            setIsBookingModalOpen(open);
+            if (!open) {
+              setSelectedAppointment(null);
+              setDefaultDate(undefined);
+              setDefaultTime(undefined);
+            }
+          }}
+          title="Book Your Appointment"
+          bookingMode="public"
+          defaultDate={defaultDate}
+          defaultTime={defaultTime}
+          appointmentToEdit={selectedAppointment}
+          onBooked={(appointment) => {
+            if (appointment?.id) {
+              cachePublicBookingAppointment(appointment as PublicBookingAppointment);
+            }
+            refresh();
             setSelectedAppointment(null);
-            setDefaultDate(undefined);
-            setDefaultTime(undefined);
-          }
-        }}
-        title="Book Your Appointment"
-        bookingMode="public"
-        defaultDate={defaultDate}
-        defaultTime={defaultTime}
-        appointmentToEdit={selectedAppointment}
-        onBooked={(appointment) => {
-          if (appointment?.id) {
-            cachePublicBookingAppointment(appointment as PublicBookingAppointment);
-          }
-          refresh();
-          setSelectedAppointment(null);
-        }}
-        onDeleted={(appointment) => {
-          if (appointment?.id) {
-            cachePublicBookingAppointment(appointment as PublicBookingAppointment);
-          }
-          refresh();
-          setSelectedAppointment(null);
-        }}
-      />
+          }}
+          onDeleted={(appointment) => {
+            if (appointment?.id) {
+              cachePublicBookingAppointment(appointment as PublicBookingAppointment);
+            }
+            refresh();
+            setSelectedAppointment(null);
+          }}
+        />
+      )}
 
       <Footer />
     </div>

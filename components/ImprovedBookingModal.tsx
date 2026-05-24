@@ -20,6 +20,7 @@ import { APPOINTMENT_PRICES, getAppointmentTypeName } from "@/lib/appointmentTyp
 import { getAuthHeaders } from "@/lib/auth-headers";
 import { toast } from 'sonner';
 import useSharedBookingLogic, {
+  ALLOWED_BOOKING_DURATIONS,
   DEFAULT_APPOINTMENT_TYPE_DURATIONS as appointmentTypeDurations,
   PAST_APPOINTMENT_STATUS_VALUES,
   findNextAvailableBookingSlot,
@@ -32,12 +33,14 @@ import useSharedBookingLogic, {
   getBookingCancellationConfig,
   getBookingConflictWarnings,
   getBookingHistoryPaymentStatusChange,
+  getBookingHistoryNotes,
   getBookingCreateDate,
   getBookingCreateTime,
   getBookingDefaultDate,
   getBookingDefaultScheduleAction,
   getBookingDefaultTime,
   getBookingEditDate,
+  parseLocalDateOnly,
   getBookingEditTime,
   getBookingPaymentStatusConfig,
   getBookingStatusLabel,
@@ -49,6 +52,7 @@ import useSharedBookingLogic, {
   isSignificantBookingPaymentStatus,
   isPastAppointmentDate,
   normalizeBookingDoctorName as normalizeDoctorName,
+  normalizeBookingDuration,
   normalizePastAppointmentStatus,
   shouldShowBookingHistoryLog,
   toBookingPatientOption as toPatientOption,
@@ -206,6 +210,10 @@ const getHistoryDetail = (log: BookingHistoryLog) => {
     (log.newState?.date && log.newState.date !== log.previousState?.date) ||
     (log.newState?.time && log.newState.time !== log.previousState?.time)
   );
+  const treatmentChanged = Boolean(
+    (log.newState?.type && log.previousState && String(log.newState.type) !== String(log.previousState.type)) ||
+    (log.newState?.customType && log.previousState && String(log.newState.customType) !== String(log.previousState.customType))
+  );
   const doctorChanged = getHistoryDoctorChange(log).changed;
   const statusChanged = Boolean(log.newState?.status && log.newState.status !== log.previousState?.status);
 
@@ -224,14 +232,99 @@ const getHistoryDetail = (log: BookingHistoryLog) => {
   const details: string[] = [];
   if (scheduleChanged) details.push("Schedule changed");
   if (doctorChanged) details.push("Doctor changed");
+  if (treatmentChanged) details.push("Treatment changed");
+
+  // patient change detection
+  const prev = (log as any)?.previousState;
+  const next = (log as any)?.newState;
+  const isPatientChanged = (() => {
+    if (!prev || !next) return false;
+    const resolvePatient = (s: any) => {
+      if (!s) return "";
+      if (typeof s.patient === "string") return s.patient;
+      if (s.patient?.id) return String(s.patient.id);
+      if (s.patient?.name) return String(s.patient.name);
+      if (s.patientId) return String(s.patientId);
+      if (s.patientName) return String(s.patientName || s.patient_name);
+      const first = s.patientFirstName || s.patient?.firstName;
+      const last = s.patientLastName || s.patient?.lastName;
+      if (first || last) return [first, last].filter(Boolean).join(" ");
+      return "";
+    };
+
+    const pPrev = String(resolvePatient(prev) || "").trim();
+    const pNext = String(resolvePatient(next) || "").trim();
+    return Boolean(pPrev && pNext && pPrev !== pNext);
+  })();
+  if (isPatientChanged) details.push("Patient Changed");
+
+  // price change detection
+  const prevPrice = prev ? Number(prev.price ?? prev.amount ?? 0) : null;
+  const nextPrice = next ? Number(next.price ?? next.amount ?? 0) : null;
+  const priceChanged = prevPrice !== null && nextPrice !== null && Number(prevPrice) !== Number(nextPrice);
+  if (priceChanged) details.push("Price changed");
+
   if (statusChanged) details.push("Appointment status updated");
   if (paymentStatusChange.changed) details.push("Payment status updated");
   if (amount > 0) details.push("Payment recorded");
 
-  if (details.length > 0) return details.slice(0, 2).join(" - ");
+  if (details.length > 0) return details.slice(0, 5).join(" - ");
 
   const actor = getHistoryActor(log);
+
+  const isPatientChangeLog = (() => {
+    const prev = (log as any)?.previousState;
+    const next = (log as any)?.newState;
+    if (!prev || !next) return false;
+    const resolvePatient = (s: any) => {
+      if (!s) return "";
+      if (typeof s.patient === "string") return s.patient;
+      if (s.patient?.id) return String(s.patient.id);
+      if (s.patient?.name) return String(s.patient.name);
+      if (s.patientId) return String(s.patientId);
+      if (s.patientName) return String(s.patientName || s.patient_name);
+      const first = s.patientFirstName || s.patient?.firstName;
+      const last = s.patientLastName || s.patient?.lastName;
+      if (first || last) return [first, last].filter(Boolean).join(" ");
+      return "";
+    };
+
+    const pPrev = String(resolvePatient(prev) || "").trim();
+    const pNext = String(resolvePatient(next) || "").trim();
+    return Boolean(pPrev && pNext && pPrev !== pNext);
+  })();
+
+  if (isPatientChangeLog) return "Patient Changed";
+
   return actor ? `Updated by ${actor}` : "Details were updated";
+};
+
+const pickAvatarSource = (...sources: unknown[]) => {
+  for (const source of sources) {
+    if (typeof source !== "string") continue;
+    const trimmed = source.trim();
+    if (trimmed) return trimmed;
+  }
+
+  return undefined;
+};
+
+const resolveAvatarSource = (source?: string) => {
+  if (!source) return undefined;
+  if (source.startsWith("http") || source.startsWith("data:") || source.startsWith("blob:")) return source;
+  return apiUrl(source);
+};
+
+const getPersonInitials = (name?: string) => {
+  const initials = String(name || "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+
+  return initials || "?";
 };
 
 interface BookingModalProps {
@@ -278,6 +371,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [modalStep, setModalStep] = useState<ImprovedBookingStep>("patient");
   const [paymentMethod, setPaymentMethod] = useState<string>("");
   const [amountToPay, setAmountToPay] = useState<string>("");
+  const [overpayPulse, setOverpayPulse] = useState(false);
   const [appointmentStatus, setAppointmentStatus] = useState<string>("scheduled");
   const [paymentStatus, setPaymentStatus] = useState<string>("unpaid");
   const [statusChangedByUser, setStatusChangedByUser] = useState<number>(0);
@@ -296,6 +390,17 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [patientAppointments, setPatientAppointments] = useState<any[]>([]);
   const lastHandledAddedPatientAtRef = useRef<number | null>(null);
   const appliedDefaultScheduleKeyRef = useRef<string | null>(null);
+
+  const toDate = (value: any): Date => {
+    if (!value) return new Date();
+    if (value instanceof Date) return value;
+    try {
+      const parsed = typeof value === 'string' ? parseLocalDateOnly(value) ?? new Date(value) : new Date(value);
+      return parsed instanceof Date && !isNaN(parsed.getTime()) ? parsed : new Date(String(value));
+    } catch (err) {
+      return new Date();
+    }
+  };
 
   // Log all available statuses when modal opens
   useEffect(() => {
@@ -386,7 +491,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             // Log comprehensive schedule information
             console.log('[BookingModal] 📅 DAILY SCHEDULE - ALL APPOINTMENTS:', {
               date: dateStr,
-              formattedDate: selectedDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }),
+              formattedDate: toDate(selectedDate).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }),
               totalAppointments: filtered.length,
               
               // Summary by status
@@ -405,7 +510,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   duration: `${apt.duration} mins`,
                   endTime: (() => {
                     const [h, m] = (apt.time || '00:00').split(':').map(Number);
-                    const end = new Date(selectedDate);
+                    const end = toDate(selectedDate);
                     end.setHours(h, m + apt.duration, 0, 0);
                     return `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
                   })(),
@@ -612,7 +717,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     if (!time || !selectedDate || !selectedDoctor) return false;
 
     const [hours, minutes] = time.split(':').map(Number);
-    const slotStartDate = new Date(selectedDate);
+    const slotStartDate = toDate(selectedDate);
     slotStartDate.setHours(hours, minutes, 0, 0);
     const slotEndDate = new Date(slotStartDate.getTime() + durationMins * 60000);
 
@@ -647,7 +752,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         aptStart = new Date(apt.date);
       }
       
-      const aptDurationMins = parseInt(String(apt.duration), 10) || 30;
+      const aptDurationMins = normalizeBookingDuration(apt.duration);
       const aptEnd = new Date(aptStart.getTime() + aptDurationMins * 60000);
 
       // Check if times overlap
@@ -668,7 +773,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
     // Find the conflicting appointment time
     const [hours, minutes] = selectedTime.split(':').map(Number);
-    const slotStartDate = new Date(selectedDate);
+    const slotStartDate = toDate(selectedDate);
     slotStartDate.setHours(hours, minutes, 0, 0);
     const slotEndDate = new Date(slotStartDate.getTime() + durationMins * 60000);
 
@@ -689,7 +794,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         aptStart = new Date(apt.date);
       }
       
-      const aptDurationMins = parseInt(String(apt.duration), 10) || 30;
+      const aptDurationMins = normalizeBookingDuration(apt.duration);
       const aptEnd = new Date(aptStart.getTime() + aptDurationMins * 60000);
       
       if (slotStartDate < aptEnd && slotEndDate > aptStart) {
@@ -716,7 +821,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       return;
     }
 
-    const durationMins = parseInt(duration, 10) || 30;
+    const durationMins = normalizeBookingDuration(duration);
     const conflict = getDurationConflictInfo(durationMins);
     
     if (conflict.hasConflict) {
@@ -726,12 +831,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     }
 
     // Log available durations when time is set
-    const availableDurations = [30, 60, 90, 120].filter(dur => isDurationAvailable(dur));
-    const unavailableDurations = [30, 60, 90, 120].filter(dur => !isDurationAvailable(dur));
+    const availableDurations = ALLOWED_BOOKING_DURATIONS.filter(dur => isDurationAvailable(dur));
+    const unavailableDurations = ALLOWED_BOOKING_DURATIONS.filter(dur => !isDurationAvailable(dur));
     
     console.log('[BookingModal] ⏱️ DURATION AVAILABILITY AT TIME:', {
       doctor: selectedDoctor,
-      date: selectedDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }),
+      date: toDate(selectedDate).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }),
       selectedTime: selectedTime,
       currentDuration: `${durationMins} mins`,
       availableDurations: availableDurations.length > 0 ? availableDurations.map(d => `${d} mins`) : '❌ NONE',
@@ -745,7 +850,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       // Show which appointments are blocking each unavailable duration
       blockedBy: unavailableDurations.length > 0 ? unavailableDurations.map(dur => {
         const [hours, minutes] = selectedTime.split(':').map(Number);
-        const slotStart = new Date(selectedDate);
+        const slotStart = toDate(selectedDate);
         slotStart.setHours(hours, minutes, 0, 0);
         const slotEnd = new Date(slotStart.getTime() + dur * 60000);
         
@@ -765,7 +870,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           } else {
             aptStart = new Date(apt.date);
           }
-          const aptDurationMins = parseInt(String(apt.duration), 10) || 30;
+          const aptDurationMins = normalizeBookingDuration(apt.duration);
           const aptEnd = new Date(aptStart.getTime() + aptDurationMins * 60000);
           return slotStart < aptEnd && slotEnd > aptStart;
         });
@@ -789,7 +894,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     if (!time || !selectedDate) return false;
 
     const [hours, minutes] = time.split(':').map(Number);
-    const slotStartDate = new Date(selectedDate);
+    const slotStartDate = toDate(selectedDate);
     slotStartDate.setHours(hours, minutes, 0, 0);
     const slotEndDate = new Date(slotStartDate.getTime() + durationMins * 60000);
 
@@ -803,7 +908,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         aptStart = new Date(apt.date);
       }
       
-      const aptDurationMins = parseInt(String(apt.duration), 10) || 30;
+      const aptDurationMins = normalizeBookingDuration(apt.duration);
       const aptEnd = new Date(aptStart.getTime() + aptDurationMins * 60000);
 
       // Check if times overlap
@@ -819,13 +924,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const getPatientConflictInfo = useCallback(() => {
     if (!selectedTime || !selectedDate) return { hasConflict: false };
     
-    const durationMins = parseInt(duration, 10) || 30;
+    const durationMins = normalizeBookingDuration(duration);
     const hasConflict = checkPatientConflict(selectedTime, durationMins);
     if (!hasConflict) return { hasConflict: false };
 
     // Find the conflicting appointment
     const [hours, minutes] = selectedTime.split(':').map(Number);
-    const slotStartDate = new Date(selectedDate);
+    const slotStartDate = toDate(selectedDate);
     slotStartDate.setHours(hours, minutes, 0, 0);
     const slotEndDate = new Date(slotStartDate.getTime() + durationMins * 60000);
 
@@ -839,7 +944,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         aptStart = new Date(apt.date);
       }
       
-      const aptDurationMins = parseInt(String(apt.duration), 10) || 30;
+      const aptDurationMins = normalizeBookingDuration(apt.duration);
       const aptEnd = new Date(aptStart.getTime() + aptDurationMins * 60000);
       
       if (slotStartDate < aptEnd && slotEndDate > aptStart) {
@@ -878,9 +983,9 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const computePatientConflicts = useCallback((): Set<string> => {
     if (!selectedTime || !selectedDate) return new Set();
     
-    const durationMins = parseInt(duration, 10) || 30;
+    const durationMins = normalizeBookingDuration(duration);
     const [hours, minutes] = selectedTime.split(':').map(Number);
-    const slotStartDate = new Date(selectedDate);
+    const slotStartDate = toDate(selectedDate);
     slotStartDate.setHours(hours, minutes, 0, 0);
     const slotEndDate = new Date(slotStartDate.getTime() + durationMins * 60000);
 
@@ -898,7 +1003,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         aptStart = new Date(apt.date);
       }
       
-      const aptDurationMins = parseInt(String(apt.duration), 10) || 30;
+      const aptDurationMins = normalizeBookingDuration(apt.duration);
       const aptEnd = new Date(aptStart.getTime() + aptDurationMins * 60000);
       
       if (slotStartDate < aptEnd && slotEndDate > aptStart) {
@@ -911,39 +1016,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     return conflictingPatientIds;
   }, [selectedTime, selectedDate, duration, dailyAppointments]);
 
-  const patientConflictSet = computePatientConflicts();
-
-  // Log patient conflicts when date/time changes
-  useEffect(() => {
-    if (!open || !selectedDate || !selectedTime) return;
-
-    const durationMins = parseInt(duration, 10) || 30;
-    const dateStr = selectedDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-    const disabledPatients = Array.from(patientConflictSet);
-    const enabledPatients = patients.filter(p => !patientConflictSet.has(p.id));
-
-    console.log('[BookingModal] 👥 PATIENT AVAILABILITY:', {
-      date: dateStr,
-      time: selectedTime,
-      duration: `${durationMins} mins`,
-      totalPatients: patients.length,
-      availablePatients: enabledPatients.length,
-      disabledPatients: disabledPatients.length,
-      available: enabledPatients.map(p => p.name),
-      disabled: disabledPatients.map(id => {
-        const patient = patients.find(p => p.id === id);
-        const appts = patientAppointments.filter((apt: any) => apt.patientId === id);
-        return {
-          name: patient?.name,
-          conflicts: appts.map((apt: any) => ({
-            time: apt.time,
-            duration: `${apt.duration} mins`,
-            doctor: apt.doctor
-          }))
-        };
-      })
-    });
-  }, [selectedDate, selectedTime, duration, patientConflictSet, patients, patientAppointments, open]);
+  const patientConflictSet = useMemo(() => computePatientConflicts(), [computePatientConflicts]);
 
   // Update duration when appointment type changes - always reset to default when type changes
   useEffect(() => {
@@ -952,7 +1025,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       return;
     }
     // Always set default duration when appointment type changes
-    const defaultDur = appointmentTypeDurations[appointmentType] || 30;
+    const defaultDur = normalizeBookingDuration(appointmentTypeDurations[appointmentType]);
     setDuration(String(defaultDur));
   }, [appointmentType]);
 
@@ -1281,7 +1354,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       
       // Always set the stored price (whether custom or standard type)
       setCustomPrice(String(appointmentToEdit.price || 0));
-      setDuration(String(appointmentToEdit.duration || 30));
+      setDuration(String(normalizeBookingDuration(appointmentToEdit.duration)));
       // Prefill discount if it exists in the appointment (from discount field)
       setDiscount(String(appointmentToEdit.discount || 0));
       // For both editing and creating via the BookingModal we intentionally
@@ -1367,14 +1440,50 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     ? `${(activeStepIndex / (visibleBookingSteps.length - 1)) * 100}%`
     : '0%';
   const selectedDoctorRecord = doctors.find((doctor) => normalizeDoctorName(doctor.name) === normalizeDoctorName(selectedDoctor));
+  // For doctor users, prefer showing only their own doctor record when present.
+  const visibleDoctors = (() => {
+    if (user?.role === 'doctor') {
+      const docKey = (user as any)?.username || (user as any)?.name || '';
+      const filtered = (doctors || []).filter((d: any) => normalizeDoctorName(d.name) === normalizeDoctorName(docKey));
+      return filtered.length > 0 ? filtered : (doctors || []);
+    }
+    return doctors || [];
+  })();
+  const summaryPatientRecord = patients.find((patient) => String(patient.id) === String(selectedPatient));
+  const summaryPatientName = summaryPatientRecord?.name || appointmentToEdit?.patientName || selectedPatient || "Patient";
+  const summaryPatientAvatar = resolveAvatarSource(pickAvatarSource(
+    summaryPatientRecord?.profilePicture,
+    summaryPatientRecord?.profilePictureUrl,
+    summaryPatientRecord?.photo,
+    summaryPatientRecord?.avatar,
+    appointmentToEdit?.patientProfile,
+    appointmentToEdit?.patientProfilePicture,
+    appointmentToEdit?.patientPhoto,
+    appointmentToEdit?.patientImage,
+    appointmentToEdit?.patientAvatar,
+    appointmentToEdit?.patient?.profilePicture,
+    appointmentToEdit?.patient?.profilePictureUrl,
+    appointmentToEdit?.patient?.photo,
+    appointmentToEdit?.patient?.avatar,
+  ));
+  const summaryDoctorAvatar = resolveAvatarSource(pickAvatarSource(
+    selectedDoctorRecord?.profilePicture,
+    (selectedDoctorRecord as any)?.profilePictureUrl,
+    appointmentToEdit?.doctorProfile,
+    appointmentToEdit?.doctorProfilePicture,
+    appointmentToEdit?.doctorPhoto,
+    appointmentToEdit?.doctorImage,
+    appointmentToEdit?.doctor?.profilePicture,
+    appointmentToEdit?.doctor?.profilePictureUrl,
+  ));
 
   const hasDoctorScheduleConflict = (doctorNameToCheck: string) => {
     if (!selectedDate || !selectedTime || !doctorNameToCheck) return false;
 
     const [hours, minutes] = selectedTime.split(':').map(Number);
-    const slotStart = new Date(selectedDate);
+    const slotStart = toDate(selectedDate);
     slotStart.setHours(hours, minutes, 0, 0);
-    const slotEnd = new Date(slotStart.getTime() + (Number(duration) || 30) * 60000);
+    const slotEnd = new Date(slotStart.getTime() + normalizeBookingDuration(duration) * 60000);
     const targetDoctor = normalizeDoctorName(doctorNameToCheck);
 
     return dailyAppointments.some((apt: any) => {
@@ -1386,7 +1495,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         : new Date(apt.date);
       const [aptHours, aptMinutes] = (apt.time || '00:00').split(':').map(Number);
       aptDate.setHours(aptHours, aptMinutes, 0, 0);
-      const aptEnd = new Date(aptDate.getTime() + (Number(apt.duration) || 30) * 60000);
+      const aptEnd = new Date(aptDate.getTime() + normalizeBookingDuration(apt.duration) * 60000);
 
       return slotStart < aptEnd && slotEnd > aptDate;
     });
@@ -1424,9 +1533,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     : (appointmentToEdit?.price !== undefined && appointmentToEdit?.balance !== undefined)
       ? Math.max(0, appointmentToEdit.price - appointmentToEdit.balance)
       : 0;
-  const discountedPrice = Math.max(0, finalPrice - Number(discount));
+  const discountAmount = Math.max(0, Number(discount) || 0);
+  const hasDiscount = discountAmount > 0;
+  const discountedPrice = Math.max(0, finalPrice - discountAmount);
   const remainingBalance = Math.max(0, discountedPrice - previouslyPaidAmount);
   const paymentAmountNow = paymentMethod === "Pay at Clinic" ? 0 : (parseFloat(amountToPay) || 0);
+  const isOverpay = paymentMethod !== "Pay at Clinic" && paymentAmountNow > remainingBalance;
   const projectedRemainingBalance = Math.max(0, remainingBalance - paymentAmountNow);
   const selectedTreatmentName = appointmentType === "Other"
     ? customAppointmentTypeName || "Custom Treatment"
@@ -1474,6 +1586,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // Second step: show summary confirmation before saving
   const handleConfirmPayment = async () => {
+    // Prevent overpayment: do not proceed if entered amount exceeds remaining balance
+    const amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
+    const amountPaid = paymentMethod === "Pay at Clinic" ? 0 : (parseFloat(amountPaidRaw) || 0);
+    if (amountPaid > remainingBalance) {
+      toast.error(`Amount exceeds remaining balance. Maximum allowed: ₱${remainingBalance.toLocaleString()}`);
+      return;
+    }
+
     // Use the shared next-step helper: if already at payment, this will open the summary
     await handleNextStep();
   };
@@ -1548,6 +1668,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     setIsConfirmSummaryOpen(false);
     try {
       const dateStr = formatDateToYYYYMMDD(selectedDate);
+      const bookingDuration = normalizeBookingDuration(duration);
       
       // Handle "Pay at Clinic" - set amount to pay as 0
       let amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
@@ -1555,6 +1676,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         amountPaidRaw = '0';
       }
       const amountPaid = parseFloat(amountPaidRaw) || 0;
+
+      // Final validation: prevent overpayment
+      if (amountPaid > remainingBalance) {
+        toast.error(`Amount exceeds remaining balance. Maximum allowed: ₱${remainingBalance.toLocaleString()}`);
+        setIsBooking(false);
+        return;
+      }
 
       console.log('[BookingModal Payment] Payment confirmation:', {
         amountToPay,
@@ -1601,7 +1729,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               time: selectedTime,
               type: getAppointmentTypeIndex(appointmentType),
               customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-              duration: Number(duration) || 30,
+              duration: bookingDuration,
               price: finalPrice,
               discount: Number(discount) || 0,
               notes,
@@ -1621,7 +1749,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               time: selectedTime,
               type: getAppointmentTypeIndex(appointmentType),
               customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-              duration: Number(duration) || 30,
+              duration: bookingDuration,
               price: finalPrice,
               discount: Number(discount) || 0,
               notes,
@@ -1692,7 +1820,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               patient: selectedPatientRecord || { id: selectedPatient, name: selectedPatient },
               date: dateStr,
               time: selectedTime,
-              duration: Number(duration) || 30,
+              duration: bookingDuration,
               type: getAppointmentTypeIndex(appointmentType),
               customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
               doctor: selectedDoctor || '',
@@ -1720,7 +1848,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 patientId: selectedPatientRecord?.id,
                 date: dateStr,
                 time: selectedTime,
-                duration: Number(duration) || 30,
+                duration: bookingDuration,
                 type: getAppointmentTypeIndex(appointmentType),
                 customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
                 doctor: selectedDoctor || "",
@@ -1761,7 +1889,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   patient: selectedPatientRecord || { id: selectedPatient, name: selectedPatient },
                   date: dateStr,
                   time: selectedTime,
-                  duration: Number(duration) || 30,
+                  duration: bookingDuration,
                   type: getAppointmentTypeIndex(appointmentType),
                   customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
                   doctor: selectedDoctor || '',
@@ -1782,7 +1910,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 patient: selectedPatientRecord || { id: selectedPatient, name: selectedPatient },
                 date: dateStr,
                 time: selectedTime,
-                duration: Number(duration) || 30,
+                duration: bookingDuration,
                 type: getAppointmentTypeIndex(appointmentType),
                 customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
                 doctor: selectedDoctor || '',
@@ -1806,7 +1934,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             time: selectedTime,
             type: getAppointmentTypeIndex(appointmentType),
             customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-            duration: Number(duration) || 30,
+            duration: bookingDuration,
             price: finalPrice,
             discount: Number(discount) || 0,
             notes,
@@ -1825,7 +1953,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           };
 
           const newSlotStart = timeToMinutes(selectedTime);
-          const newSlotEnd = newSlotStart + (Number(duration) || 30);
+          const newSlotEnd = newSlotStart + bookingDuration;
 
           const pendingToCancel = dailyAppointments.filter((apt: any) => {
             // Only cancel cart appointments
@@ -1838,7 +1966,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             if (apt.date !== dateStr) return false;
             // That overlap with the new appointment
             const aptStart = timeToMinutes(apt.time);
-            const aptEnd = aptStart + (apt.duration || 30);
+            const aptEnd = aptStart + normalizeBookingDuration(apt.duration);
             return newSlotStart < aptEnd && newSlotEnd > aptStart;
           });
 
@@ -2145,8 +2273,8 @@ return (
                       </div>
                       <div>
                         <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-1 group-hover:text-blue-500 transition-colors">Appointment Date</p>
-                        <p className="text-3xl font-black text-gray-900">{selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
-                        <p className="text-sm font-bold text-gray-400 mt-1">{selectedDate.toLocaleDateString('en-US', { weekday: 'long' })}</p>
+                        <p className="text-3xl font-black text-gray-900">{toDate(selectedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
+                        <p className="text-sm font-bold text-gray-400 mt-1">{toDate(selectedDate).toLocaleDateString('en-US', { weekday: 'long' })}</p>
                       </div>
                     </button>
                     <button 
@@ -2167,7 +2295,7 @@ return (
               )}
 
               {/* STEP 3: DOCTOR */}
-              {modalStep === 'doctor' && (
+              {modalStep === 'doctor' && showDoctorStep && (
                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
                   <div className="flex items-center gap-5 mb-10">
                     <div className="flex h-14 w-14 items-center justify-center rounded-[1.25rem] bg-blue-600 text-white shadow-xl shadow-blue-100 ring-4 ring-blue-50">
@@ -2179,7 +2307,7 @@ return (
                     </div>
                     <div className="hidden sm:block">
                       <div className="rounded-[1.25rem] bg-blue-50 px-5 py-3 text-[10px] font-black uppercase tracking-widest text-blue-700 shadow-sm">
-                        {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} @ {selectedTime ? formatTimeTo12h(selectedTime) : '--:--'}
+                        {toDate(selectedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} @ {selectedTime ? formatTimeTo12h(selectedTime) : '--:--'}
                       </div>
                     </div>
                   </div>
@@ -2192,7 +2320,7 @@ return (
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-                      {doctors.map((doctor) => {
+                      {visibleDoctors.map((doctor) => {
                         const selected = normalizeDoctorName(selectedDoctor) === normalizeDoctorName(doctor.name);
                         const unavailable = hasDoctorScheduleConflict(doctor.name);
 
@@ -2299,12 +2427,12 @@ return (
                         </div>
                         <div className="mt-4">
                           {canManagePricing ? (
-                            <Select value={duration} onValueChange={setDuration}>
+                            <Select value={duration} onValueChange={(value) => setDuration(String(normalizeBookingDuration(value)))}>
                               <SelectTrigger className="h-12 w-full rounded-2xl border-0 bg-gray-50 px-4 text-base font-black text-gray-900 focus:ring-0 focus:ring-offset-0">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent className="rounded-xl">
-                                {[15, 30, 45, 60, 75, 90, 105, 120].map(d => <SelectItem key={d} value={String(d)}>{d} mins</SelectItem>)}
+                                {ALLOWED_BOOKING_DURATIONS.map(d => <SelectItem key={d} value={String(d)}>{d} mins</SelectItem>)}
                               </SelectContent>
                             </Select>
                           ) : (
@@ -2402,10 +2530,10 @@ return (
 
               {/* FINAL STEP: PAYMENT & STATUS */}
               {modalStep === 'payment' && (
-                <div className="mx-auto max-w-4xl space-y-6 py-2 animate-in fade-in slide-in-from-bottom-4">
-                  <div className="flex items-center gap-5">
-                    <div className="flex h-14 w-14 items-center justify-center rounded-[1.25rem] bg-emerald-500 text-white shadow-xl shadow-emerald-100 ring-4 ring-emerald-50">
-                      <CreditCard className="h-7 w-7" />
+                <div className="mx-auto max-w-4xl space-y-8 py-2 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <div className="flex items-center gap-6 p-6 bg-gray-50/50 rounded-[2rem] border border-gray-100/50">
+                    <div className="flex h-16 w-16 items-center justify-center rounded-[1.25rem] bg-emerald-500 text-white shadow-xl shadow-emerald-200 ring-4 ring-emerald-50 shrink-0">
+                      <CreditCard className="h-8 w-8" />
                     </div>
                     <div>
                       <h3 className="text-2xl font-black text-gray-900 tracking-tight">Payment & Status</h3>
@@ -2413,177 +2541,107 @@ return (
                     </div>
                   </div>
 
-                  <div className="overflow-hidden rounded-[2rem] border border-gray-100 bg-white shadow-xl shadow-gray-100/50">
-                    <div className="grid grid-cols-3 divide-x divide-gray-50 bg-gray-50/50">
-                      <div className="px-6 py-5">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Total Price</p>
-                        <p className="mt-1 text-2xl font-black text-gray-900 tracking-tighter">&#8369;{discountedPrice.toLocaleString()}</p>
-                      </div>
-                      <div className="px-6 py-5">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Amount Paid</p>
-                        <p className="mt-1 text-2xl font-black text-emerald-600 tracking-tighter">&#8369;{previouslyPaidAmount.toLocaleString()}</p>
-                      </div>
-                      <div className="px-6 py-5">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Due Balance</p>
-                        <p className="mt-1 text-2xl font-black text-blue-600 tracking-tighter">&#8369;{remainingBalance.toLocaleString()}</p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm flex flex-col justify-center text-center">
+                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5 opacity-70">Total Price</p>
+                      <div className="flex flex-col items-center justify-center">
+                        {Number(discount) > 0 && (
+                          <span className="text-xs font-bold text-gray-400 line-through decoration-gray-400/50">&#8369;{(customPrice === "0" ? finalPrice : Number(customPrice)).toLocaleString()}</span>
+                        )}
+                        <p className="text-2xl font-black text-blue-600 tracking-tighter">&#8369;{discountedPrice.toLocaleString()}</p>
                       </div>
                     </div>
+                    <div className="bg-emerald-50/50 p-6 rounded-[2rem] border border-emerald-100/50 flex flex-col justify-center text-center">
+                      <p className="text-[10px] font-black text-emerald-600/60 uppercase tracking-widest mb-1.5">Amount Paid</p>
+                      <p className="text-2xl font-black text-emerald-600 tracking-tighter">&#8369;{previouslyPaidAmount.toLocaleString()}</p>
+                    </div>
+                    <div className="bg-gray-50/50 p-6 rounded-[2rem] border border-gray-100/50 flex flex-col justify-center text-center">
+                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5 opacity-70">Due Balance</p>
+                      <p className="text-2xl font-black text-gray-900 tracking-tighter">&#8369;{remainingBalance.toLocaleString()}</p>
+                    </div>
+                  </div>
 
-                    <div className="grid gap-8 p-8 md:grid-cols-[1fr_300px]">
-                      <div className="space-y-6">
-                        <div className="flex items-center justify-between gap-4">
+                  <div className="bg-white rounded-[2rem] border border-gray-100 shadow-xl shadow-gray-100/20 p-8 space-y-8 transition-all hover:shadow-gray-100/40">
+                    <div className="space-y-6">
+                      <div className="flex items-center justify-between gap-6">
+                        <div className="flex items-center gap-5 min-w-0">
+                          <div className="h-14 w-14 rounded-2xl bg-blue-50 flex items-center justify-center shrink-0 shadow-sm">
+                            <Stethoscope className="h-7 w-7 text-blue-600" />
+                          </div>
                           <div className="min-w-0">
-                            <p className="truncate text-lg font-black text-gray-900 tracking-tight">{selectedTreatmentName || "Selected Treatment"}</p>
+                            <h4 className="truncate text-xl font-black text-gray-900 tracking-tight">{selectedTreatmentName || "Selected Treatment"}</h4>
                             <p className={`text-xs font-bold ${projectedRemainingBalance > 0 ? 'text-blue-500' : 'text-emerald-500'}`}>
                               {projectedRemainingBalance > 0 
                                 ? `Remaining balance: ₱${projectedRemainingBalance.toLocaleString()}` 
                                 : 'Payment will fully cover the balance'}
                             </p>
                           </div>
-                          <Button
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setAmountToPay(String(remainingBalance))}
+                          disabled={paymentMethod === "Pay at Clinic" || remainingBalance <= 0}
+                          className="h-12 shrink-0 rounded-2xl border-gray-100 bg-white px-6 text-[10px] font-black uppercase tracking-widest hover:bg-gray-50 hover:border-gray-200 transition-all shadow-sm"
+                        >
+                          Full Payment
+                        </Button>
+                      </div>
+
+                      <div className="relative group">
+                        <div className="absolute inset-y-0 left-8 flex items-center pointer-events-none">
+                          <span className="text-3xl font-black text-gray-300 transition-colors group-focus-within:text-blue-600 opacity-40">&#8369;</span>
+                        </div>
+                        <Input
+                          type="number"
+                          min="0"
+                          placeholder={remainingBalance > 0 ? String(remainingBalance) : "0"}
+                          value={amountToPay}
+                          onChange={(e: any) => setAmountToPay(e.target.value)}
+                          max={remainingBalance}
+                          className="h-24 rounded-[1.5rem] border-2 border-gray-100 bg-gray-50/50 pl-16 pr-8 text-4xl font-black shadow-none transition-all appearance-none focus:border-blue-600 focus:bg-white focus:ring-0 tracking-tighter"
+                          disabled={paymentMethod === "Pay at Clinic"}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-4 pt-6 border-t border-gray-50">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-2 opacity-70">Payment Method</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                        {[
+                          { id: "GCash", label: "GCash", icon: "GC", color: "bg-blue-600", shadow: "shadow-blue-100" },
+                          { id: "Card", label: "Credit Card", icon: <CreditCard className="h-5 w-5"/>, color: "bg-indigo-600", shadow: "shadow-indigo-100" },
+                          ...(isStaffBookingMode ? [{ id: "Cash", label: "Cash", icon: <Banknote className="h-4 w-4"/>, color: "bg-slate-700", shadow: "shadow-slate-100" }] : []),
+                          { id: "Pay at Clinic", label: "Pay at Clinic", icon: <Banknote className="h-4 w-4"/>, color: "bg-emerald-600", shadow: "shadow-emerald-100" }
+                        ].map((pm) => (
+                          <button
+                            key={pm.id}
                             type="button"
-                            variant="outline"
-                            onClick={() => setAmountToPay(String(remainingBalance))}
-                            disabled={paymentMethod === "Pay at Clinic" || remainingBalance <= 0}
-                            className="h-10 shrink-0 rounded-xl border-gray-200 bg-white px-4 text-[10px] font-black uppercase tracking-widest hover:bg-gray-50 transition-all shadow-sm"
+                            aria-pressed={paymentMethod === pm.id}
+                            onClick={() => { setPaymentMethod(pm.id); if (pm.id === "Pay at Clinic") setAmountToPay("0"); }}
+                            className={`flex flex-col h-[7.5rem] items-center justify-center gap-3 rounded-3xl border-2 px-4 transition-all group relative ${
+                              paymentMethod === pm.id
+                                ? `border-blue-600 bg-blue-50/50 text-blue-700 shadow-xl ${pm.shadow}`
+                                : 'border-gray-100 bg-white text-gray-600 hover:border-gray-200 hover:bg-gray-50'
+                            }`}
                           >
-                            Full Payment
-                          </Button>
-                        </div>
-
-                        <div className="relative group">
-                          <div className="absolute inset-y-0 left-6 flex items-center pointer-events-none">
-                            <span className="text-2xl font-black text-gray-300 transition-colors group-focus-within:text-blue-600">&#8369;</span>
-                          </div>
-                          <Input
-                            type="number"
-                            min="0"
-                            placeholder={remainingBalance > 0 ? String(remainingBalance) : "0"}
-                            value={amountToPay}
-                            onChange={(e: any) => setAmountToPay(e.target.value)}
-                            className="h-20 rounded-[1.5rem] border-2 border-gray-100 bg-gray-50/30 pl-14 pr-6 text-3xl font-black shadow-none transition-all appearance-none focus:border-blue-600 focus:bg-white focus:ring-0"
-                            disabled={paymentMethod === "Pay at Clinic"}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="space-y-3">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-1">Payment Method</p>
-                        <div className="grid grid-cols-1 gap-3">
-                          {[
-                            { id: "GCash", label: "GCash", icon: "GC", color: "bg-blue-600", shadow: "shadow-blue-100" },
-                            { id: "Card", label: "Credit Card", icon: <CreditCard className="h-4 w-4"/>, color: "bg-indigo-600", shadow: "shadow-indigo-100" },
-                            ...(isStaffBookingMode ? [{ id: "Cash", label: "Cash", icon: <Banknote className="h-4 w-4"/>, color: "bg-slate-700", shadow: "shadow-slate-100" }] : []),
-                            { id: "Pay at Clinic", label: "Pay at Clinic", icon: <Banknote className="h-4 w-4"/>, color: "bg-emerald-600", shadow: "shadow-emerald-100" }
-                          ].map((pm) => (
-                            <button
-                              key={pm.id}
-                              type="button"
-                              aria-pressed={paymentMethod === pm.id}
-                              onClick={() => { setPaymentMethod(pm.id); if (pm.id === "Pay at Clinic") setAmountToPay("0"); }}
-                              className={`flex h-[4.5rem] items-center gap-4 rounded-2xl border-2 px-4 transition-all ${
-                                paymentMethod === pm.id
-                                  ? `border-blue-600 bg-blue-50/50 text-blue-700 shadow-lg ${pm.shadow}`
-                                  : 'border-gray-100 bg-white text-gray-600 hover:border-gray-200 hover:bg-gray-50'
-                              }`}
-                            >
-                              <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${pm.color} text-[10px] font-black italic text-white shadow-lg`}>
-                                {pm.icon}
+                            <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${pm.color} text-[10px] font-black italic text-white shadow-lg transition-transform group-hover:scale-110`}>
+                              {pm.icon}
+                            </div>
+                            <span className="text-xs font-black tracking-widest uppercase">{pm.label}</span>
+                            {paymentMethod === pm.id && (
+                              <div className="absolute top-3 right-3 flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-white shadow-md">
+                                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" />
+                                </svg>
                               </div>
-                              <span className="text-sm font-black tracking-tight">{pm.label}</span>
-                              {paymentMethod === pm.id && (
-                                <div className="ml-auto flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-white">
-                                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7" />
-                                  </svg>
-                                </div>
-                              )}
-                            </button>
-                          ))}
-                        </div>
+                            )}
+                          </button>
+                        ))}
                       </div>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                    <div className="rounded-[2rem] border border-gray-100 bg-white p-6 shadow-xl shadow-gray-100/30 transition-all hover:shadow-gray-100/50">
-                        <div className="flex items-center gap-4">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-[0.9rem] bg-blue-50 text-blue-600 shadow-sm ring-4 ring-blue-50/50">
-                            <Stethoscope className="h-5 w-5" />
-                          </div>
-                          <Label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Appointment Status</Label>
-                        </div>
-                        <div className="mt-5">
-                          {canEditAppointmentStatus ? (
-                            <Select value={getFinalAppointmentStatus()} onValueChange={handleStatusChange} disabled={appointmentStatusOptions.length === 0}>
-                              <SelectTrigger className={`h-12 w-full rounded-xl border-2 border-gray-50 bg-gray-50/50 px-4 text-sm font-black transition-all hover:bg-gray-50 focus:ring-0 focus:ring-offset-0 ${
-                                getAppointmentStatusOption(getFinalAppointmentStatus())?.textColor || 'text-gray-900'
-                              }`}>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent className="rounded-2xl border-none shadow-2xl">
-                                {appointmentStatusOptions.map((status) => (
-                                  <SelectItem key={status.value} value={status.value} className="rounded-xl my-1 mx-2">
-                                    {status.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          ) : (
-                            <div className={`flex h-12 items-center rounded-xl bg-gray-50/50 px-4 text-sm font-black border-2 border-gray-50 ${
-                              getAppointmentStatusOption(getFinalAppointmentStatus())?.textColor || 'text-gray-900'
-                            }`}>
-                              {getBookingStatusLabel(getFinalAppointmentStatus(), appointmentStatusOptions)}
-                            </div>
-                          )}
-                        </div>
-                    </div>
-
-                    <div className="rounded-[2rem] border border-gray-100 bg-white p-6 shadow-xl shadow-gray-100/30 transition-all hover:shadow-gray-100/50">
-                        <div className="flex items-center gap-4">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-[0.9rem] bg-emerald-50 text-emerald-600 shadow-sm ring-4 ring-emerald-50/50">
-                            <CreditCard className="h-5 w-5" />
-                          </div>
-                          <Label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Payment Status</Label>
-                        </div>
-                        <div className="mt-5">
-                          {canManagePricing ? (
-                            <Select value={getFinalPaymentStatus()} onValueChange={handlePaymentStatusChange}>
-                              <SelectTrigger className={`h-12 w-full rounded-xl border-2 border-gray-50 bg-gray-50/50 px-4 text-sm font-black transition-all hover:bg-gray-50 focus:ring-0 focus:ring-offset-0 ${
-                                getPaymentStatusOption(getFinalPaymentStatus())?.textColor || 'text-gray-900'
-                              }`}>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent className="rounded-2xl border-none shadow-2xl">
-                                {paymentStatusOptions.map((status) => (
-                                  <SelectItem key={status.value} value={status.value} className="rounded-xl my-1 mx-2">
-                                    {status.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          ) : (
-                            <div className={`flex h-12 items-center rounded-xl bg-gray-50/50 px-4 text-sm font-black border-2 border-gray-50 ${
-                              getPaymentStatusOption(getFinalPaymentStatus())?.textColor || 'text-gray-900'
-                            }`}>
-                              {getBookingStatusLabel(getFinalPaymentStatus(), paymentStatusOptions)}
-                            </div>
-                          )}
-                        </div>
-                    </div>
-                  </div>
-
-                  <CompactNotesField
-                    id="improved-booking-notes"
-                    label={isPatientLevelBookingMode ? "My Notes" : "Additional Notes"}
-                    placeholder={isPatientLevelBookingMode ? "Add any notes for your dentist..." : "Any special instructions or clinical notes..."}
-                    value={notes}
-                    onChange={setNotes}
-                    disabled={isPatientReadonly && isCancelled}
-                    className="rounded-[2rem] border border-gray-100 bg-white p-6 shadow-xl shadow-gray-100/30 transition-all hover:shadow-gray-100/50"
-                    labelClassName="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-4"
-                    textareaClassName="min-h-[100px] rounded-2xl border-2 border-gray-50 bg-gray-50/30 p-5 text-sm font-medium focus:border-blue-500 focus:bg-white transition-all"
-                  />
                 </div>
               )}
             </div>
@@ -2612,9 +2670,25 @@ return (
                   </Button>
                 )}
                 <Button
-                  onClick={modalStep === 'payment' ? handleConfirmPayment : handleConfirmBooking}
+                  onClick={() => {
+                    if (isBooking) return;
+                    const overpayNow = modalStep === 'payment' && isOverpay;
+                    if (overpayNow) {
+                      toast.error(`Amount exceeds remaining balance. Maximum allowed: ₱${remainingBalance.toLocaleString()}`);
+                      setOverpayPulse(true);
+                      setTimeout(() => setOverpayPulse(false), 700);
+                      return;
+                    }
+
+                    if (modalStep === 'payment') {
+                      handleConfirmPayment();
+                    } else {
+                      handleConfirmBooking();
+                    }
+                  }}
+                  aria-disabled={modalStep === 'payment' && isOverpay}
                   disabled={isBooking}
-                  className="h-12 w-full sm:min-w-[200px] rounded-2xl bg-blue-600 px-8 font-black uppercase tracking-widest text-white shadow-lg shadow-blue-200 hover:bg-blue-700 hover:shadow-blue-300 transition-all sm:w-auto"
+                  className={`h-12 w-full sm:min-w-[200px] rounded-2xl bg-blue-600 px-8 font-black uppercase tracking-widest text-white shadow-lg shadow-blue-200 hover:bg-blue-700 hover:shadow-blue-300 transition-all sm:w-auto ${modalStep === 'payment' && isOverpay ? 'opacity-80 cursor-pointer' : ''} ${overpayPulse ? 'ring-2 ring-red-400 animate-pulse' : ''}`}
                 >
                   {isBooking ? <Loader2 className="h-5 w-5 animate-spin" /> : (
                     <div className="flex items-center justify-center gap-2">
@@ -2671,6 +2745,7 @@ return (
               mergedHistoryLogs.map((log, index) => {
                 const badges = getHistoryBadges(log);
                 const changedBy = log.changedByName || log.changedBy;
+                const historyNotes = getBookingHistoryNotes(log);
 
                 return (
                   <div key={log.id || `${log.logType}-${log.changedAt}-${index}`} className="rounded-2xl border border-gray-100 bg-gray-50/70 p-4">
@@ -2688,6 +2763,11 @@ return (
                           ))}
                         </div>
                         <p className="mt-1 text-xs font-semibold text-gray-500">{getHistoryDetail(log)}</p>
+                        {historyNotes && (
+                          <p className="mt-1 truncate text-xs font-semibold text-gray-500" title={historyNotes}>
+                            Notes: {historyNotes}
+                          </p>
+                        )}
                         <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">
                           {formatHistoryTimestamp(log.changedAt)}
                           {changedBy ? ` • ${changedBy}` : ""}
@@ -2722,47 +2802,68 @@ return (
 
       {/* Summary confirmation dialog */}
       <Dialog open={isConfirmSummaryOpen} onOpenChange={setIsConfirmSummaryOpen}>
-        <DialogContent className="max-w-xl p-0 overflow-hidden border-none shadow-2xl rounded-[2.5rem]">
-          <DialogHeader className="p-8 bg-gray-50 border-b">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-2xl gap-0 overflow-hidden rounded-[2rem] border-none p-0 shadow-2xl sm:max-w-2xl">
+          <DialogHeader className="border-b bg-gray-50 px-6 py-5">
             <div className="flex items-center gap-4">
-              <div className="bg-blue-600 p-3 rounded-2xl text-white shadow-lg shadow-blue-100">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-100">
                 <AlertCircle className="h-6 w-6" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <DialogTitle className="text-xl font-black text-gray-900">Confirm Appointment</DialogTitle>
-                <p className="text-sm font-bold text-gray-500">Please review all details before saving</p>
+                <p className="mt-1 text-sm font-bold text-gray-500">Please review all details before saving</p>
               </div>
             </div>
           </DialogHeader>
           
-          <div className="p-8 space-y-6 bg-white">
-            <div className="grid grid-cols-2 gap-8">
-              <div className="space-y-4">
-                <div>
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Patient</p>
-                  <p className="text-base font-black text-gray-900">{patients.find(p => p.id === selectedPatient)?.name || selectedPatient}</p>
+          <div className="space-y-5 bg-white p-6">
+            <div className="rounded-[1.75rem] border border-gray-100/70 bg-gray-50/60 p-5">
+              <div className="grid gap-x-8 gap-y-5 sm:grid-cols-2">
+                <div className="min-w-0">
+                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5 opacity-70">Patient</p>
+                  <div className="flex items-center gap-3">
+                    <Avatar className="h-10 w-10 shrink-0 border-2 border-white shadow-md">
+                      {summaryPatientAvatar && (
+                        <AvatarImage src={summaryPatientAvatar} alt={summaryPatientName} className="object-cover" />
+                      )}
+                      <AvatarFallback className="bg-blue-600 text-[11px] font-black text-white">
+                        {getPersonInitials(summaryPatientName)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <p className="min-w-0 truncate text-base font-black text-gray-900 tracking-tight">{summaryPatientName}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Service</p>
-                  <p className="text-base font-black text-gray-900">{appointmentType === "Other" ? customAppointmentTypeName : appointmentType}</p>
+
+                <div className="min-w-0">
+                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5 opacity-70">Doctor</p>
+                  <div className="flex items-center gap-3">
+                    <Avatar className="h-10 w-10 shrink-0 border-2 border-white shadow-md">
+                      {summaryDoctorAvatar && (
+                        <AvatarImage src={summaryDoctorAvatar} alt={displayDoctor} className="object-cover" />
+                      )}
+                      <AvatarFallback className="bg-emerald-500 text-[11px] font-black text-white">
+                        {getDoctorInitials(displayDoctor)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <p className="min-w-0 truncate text-base font-black text-gray-900 tracking-tight">{displayDoctor}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Schedule</p>
-                  <p className="text-base font-black text-gray-900">
-                    {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} at {selectedTime ? formatTimeTo12h(selectedTime) : '—'}
+
+                <div className="min-w-0">
+                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Service</p>
+                  <p className="text-base font-black leading-snug text-gray-900 tracking-tight">{appointmentType === "Other" ? customAppointmentTypeName : appointmentType}</p>
+                </div>
+
+                <div className="min-w-0">
+                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Schedule</p>
+                  <p className="text-base font-black leading-snug text-gray-900 tracking-tight">
+                    {toDate(selectedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} at {selectedTime ? formatTimeTo12h(selectedTime) : '—'}
                   </p>
                 </div>
-              </div>
 
-              <div className="space-y-4">
-                <div>
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Doctor</p>
-                  <p className="text-base font-black text-gray-900">{displayDoctor}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Duration</p>
+                <div className="min-w-0">
+                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Duration</p>
                   <div className="flex items-center gap-2">
-                    <p className="text-base font-black text-gray-900">{duration} mins</p>
+                    <p className="text-base font-black text-gray-900 tracking-tight">{duration} mins</p>
                     {durationConflict && (
                       <span title={bookingConflictWarnings.find(w => w.type === 'duration')?.message || durationConflict} className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-amber-700">
                         <AlertCircle className="h-3.5 w-3.5" />
@@ -2770,27 +2871,28 @@ return (
                     )}
                   </div>
                 </div>
-                <div>
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Status</p>
+
+                <div className="min-w-0">
+                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Status</p>
                   {canEditAppointmentStatus ? (
                     <Select value={getFinalAppointmentStatus()} onValueChange={handleStatusChange} disabled={appointmentStatusOptions.length === 0}>
-                      <SelectTrigger className={`h-8 w-auto min-w-[120px] rounded-full border-0 px-3 text-[10px] font-black uppercase tracking-tighter shadow-sm ${
+                      <SelectTrigger className={`h-9 w-full rounded-full border-0 px-3 text-[10px] font-black uppercase tracking-tighter shadow-sm focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 sm:max-w-[180px] ${
                         getAppointmentStatusOption(getFinalAppointmentStatus())?.bgColor || 'bg-gray-100'
                       } ${
                         getAppointmentStatusOption(getFinalAppointmentStatus())?.textColor || 'text-gray-700'
                       }`}>
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="rounded-2xl border-none shadow-2xl">
                         {appointmentStatusOptions.map((status) => (
-                          <SelectItem key={status.value} value={status.value}>
+                          <SelectItem key={status.value} value={status.value} className="rounded-xl my-1 mx-2">
                             {status.label}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   ) : (
-                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter shadow-sm ${
+                    <span className={`inline-flex h-9 items-center rounded-full px-3 text-[10px] font-black uppercase tracking-tighter shadow-sm ${
                       getAppointmentStatusOption(getFinalAppointmentStatus())?.bgColor || 'bg-gray-100'
                     } ${
                       getAppointmentStatusOption(getFinalAppointmentStatus())?.textColor || 'text-gray-700'
@@ -2799,48 +2901,19 @@ return (
                     </span>
                   )}
                 </div>
-                <div>
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Payment Status</p>
-                  {canManagePricing ? (
-                    <Select value={getFinalPaymentStatus()} onValueChange={handlePaymentStatusChange}>
-                      <SelectTrigger className={`h-8 w-auto min-w-[120px] rounded-full border-0 px-3 text-[10px] font-black uppercase tracking-tighter shadow-sm ${
-                        getPaymentStatusOption(getFinalPaymentStatus())?.bgColor || 'bg-gray-100'
-                      } ${
-                        getPaymentStatusOption(getFinalPaymentStatus())?.textColor || 'text-gray-700'
-                      }`}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {paymentStatusOptions.map((status) => (
-                          <SelectItem key={status.value} value={status.value}>
-                            {status.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter shadow-sm ${
-                      getPaymentStatusOption(getFinalPaymentStatus())?.bgColor || 'bg-gray-100'
-                    } ${
-                      getPaymentStatusOption(getFinalPaymentStatus())?.textColor || 'text-gray-700'
-                    }`}>
-                      {getBookingStatusLabel(getFinalPaymentStatus(), paymentStatusOptions)}
-                    </span>
-                  )}
-                </div>
               </div>
             </div>
 
             <CompactNotesField
               id="improved-summary-notes"
-              label="Notes"
-              placeholder="No notes added."
+              label={isPatientLevelBookingMode ? "My Notes" : "Additional Notes"}
+              placeholder={isPatientLevelBookingMode ? "Add any notes for your dentist..." : "Any special instructions or clinical notes..."}
               value={notes}
               onChange={setNotes}
               disabled={isPatientReadonly && isCancelled}
-              className="rounded-2xl border-2 border-gray-100 bg-gray-50/60 p-4"
-              labelClassName="text-[10px] font-black text-gray-400 uppercase tracking-widest"
-              textareaClassName="rounded-2xl border-2 border-gray-100 bg-white p-4 font-medium"
+              className="rounded-[1.5rem] border border-gray-100 bg-gray-50/50 p-4"
+              labelClassName="mb-2 text-[9px] font-black uppercase tracking-widest text-gray-400 opacity-70"
+              textareaClassName="min-h-[58px] resize-none rounded-xl border border-gray-100 bg-white p-3 text-sm font-medium transition-all focus:border-blue-500 focus:bg-white"
             />
 
             {bookingConflictWarnings.length > 0 && (
@@ -2850,48 +2923,94 @@ return (
               </div>
             )}
 
-            <div className="pt-6 border-t-2 border-dashed border-gray-100">
-              <div className="bg-gray-50 rounded-3xl p-6 space-y-3">
-                <div className="flex justify-between text-sm font-bold text-gray-500">
-                  <span>Total Price</span>
-                  <span>₱{finalPrice.toLocaleString()}</span>
-                </div>
-                {Number(discount) > 0 && (
-                  <div className="flex justify-between text-sm font-bold text-orange-600">
-                    <span>Discount</span>
-                    <span>-₱{Number(discount).toLocaleString()}</span>
+            <div className="space-y-3">
+              <div className="flex items-center gap-4">
+                <div className="h-px flex-1 bg-gray-100"></div>
+                <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Financial Summary</p>
+                <div className="h-px flex-1 bg-gray-100"></div>
+              </div>
+
+              <div className="space-y-5 rounded-[1.75rem] border border-gray-100/70 bg-gray-50/60 p-5">
+                <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_180px] md:items-start">
+                  <div className="min-w-0">
+                    <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">Final Price</p>
+                    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
+                      {Number(discount) > 0 && (
+                        <span className="text-sm font-bold text-gray-400 line-through decoration-gray-400/50">&#8369;{(customPrice === "0" ? finalPrice : Number(customPrice)).toLocaleString()}</span>
+                      )}
+                      <p className="text-3xl font-black text-blue-600 tracking-tighter">&#8369;{discountedPrice.toLocaleString()}</p>
+                      {Number(discount) > 0 && (
+                        <span className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-emerald-700 shadow-sm">
+                          Saved &#8369;{Number(discount).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                )}
-                <div className="flex justify-between items-center pt-3 border-t border-gray-200">
-                  <span className="text-lg font-black text-gray-900">Final Price</span>
-                  <span className="text-2xl font-black text-blue-600">₱{discountedPrice.toLocaleString()}</span>
+                  <div className="min-w-0 md:justify-self-end md:text-right">
+                    <div>
+                      <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1 opacity-70">Payment Status</p>
+                      {canManagePricing ? (
+                        <Select value={getFinalPaymentStatus()} onValueChange={handlePaymentStatusChange}>
+                          <SelectTrigger className={`h-9 w-full rounded-full border-0 px-3 text-[10px] font-black uppercase tracking-tighter shadow-sm focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 md:w-[160px] ${
+                            getPaymentStatusOption(getFinalPaymentStatus())?.bgColor || 'bg-gray-100'
+                          } ${
+                            getPaymentStatusOption(getFinalPaymentStatus())?.textColor || 'text-gray-700'
+                          }`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="rounded-2xl border-none shadow-2xl">
+                            {paymentStatusOptions.map((status) => (
+                              <SelectItem key={status.value} value={status.value} className="rounded-xl my-1 mx-2">
+                                {status.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <span className={`inline-flex h-9 items-center rounded-full px-3 text-[10px] font-black uppercase tracking-tighter shadow-sm ${
+                          getPaymentStatusOption(getFinalPaymentStatus())?.bgColor || 'bg-gray-100'
+                        } ${
+                          getPaymentStatusOption(getFinalPaymentStatus())?.textColor || 'text-gray-700'
+                        }`}>
+                          {getBookingStatusLabel(getFinalPaymentStatus(), paymentStatusOptions)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-3 border-t border-gray-100/70 pt-4">
+                  <div className="text-center">
+                    <p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mb-1">Already Paid</p>
+                    <p className="text-sm font-black text-emerald-600 tracking-tight">₱{previouslyPaidAmount.toLocaleString()}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mb-1">Paying Now</p>
+                    <p className="text-sm font-black text-blue-600 tracking-tight">₱{paymentAmountNow.toLocaleString()}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mb-1">Remaining</p>
+                    <p className="text-sm font-black text-gray-400 tracking-tight">₱{Math.max(0, discountedPrice - previouslyPaidAmount - paymentAmountNow).toLocaleString()}</p>
+                  </div>
                 </div>
               </div>
             </div>
-
-            <div className="flex flex-col gap-2 text-xs font-bold text-gray-400 uppercase tracking-widest text-center">
-              {previouslyPaidAmount > 0 && (
-                <p className="text-emerald-600">Already Paid: ₱{previouslyPaidAmount.toLocaleString()}</p>
-              )}
-              <p className="text-blue-700">Paying Now: ₱{paymentAmountNow.toLocaleString()}</p>
-              <p>Remaining: ₱{Math.max(0, discountedPrice - previouslyPaidAmount - paymentAmountNow).toLocaleString()}</p>
-            </div>
-          </div>
+          </div>         
 
           {/* Patient-facing note: suggest payment to reserve when booking remains in the cart */}
           {user?.role === 'patient' && isCartAppointmentStatus(getFinalAppointmentStatus()) && (
-            <div className="px-8">
+            <div className="px-6 pb-5">
               <div className="rounded-lg p-3 bg-yellow-50 border border-yellow-100 text-yellow-800 text-sm font-semibold">
                 Note: This booking will be added to your cart. Adding a payment will reserve this schedule.
               </div>
             </div>
           )}
 
-          <DialogFooter className="p-8 bg-white border-t flex gap-4">
-            <Button variant="outline" onClick={() => setIsConfirmSummaryOpen(false)} disabled={isBooking} className="h-14 flex-1 rounded-2xl font-bold border-2">
+          <DialogFooter className="flex gap-3 border-t bg-gray-50/60 p-6">
+            <Button variant="outline" onClick={() => setIsConfirmSummaryOpen(false)} disabled={isBooking} className="h-12 flex-1 rounded-2xl border-2 font-bold">
               Back to Edit
             </Button>
-            <Button className="bg-blue-600 hover:bg-blue-700 text-white h-14 flex-1 rounded-2xl font-black uppercase tracking-widest shadow-lg shadow-blue-100" onClick={handleConfirmSummary} disabled={isBooking}>
+            <Button className="h-12 flex-1 rounded-2xl bg-blue-600 font-black uppercase tracking-widest text-white shadow-lg shadow-blue-100 hover:bg-blue-700" onClick={handleConfirmSummary} disabled={isBooking}>
               {isBooking ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : null}
               {isCartAppointmentStatus(getFinalAppointmentStatus()) ? 'Add to Cart' : 'Confirm & Save'}
             </Button>

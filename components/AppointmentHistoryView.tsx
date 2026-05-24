@@ -10,7 +10,7 @@ import { apiUrl } from "@/lib/api";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import { toast } from "sonner";
 import { useDoctors } from "@/hooks/useDoctors";
-import { formatBookingHistoryStatusLabel } from "./sharedBookingLogic";
+import { formatBookingHistoryStatusLabel, normalizeBookingHistoryStatus, isSignificantBookingPaymentStatus } from "./sharedBookingLogic";
 
 interface AppointmentHistoryViewProps {
   open: boolean;
@@ -104,6 +104,33 @@ const normalizeDoctorName = (doctor: any) => {
   return /^(none|null|undefined|unassigned|no doctor assigned)$/.test(normalized) ? "" : normalized;
 };
 
+const shortDoctorLabel = (fullName?: string, prefix = "From") => {
+  if (!fullName) return "";
+  const stripped = String(fullName).replace(/^Dr\.?\s+/i, "").trim();
+  const first = stripped.split(/\s+/)[0] || stripped;
+  return `${prefix} Dr. ${first}`;
+};
+
+const shortPatientLabel = (fullName?: string, prefix = "From") => {
+  if (!fullName) return "";
+  const stripped = String(fullName).trim();
+  return `${prefix} ${stripped}`;
+};
+
+const shortScheduleLabel = (snapshot: any) => {
+  if (!snapshot) return "";
+  const date = snapshot?.date;
+  const time = snapshot?.time;
+  const duration = snapshot?.duration;
+  try {
+    const dateLabel = new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const timeLabel = formatAppointmentTimeRange(time, duration);
+    return `${dateLabel} ${timeLabel}`;
+  } catch (e) {
+    return formatAppointmentTimeRange(time, duration) || String(date || "");
+  }
+};
+
 const formatCompactTime = (time24?: string) => formatTimeTo12h(time24 || "").replace(/\s+/g, "");
 
 const formatAppointmentTimeRange = (time?: string, duration?: unknown) => {
@@ -121,6 +148,36 @@ const formatAppointmentTimeRange = (time?: string, duration?: unknown) => {
   const endTime24 = `${String(endTime.getHours()).padStart(2, "0")}:${String(endTime.getMinutes()).padStart(2, "0")}`;
 
   return `${startLabel} - ${formatCompactTime(endTime24)}`;
+};
+
+const isIgnorablePatientName = (name?: string) => {
+  if (!name) return true;
+  const n = String(name).trim().toLowerCase();
+  return n === "" || /^(no patient assigned|no patient|occupied|unassigned|none|null|n\/a|-)$/.test(n);
+};
+
+const isValidDateValue = (value: any) => {
+  if (value === undefined || value === null || String(value).trim() === "") return false;
+  const d = new Date(value);
+  return !Number.isNaN(d.getTime());
+};
+
+const isMeaningfulTime = (time?: string, duration?: unknown) => {
+  const label = formatAppointmentTimeRange(time, duration);
+  if (!label) return false;
+  const n = String(label).trim().toLowerCase();
+  return n !== "no time" && n !== "";
+};
+
+const isMeaningfulTreatmentName = (name?: string) => {
+  if (!name) return false;
+  const n = String(name).trim().toLowerCase();
+  return n !== "appointment" && n !== "";
+};
+
+const isInsignificantStatus = (status?: string) => {
+  const n = String(status ?? "").toLowerCase().trim();
+  return n === "" || /^(updated|invalid|unknown|none|n\/a|-)$/.test(n);
 };
 
 const pickNumericValue = (...values: unknown[]) => {
@@ -145,6 +202,29 @@ const getExplicitSnapshotPaymentAmount = (snapshot: any) =>
 const isLogSnapshot = (snapshot: any) =>
   Boolean(snapshot?.logType || snapshot?.changeType || snapshot?.previousState || snapshot?.newState);
 
+const isPatientChange = (snapshot: any) => {
+  const prev = snapshot?.previousState;
+  const next = snapshot?.newState;
+  if (!prev || !next) return false;
+
+  const resolvePatient = (s: any) => {
+    if (!s) return "";
+    if (typeof s.patient === "string") return s.patient;
+    if (s.patient?.id) return String(s.patient.id);
+    if (s.patient?.name) return String(s.patient.name);
+    if (s.patientId) return String(s.patientId);
+    if (s.patientName) return String(s.patientName || s.patient_name);
+    const first = s.patientFirstName || s.patient?.firstName;
+    const last = s.patientLastName || s.patient?.lastName;
+    if (first || last) return [first, last].filter(Boolean).join(" ");
+    return "";
+  };
+
+  const pPrev = String(resolvePatient(prev) || "").trim();
+  const pNext = String(resolvePatient(next) || "").trim();
+  return Boolean(pPrev && pNext && pPrev !== pNext);
+};
+
 type DoctorReassignment = {
   previousDoctorName: string;
   currentDoctorName: string;
@@ -157,13 +237,19 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [patientRecord, setPatientRecord] = useState<any | null>(null);
   const [latestPaymentLogAmount, setLatestPaymentLogAmount] = useState<number | null>(null);
   const [latestDoctorReassignment, setLatestDoctorReassignment] = useState<DoctorReassignment | null>(null);
-  const { doctors } = useDoctors();
+  const { doctors } = useDoctors(undefined, { enabled: open });
   const displayedPatientId = displayedSnapshot?.patientId || displayedSnapshot?.patient?.id || "";
   const displayedAppointmentId = displayedSnapshot?.id || displayedSnapshot?.appointmentId || "";
 
   useEffect(() => {
     setDisplayedSnapshot(appointmentSnapshot);
-    setSnapshotState(Boolean(isHistorical) ? "historical" : "current");
+    // Prefer explicit snapshot metadata when available. If the snapshot includes
+    // `_isHistorical` (set by `fetchSnapshotFromLogs`), honor that value. Otherwise
+    // fall back to the `isHistorical` prop provided by the caller.
+    const derivedHistorical = appointmentSnapshot && Object.prototype.hasOwnProperty.call(appointmentSnapshot, "_isHistorical")
+      ? Boolean(appointmentSnapshot._isHistorical)
+      : Boolean(isHistorical);
+    setSnapshotState(derivedHistorical ? "historical" : "current");
   }, [appointmentSnapshot, isHistorical]);
 
   useEffect(() => {
@@ -205,7 +291,6 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       !open ||
       !appointmentId ||
       snapshotState === "historical" ||
-      isLogSnapshot(displayedSnapshot) ||
       (explicitAmount !== null && explicitAmount > 0)
     ) return;
 
@@ -375,24 +460,102 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     (doctorRecord as any)?.profilePictureUrl;
 
   const resolvedDoctorImage = resolveImageSource(pickImageSource(doctorImage));
+
+  // Prepare previous / next state values for explicit change lines
+  const prevState = displayedSnapshot?.previousState || null;
+  const nextState = displayedSnapshot?.newState || displayedSnapshot || null;
+
+  const prevPatientName = prevState ? resolvePatientName(prevState) : null;
+  const nextPatientName = nextState ? resolvePatientName(nextState) : patientName;
+
+  const prevTreatmentName = prevState ? resolveAppointmentTypeName(prevState.type, prevState.customType) : null;
+  const nextTreatmentName = nextState ? resolveAppointmentTypeName(nextState.type, nextState.customType) : typeName;
+
+  // Price calculations: account for `discount` on snapshots (appointments may store `discount`)
+  const getBasePrice = (s: any) => (s ? pickNumericValue(s.price, s.amount, s.totalPrice) : null);
+  const getDiscountValue = (s: any) => {
+    const d = s ? pickNumericValue(s.discount) : null;
+    return Number(d ?? 0);
+  };
+
+  const prevBase = getBasePrice(prevState);
+  const prevDiscount = prevState ? getDiscountValue(prevState) : 0;
+  const prevPrice = prevBase !== null ? Math.max(0, Number(prevBase) - Number(prevDiscount)) : null;
+
+  const nextBase = getBasePrice(nextState) ?? getBasePrice(displayedSnapshot);
+  const nextDiscount = nextState ? (getDiscountValue(nextState) || getDiscountValue(displayedSnapshot)) : getDiscountValue(displayedSnapshot);
+  const nextPrice = nextBase !== null ? Math.max(0, Number(nextBase) - Number(nextDiscount)) : null;
+
+  // Values for rendering: prefer next (current) values, fallback to previous or raw snapshot
+  const displayedBasePrice = nextBase ?? prevBase ?? pickNumericValue(displayedSnapshot.price) ?? 0;
+  const displayedDiscountAmount = Number(nextDiscount ?? prevDiscount ?? pickNumericValue(displayedSnapshot.discount) ?? 0);
+  const displayedEffectivePrice = nextPrice ?? prevPrice ?? Math.max(0, Number(displayedBasePrice) - Number(displayedDiscountAmount));
+
+  // Parse numeric remaining balance (accepts numbers or currency strings)
+  const parseCurrencyNumber = (v: any) => {
+    if (v === undefined || v === null) return null;
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+    const cleaned = String(v).replace(/[^0-9.-]/g, '');
+    const n2 = Number(cleaned);
+    return Number.isFinite(n2) ? n2 : null;
+  };
+
+  const displayedBalanceNumeric = parseCurrencyNumber(displayedSnapshot.balance ?? displayedSnapshot.remaining ?? displayedSnapshot.balanceAmount);
+
+  const prevStatus = prevState?.status || null;
+  const nextStatus = nextState?.status || displayedSnapshot?.status || null;
+
+  const prevPaymentStatus = prevState?.paymentStatus || null;
+  const nextPaymentStatus = nextState?.paymentStatus || displayedSnapshot?.paymentStatus || null;
+
+  const prevStatusNorm = normalizeBookingHistoryStatus(prevStatus);
+  const nextStatusNorm = normalizeBookingHistoryStatus(nextStatus || displayedSnapshot?.status);
+  const prevPaymentStatusNorm = normalizeBookingHistoryStatus(prevPaymentStatus);
+  const nextPaymentStatusNorm = normalizeBookingHistoryStatus(nextPaymentStatus || displayedSnapshot?.paymentStatus);
+
+  const prevScheduleLabel = prevState ? `${new Date(prevState.date).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })} ${formatAppointmentTimeRange(prevState.time, prevState.duration)}` : null;
+  const nextScheduleLabel = nextState ? `${new Date(nextState.date).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })} ${formatAppointmentTimeRange(nextState.time, nextState.duration)}` : null;
   const changedByName = displayedSnapshot.changedByName || appointmentSnapshot?.changedByName;
   const isPastSnapshot = snapshotState === "historical";
-  const stateLabel = isPastSnapshot ? "Past Log" : snapshotState === "latest" ? "Latest" : "Current";
-  const stateBadgeClass = isPastSnapshot
+  // Consider the snapshot to be a "log view" only when it's actually historical.
+  // Many snapshots reconstructed from logs include `previousState`/`newState` metadata
+  // but may represent the most-recent (current) state — those should not be shown as
+  // historical. Use `snapshotState` (which prefers `_isHistorical` when available)
+  // as the authoritative source.
+  const openedFromLog = isLogSnapshot(displayedSnapshot) && isPastSnapshot;
+
+  // Use authoritative snapshotState to determine header label/prefix.
+  // Treat "latest" the same as "current" (show as Current) so the most recent log appears as Current.
+  const stateLabel = isPastSnapshot ? "Log" : "Current";
+
+  const stateBadgeClass = snapshotState === "historical"
     ? "border-amber-200 bg-amber-50 text-amber-700"
-    : snapshotState === "latest"
-      ? "border-blue-200 bg-blue-50 text-blue-700"
-      : "border-emerald-200 bg-emerald-50 text-emerald-700";
-  const StateIcon = isPastSnapshot ? History : CheckCircle2;
-  const timestampPrefix = isPastSnapshot ? "Saved on" : snapshotState === "latest" ? "Latest log from" : "Current as of";
+    : "border-emerald-200 bg-emerald-50 text-emerald-700";
+
+  const StateIcon = snapshotState === "historical" ? History : CheckCircle2;
+
+  const timestampPrefix = snapshotState === "historical" ? "Logged on" : "Current as of";
+  const isLogView = isPastSnapshot; // authoritative
   const explicitSnapshotPaymentAmount = getExplicitSnapshotPaymentAmount(displayedSnapshot);
-  const openedFromLog = isLogSnapshot(displayedSnapshot);
-  const snapshotPaymentAmount =
-    isPastSnapshot || openedFromLog
-      ? explicitSnapshotPaymentAmount ?? 0
-      : explicitSnapshotPaymentAmount && explicitSnapshotPaymentAmount > 0
-        ? explicitSnapshotPaymentAmount
-        : latestPaymentLogAmount ?? 0;
+  const snapshotPaymentAmount = isLogView
+    ? // historical log: show any explicit payment amount recorded on the log (or 0)
+      explicitSnapshotPaymentAmount ?? 0
+    : // current view: prefer explicit snapshot payment if present, else fall back to latest payment log amount
+      (explicitSnapshotPaymentAmount && explicitSnapshotPaymentAmount > 0 ? explicitSnapshotPaymentAmount : latestPaymentLogAmount ?? 0);
+
+  // Compute total paid (price - remaining balance) when possible, fallback to snapshot payment
+  const totalPaidAmount = (displayedBalanceNumeric !== null && Number.isFinite(Number(displayedEffectivePrice)))
+    ? Math.max(0, Number(displayedEffectivePrice) - Number(displayedBalanceNumeric))
+    : (snapshotPaymentAmount ?? 0);
+
+  const displayedBalanceLabel = displayedBalanceNumeric !== null
+    ? `₱${Number(displayedBalanceNumeric).toLocaleString()}`
+    : (displayedSnapshot.balance !== undefined && displayedSnapshot.balance !== null ? String(displayedSnapshot.balance) : '₱0');
+
+  const patientChanged = isPatientChange(displayedSnapshot);
+  const changeSuffix = patientChanged ? "Patient Changed" : (changedByName ? `by ${changedByName}` : "");
 
   const appointmentId = displayedAppointmentId;
   const canOpenAppointment = Boolean(appointmentId && snapshotState === "current" && onOpenAppointment && !isAppointmentOpen);
@@ -444,7 +607,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       snap.changedByName = latest.changedByName;
 
       setDisplayedSnapshot(snap);
-      setSnapshotState("latest");
+      setSnapshotState("current");
     } catch (err) {
       console.error("Failed to load logs:", err);
       toast.error("Failed to load appointment logs");
@@ -468,7 +631,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                 </span>
               </DialogTitle>
               <DialogDescription className="truncate">
-                {timestampPrefix} {snapshotDate} {changedByName && `by ${changedByName}`}
+                {timestampPrefix} {snapshotDate}{changeSuffix ? ` ${changeSuffix}` : ""}
               </DialogDescription>
             </div>
 
@@ -502,7 +665,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
           <div className="mt-2 mb-3 p-3 rounded-md bg-amber-50 border border-amber-200 text-amber-900 text-sm flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 flex-shrink-0" />
             <div>
-              This is an older saved log. Use "View Latest" to open the current appointment details before making decisions.
+              This is an older payment log. Use "Latest" to open the current appointment details before making decisions.
             </div>
           </div>
         ) : null}
@@ -520,6 +683,9 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
               <div>
                 <Label className="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Patient</Label>
                 <p className="font-medium text-slate-900">{patientName}</p>
+                {prevState && nextState && prevPatientName && nextPatientName && prevPatientName !== nextPatientName && !isIgnorablePatientName(prevPatientName) ? (
+                  <p className="mt-1 text-xs font-semibold text-blue-700">{shortPatientLabel(prevPatientName)}</p>
+                ) : null}
               </div>
             </div>
 
@@ -530,6 +696,9 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
               <div>
                 <Label className="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Date</Label>
                 <p className="font-medium text-slate-900">{formattedDate}</p>
+                {prevState && nextState && prevState.date !== nextState.date && isValidDateValue(prevState.date) ? (
+                  <p className="mt-1 text-xs font-semibold text-blue-700">From {new Date(prevState.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
+                ) : null}
               </div>
             </div>
 
@@ -540,9 +709,27 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
               <div>
                 <Label className="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Time</Label>
                 <p className="font-medium text-slate-900">{formatAppointmentTimeRange(displayedSnapshot.time, displayedSnapshot.duration)}</p>
+                {prevState && nextState && (prevState.time !== nextState.time || (prevState.duration || 0) !== (nextState.duration || 0)) && isMeaningfulTime(prevState.time, prevState.duration) ? (
+                  <p className="mt-1 text-xs font-semibold text-blue-700">From {formatAppointmentTimeRange(prevState.time, prevState.duration)}</p>
+                ) : null}
               </div>
             </div>
 
+            {/* Service block */}
+            <div className="flex items-center gap-3">
+              <div className="bg-white p-2 rounded-md shadow-sm border border-slate-200">
+                <Stethoscope className="w-5 h-5 text-blue-600" />
+              </div>
+              <div>
+                <Label className="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Service</Label>
+                <p className="font-medium text-slate-900">{typeName}</p>
+                {prevState && nextState && prevTreatmentName && nextTreatmentName && prevTreatmentName !== nextTreatmentName && isMeaningfulTreatmentName(prevTreatmentName) ? (
+                  <p className="mt-1 text-xs font-semibold text-blue-700">From {prevTreatmentName}</p>
+                ) : null}
+              </div>
+            </div>
+
+            {/* Doctor block */}
             <div className="flex items-center gap-3">
               <Avatar className="h-11 w-11 rounded-md border border-slate-200 bg-white shadow-sm">
                 <AvatarImage src={resolvedDoctorImage} alt={displayedDoctorName || "Doctor"} className="object-cover" />
@@ -551,14 +738,26 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                 </AvatarFallback>
               </Avatar>
               <div>
-                <Label className="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Service & Doctor</Label>
-                <p className="font-medium text-slate-900">{typeName}</p>
-                <p className="text-sm text-slate-600">{displayedDoctorName || "No doctor assigned"}</p>
-                {hasResolvedDoctorReassignment && (
-                  <p className="mt-1 text-xs font-semibold text-blue-700">
-                    Reassigned from {resolvedPreviousDoctorName} to {resolvedCurrentDoctorName}
-                  </p>
-                )}
+                <Label className="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Doctor</Label>
+                <p className="font-medium text-slate-900">{displayedDoctorName || "No doctor assigned"}</p>
+                {(() => {
+                  const prevDoc = prevState ? resolveDoctorName(prevState?.doctor || prevState?.doctorName || prevState?.doctorId) : "";
+                  const nextDoc = nextState ? resolveDoctorName(nextState?.doctor || nextState?.doctorName || nextState?.doctorId) : "";
+                  const prevDocNorm = prevDoc ? normalizeDoctorName(prevDoc) : "";
+                  const nextDocNorm = nextDoc ? normalizeDoctorName(nextDoc) : "";
+                  const resolvedPrevNorm = resolvedPreviousDoctorName ? normalizeDoctorName(resolvedPreviousDoctorName) : "";
+                  const resolvedNextNorm = resolvedCurrentDoctorName ? normalizeDoctorName(resolvedCurrentDoctorName) : "";
+
+                  const docChanged = (
+                    (resolvedPrevNorm && resolvedNextNorm && resolvedPrevNorm !== resolvedNextNorm) ||
+                    (prevDocNorm && nextDocNorm && prevDocNorm !== nextDocNorm)
+                  );
+
+                  if (!docChanged) return null;
+
+                  const labelSource = (resolvedPrevNorm && resolvedNextNorm) ? resolvedPreviousDoctorName : prevDoc;
+                  return <p className="mt-1 text-xs font-semibold text-blue-700">{shortDoctorLabel(labelSource)}</p>;
+                })()}
               </div>
             </div>
           </div>
@@ -569,24 +768,30 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
               <Label className="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Status</Label>
               <div className="mt-1">
                  <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                  displayedSnapshot.status === 'completed' ? 'bg-green-100 text-green-700' :
-                  displayedSnapshot.status === 'cancelled' ? 'bg-red-100 text-red-700' :
+                  (nextStatus || displayedSnapshot.status) === 'completed' ? 'bg-green-100 text-green-700' :
+                  (nextStatus || displayedSnapshot.status) === 'cancelled' ? 'bg-red-100 text-red-700' :
                   'bg-blue-100 text-blue-700'
                 }`}> 
-                  {formatBookingHistoryStatusLabel(displayedSnapshot.status).toUpperCase()}
+                  {formatBookingHistoryStatusLabel(nextStatus || displayedSnapshot.status).toUpperCase()}
                 </span>
+                {prevStatus && nextStatus && prevStatusNorm && nextStatusNorm && !isInsignificantStatus(prevStatusNorm) && prevStatusNorm !== nextStatusNorm ? (
+                  <p className="mt-1 text-xs text-slate-600">{formatBookingHistoryStatusLabel(prevStatus)} → {formatBookingHistoryStatusLabel(nextStatus)}</p>
+                ) : null}
               </div>
             </div>
             <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
               <Label className="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Payment</Label>
               <div className="mt-1">
                 <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                  displayedSnapshot.paymentStatus === 'paid' ? 'bg-green-100 text-green-700' :
-                  displayedSnapshot.paymentStatus === 'half-paid' ? 'bg-amber-100 text-amber-700' :
+                  (nextPaymentStatus || displayedSnapshot.paymentStatus) === 'paid' ? 'bg-green-100 text-green-700' :
+                  (nextPaymentStatus || displayedSnapshot.paymentStatus) === 'half-paid' ? 'bg-amber-100 text-amber-700' :
                   'bg-slate-100 text-slate-700'
                 }`}>
-                  {formatBookingHistoryStatusLabel(displayedSnapshot.paymentStatus).toUpperCase()}
+                  {formatBookingHistoryStatusLabel(nextPaymentStatus || displayedSnapshot.paymentStatus).toUpperCase()}
                 </span>
+                {prevPaymentStatus && nextPaymentStatus && prevPaymentStatusNorm && nextPaymentStatusNorm && !isInsignificantStatus(prevPaymentStatusNorm) && prevPaymentStatusNorm !== nextPaymentStatusNorm ? (
+                  <p className="mt-1 text-xs text-slate-600">{formatBookingHistoryStatusLabel(prevPaymentStatus)} → {formatBookingHistoryStatusLabel(nextPaymentStatus)}</p>
+                ) : null}
               </div>
             </div>
           </div>
@@ -605,18 +810,43 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                 <Banknote className="w-4 h-4 text-slate-500" />
                 <span className="text-sm font-medium">Price</span>
               </div>
-              <span className="font-bold">₱{displayedSnapshot.price?.toLocaleString()}</span>
+              {prevPrice !== null && nextPrice !== null && Number(prevPrice) !== Number(nextPrice) && Number(prevPrice) > 0 ? (
+                <div className="text-right">
+                  <div className="font-bold">₱{Number(nextPrice).toLocaleString()}</div>
+                  <div className="text-xs font-semibold text-blue-700">From ₱{Number(prevPrice).toLocaleString()}</div>
+                </div>
+              ) : (
+                (displayedDiscountAmount > 0) ? (
+                  <div className="text-right">
+                    <div className="text-xs text-blue-200 line-through opacity-80 mb-0.5">₱{Number(displayedBasePrice).toLocaleString()}</div>
+                    <div className="font-bold">₱{Number(displayedEffectivePrice).toLocaleString()}</div>
+                  </div>
+                ) : (
+                  <span className="font-bold">₱{(Number(displayedEffectivePrice) || 0).toLocaleString()}</span>
+                )
+              )}
             </div>
-            <div className="flex justify-between items-center">
-              <div className="flex items-center gap-2 text-green-600">
-                <CreditCard className="w-4 h-4" />
-                <span className="text-sm font-medium">Paid in Snapshot</span>
-              </div>
+            {isLogSnapshot(displayedSnapshot) && (
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2 text-green-600">
+                  <CreditCard className="w-4 h-4" />
+                  <span className="text-sm font-medium">Paid in Snapshot</span>
+                </div>
                 <span className="font-bold text-green-600">₱{snapshotPaymentAmount.toLocaleString()}</span>
-            </div>
+              </div>
+            )}
+            {totalPaidAmount !== null ? (
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <Banknote className="w-4 h-4 text-slate-500" />
+                  <span className="text-sm font-medium">Total Paid</span>
+                </div>
+                <span className="font-bold">₱{Number(totalPaidAmount).toLocaleString()}</span>
+              </div>
+            ) : null}
             <div className="pt-2 border-t border-slate-200 flex justify-between items-center">
               <span className="text-sm font-bold text-slate-700">Remaining Balance</span>
-                <span className="text-lg font-black text-primary">₱{displayedSnapshot.balance?.toLocaleString()}</span>
+                <span className="text-lg font-black text-primary">{displayedBalanceLabel}</span>
             </div>
           </div>
 

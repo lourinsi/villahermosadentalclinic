@@ -14,6 +14,7 @@ import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
+import AppointmentHistoryView from "@/components/AppointmentHistoryView";
 import { Input } from "@/components/ui/input";
 import { isCartAppointmentStatus } from "@/lib/appointment-status";
 import {
@@ -36,6 +37,9 @@ const OrdersContent = () => {
     const { appointments, isLoading: appointmentsLoading } = useAppointments(undefined, { patientId: user?.patientId });
     const { statuses: APPOINTMENT_STATUSES } = useAppointmentStatuses();
     const { openEditModal } = useAppointmentModal();
+    const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
+    const [historySnapshot, setHistorySnapshot] = useState<any | null>(null);
+    const [historyLogDate, setHistoryLogDate] = useState<string | undefined>(undefined);
     const [sortedAppointments, setSortedAppointments] = useState<Appointment[]>([]);
     
     // Helper function to get status label
@@ -502,7 +506,11 @@ const OrdersContent = () => {
                                                 Payment Complete
                                             </div>
                                             <Button 
-                                                onClick={() => handleOpenPayment(appointment)} 
+                                                onClick={() => {
+                                                    setHistorySnapshot(appointment);
+                                                    setHistoryLogDate(undefined);
+                                                    setIsHistoryOpen(true);
+                                                }}
                                                 variant="outline"
                                                 size="sm"
                                                 className="border-gray-300 text-gray-700 hover:bg-gray-100"
@@ -522,6 +530,13 @@ const OrdersContent = () => {
                     ))}
                 </div>
             )}
+
+            <AppointmentHistoryView
+                open={isHistoryOpen}
+                onOpenChange={(open) => setIsHistoryOpen(open)}
+                appointmentSnapshot={historySnapshot}
+                logDate={historyLogDate || ""}
+            />
         </div>
     );
 };

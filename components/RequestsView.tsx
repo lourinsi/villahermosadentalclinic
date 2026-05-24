@@ -71,6 +71,35 @@ interface RequestsViewProps {
 const REQUESTS_PER_PAGE = 10;
 const HISTORY_PER_PAGE = 10;
 
+const resolveImageSource = (source?: string) => {
+  if (!source) return undefined;
+  if (
+    source.startsWith("http") ||
+    source.startsWith("data:") ||
+    source.startsWith("blob:")
+  ) {
+    return source;
+  }
+  return apiUrl(source);
+};
+
+const getPatientImage = (appointment: any) => {
+  if (!appointment) return undefined;
+  return (
+    appointment.patientProfile ||
+    appointment.patientProfilePicture ||
+    appointment.patientPhoto ||
+    appointment.patientImage ||
+    appointment.patientAvatar ||
+    appointment.profilePicture ||
+    appointment.patient?.profilePicture ||
+    appointment.patient?.profilePictureUrl ||
+    appointment.patient?.photo ||
+    appointment.patient?.photoUrl ||
+    appointment.patient?.avatar
+  );
+};
+
 export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const {
     appointments,
@@ -198,6 +227,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const [historySearchTerm, setHistorySearchTerm] = useState("");
   const [historyStatusFilter, setHistoryStatusFilter] = useState("all");
   const [historyDateFilter, setHistoryDateFilter] = useState("");
+  const [historyDoctorFilter, setHistoryDoctorFilter] = useState("all");
   const [historySortColumn, setHistorySortColumn] = useState<string | null>(null);
   const [historySortDirection, setHistorySortDirection] = useState<"asc" | "desc">("asc");
   
@@ -423,10 +453,11 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         limit: String(HISTORY_PER_PAGE),
       });
       const search = historySearchTerm.trim();
+      const selectedDoctor = doctorFilter || (historyDoctorFilter !== "all" ? historyDoctorFilter : "");
 
       if (search) params.set("search", search);
       if (historyStatusFilter !== "all") params.set("status", historyStatusFilter);
-      if (doctorFilter) params.set("doctor", doctorFilter);
+      if (selectedDoctor) params.set("doctor", selectedDoctor);
       if (historyDateFilter) {
         params.set("startDate", historyDateFilter);
         params.set("endDate", historyDateFilter);
@@ -520,6 +551,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     historySortColumn,
     historySortDirection,
     historyStatusFilter,
+    historyDoctorFilter,
   ]);
 
   useEffect(() => {
@@ -531,6 +563,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     historySortColumn,
     historySortDirection,
     historyStatusFilter,
+    historyDoctorFilter,
   ]);
 
   useEffect(() => {
@@ -548,6 +581,37 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     refreshRequests();
     refreshHistory();
   }, [refreshHistory, refreshRequests]);
+
+  useEffect(() => {
+    const handleAppointmentsUpdated = (event: Event) => {
+      const updatedAppointment = (event as CustomEvent<{ appointment?: Appointment }>).detail?.appointment;
+
+      if (updatedAppointment?.id) {
+        const normalizedAppointment = {
+          ...updatedAppointment,
+          status: normalizeAppointmentStatus(updatedAppointment.status),
+        };
+
+        const mergeUpdatedAppointment = (items: Appointment[]) =>
+          items.map((appointment) =>
+            String(appointment.id) === String(normalizedAppointment.id)
+              ? { ...appointment, ...normalizedAppointment }
+              : appointment
+          );
+
+        setRequests(mergeUpdatedAppointment);
+        setHistory(mergeUpdatedAppointment);
+      }
+
+      refreshAppointmentLists();
+    };
+
+    window.addEventListener("appointments:updated", handleAppointmentsUpdated as EventListener);
+
+    return () => {
+      window.removeEventListener("appointments:updated", handleAppointmentsUpdated as EventListener);
+    };
+  }, [refreshAppointmentLists]);
 
   const handleApprove = async (appointment: Appointment) => {
     setPendingApproveAppointment(appointment);
@@ -736,10 +800,10 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const sortedHistory = history;
 
   const requestDoctorOptions = useMemo(() => {
-    return Array.from(new Set([...appointments, ...requests].map((appointment) => appointment.doctor).filter(Boolean))).sort();
-  }, [appointments, requests]);
+    return Array.from(new Set([...appointments, ...requests, ...history].map((appointment) => appointment.doctor).filter(Boolean))).sort();
+  }, [appointments, requests, history]);
   const pendingRequestColumnCount = doctorFilter ? 8 : 9;
-  const historyColumnCount = 8;
+  const historyColumnCount = doctorFilter ? 7 : 8;
 
   return (
     <div className="p-6 max-w-[1600px] mx-auto space-y-6">
@@ -923,6 +987,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           <TableCell className="py-4">
                             <div className="flex items-center gap-3">
                               <Avatar className="h-10 w-10 border-2 border-white shadow-sm">
+                                <AvatarImage src={resolveImageSource(getPatientImage(request))} alt={request.patientName} />
                                 <AvatarFallback className="bg-violet-100 text-violet-700 font-bold text-xs uppercase">
                                   {getInitials(request.patientName)}
                                 </AvatarFallback>
@@ -1085,7 +1150,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <Input 
-                      placeholder="Search history..." 
+                      placeholder="Search patient or service..." 
                       className="pl-10 w-64 bg-gray-50 border-gray-100 rounded-xl text-sm"
                       value={historySearchTerm}
                       onChange={(e) => {
@@ -1116,10 +1181,34 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     </SelectContent>
                   </Select>
 
+                  {!doctorFilter && (
+                    <Select
+                      value={historyDoctorFilter}
+                      onValueChange={(value) => {
+                        setHistoryDoctorFilter(value);
+                        setHistoryCurrentPage(1);
+                      }}
+                    >
+                      <SelectTrigger className="w-[160px] bg-gray-50 border-gray-100 rounded-xl text-sm">
+                        <div className="flex items-center gap-2">
+                          <User className="h-3.5 w-3.5 text-gray-400" />
+                          <SelectValue placeholder="All Doctors" />
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Doctors</SelectItem>
+                        {requestDoctorOptions.map((doc: any) => (
+                          <SelectItem key={doc} value={doc}>{doc}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+
                   <Button variant="ghost" size="icon" className="rounded-xl border border-gray-100" onClick={() => {
                     setHistorySearchTerm("");
                     setHistoryStatusFilter("all");
                     setHistoryDateFilter("");
+                    setHistoryDoctorFilter("all");
                     setHistoryCurrentPage(1);
                   }}>
                     <RotateCcw className="h-4 w-4 text-gray-500" />
@@ -1147,6 +1236,13 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           Schedule {getSortIcon("date", false)}
                         </div>
                       </TableHead>
+                      {!doctorFilter && (
+                        <TableHead className="font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("doctor")}>
+                          <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                            Doctor {getSortIcon("doctor", false)}
+                          </div>
+                        </TableHead>
+                      )}
                       <TableHead className="font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("status")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
                           Status {getSortIcon("status", false)}
@@ -1195,6 +1291,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           <TableCell className="py-4">
                             <div className="flex items-center gap-3">
                               <Avatar className="h-10 w-10 border-2 border-white shadow-sm">
+                                <AvatarImage src={resolveImageSource(getPatientImage(item))} alt={item.patientName} />
                                 <AvatarFallback className="bg-violet-100 text-violet-700 font-bold text-xs uppercase">
                                   {getInitials(item.patientName)}
                                 </AvatarFallback>
@@ -1214,6 +1311,14 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                               <span className="text-xs text-gray-500 font-medium">{item.time}</span>
                             </div>
                           </TableCell>
+                          {!doctorFilter && (
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <div className="h-1.5 w-1.5 rounded-full bg-violet-400"></div>
+                                <span className="text-sm font-semibold text-gray-700">{item.doctor}</span>
+                              </div>
+                            </TableCell>
+                          )}
                           <TableCell>
                             <Select 
                               value={item.status} 

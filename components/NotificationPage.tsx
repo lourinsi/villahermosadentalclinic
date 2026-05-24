@@ -26,7 +26,7 @@ export function NotificationPage({ portal }: NotificationPageProps) {
     deleteAllNotifications,
     refreshNotifications,
     restoreNotification
-  } = useNotifications();
+  } = useNotifications({ includeDeleted: true });
 
   const { 
     updateAppointment, 

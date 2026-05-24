@@ -39,24 +39,26 @@ export default function PublicCartPage() {
         </div>
       </main>
 
-      <BookingModalWrapper
-        open={isBookingModalOpen}
-        onOpenChange={(open) => {
-          setIsBookingModalOpen(open);
-          if (!open) setSelectedAppointment(null);
-        }}
-        title="Book Your Appointment"
-        bookingMode="public"
-        appointmentToEdit={selectedAppointment}
-        onBooked={() => {
-          refresh();
-          setSelectedAppointment(null);
-        }}
-        onDeleted={() => {
-          refresh();
-          setSelectedAppointment(null);
-        }}
-      />
+      {isBookingModalOpen && (
+        <BookingModalWrapper
+          open={isBookingModalOpen}
+          onOpenChange={(open) => {
+            setIsBookingModalOpen(open);
+            if (!open) setSelectedAppointment(null);
+          }}
+          title="Book Your Appointment"
+          bookingMode="public"
+          appointmentToEdit={selectedAppointment}
+          onBooked={() => {
+            refresh();
+            setSelectedAppointment(null);
+          }}
+          onDeleted={() => {
+            refresh();
+            setSelectedAppointment(null);
+          }}
+        />
+      )}
 
       <Footer />
     </div>

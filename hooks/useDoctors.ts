@@ -11,85 +11,128 @@ export interface DoctorOption {
   specialization?: string;
   email?: string;
   profilePicture?: string;
+  // legacy/alternate field used across the app
+  profilePictureUrl?: string;
   bio?: string;
 }
 
 const STAFF_API = apiUrl("/api/staff?limit=100");
 const PUBLIC_DOCTORS_API = apiUrl("/api/staff/public-doctors");
+const DOCTOR_CACHE_TTL_MS = 5 * 60 * 1000;
 
-export function useDoctors(refreshKey?: number, options?: { publicBooking?: boolean }) {
-  const [doctors, setDoctors] = useState<DoctorOption[]>([]);
-  const [isLoadingDoctors, setIsLoadingDoctors] = useState(true);
+const doctorCache = new Map<string, { data: DoctorOption[]; fetchedAt: number }>();
+const doctorRequests = new Map<string, Promise<DoctorOption[]>>();
+
+function getCachedDoctors(cacheKey: string) {
+  const cached = doctorCache.get(cacheKey);
+  if (!cached) return null;
+  if (Date.now() - cached.fetchedAt > DOCTOR_CACHE_TTL_MS) {
+    doctorCache.delete(cacheKey);
+    return null;
+  }
+  return cached.data;
+}
+
+export function useDoctors(
+  refreshKey?: number,
+  options?: { publicBooking?: boolean; enabled?: boolean }
+) {
   const publicBooking = Boolean(options?.publicBooking);
+  const enabled = options?.enabled ?? true;
+  const baseCacheKey = publicBooking ? "public-doctors" : "staff-doctors";
+  const initialDoctors = getCachedDoctors(baseCacheKey);
 
-  const loadDoctors = useCallback(async () => {
+  const [doctors, setDoctors] = useState<DoctorOption[]>(() => initialDoctors || []);
+  const [isLoadingDoctors, setIsLoadingDoctors] = useState(enabled && !initialDoctors);
+
+  const loadDoctors = useCallback(async (force = false) => {
+    if (!enabled && !force) {
+      setIsLoadingDoctors(false);
+      return [];
+    }
+
+    const token = typeof window !== "undefined" ? localStorage.getItem("authToken") : null;
+    const cacheKey = `${baseCacheKey}:${token || "cookie"}`;
+    const cached = force ? null : getCachedDoctors(cacheKey) || getCachedDoctors(baseCacheKey);
+
+    if (cached) {
+      setDoctors(cached);
+      setIsLoadingDoctors(false);
+      return cached;
+    }
+
     try {
       setIsLoadingDoctors(true);
-      const token = typeof window !== 'undefined' ? localStorage.getItem("authToken") : null;
-      const headers: HeadersInit = {
-        "Content-Type": "application/json",
-      };
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
-      }
-      const response = await fetch(publicBooking ? PUBLIC_DOCTORS_API : STAFF_API, { headers, credentials: "include" });
-      
-      if (!response.ok) {
-        // If the user is not authenticated, the API may return 401/403.
-        // That's an expected case for public/landing pages — avoid noisy
-        // console.error with full stack traces in that situation.
-        if (response.status === 401 || response.status === 403) {
-          // Use debug-level logging so it can be inspected when needed
-          // but won't create an error stack in normal unauthenticated usage.
-          console.debug('[useDoctors] Unauthenticated - backend returned', response.status, response.statusText);
-          if (!publicBooking) {
-            const publicResponse = await fetch(PUBLIC_DOCTORS_API);
-            if (publicResponse.ok) {
-              const publicResult = await publicResponse.json();
-              if (publicResult?.success && Array.isArray(publicResult.data)) {
-                setDoctors(mapDoctorOptions(publicResult.data));
-              }
-            } else {
-              setDoctors([]);
-            }
-            setIsLoadingDoctors(false);
-            return;
-          }
 
-          setDoctors([]);
-          setIsLoadingDoctors(false);
-          return;
-        }
+      let request = doctorRequests.get(cacheKey);
+      if (!request) {
+        request = fetchDoctors(publicBooking, token).finally(() => {
+          doctorRequests.delete(cacheKey);
+        });
+        doctorRequests.set(cacheKey, request);
+      }
 
-        console.error('[useDoctors] Fetch failed with status:', response.status, response.statusText);
-        setDoctors([]);
-        setIsLoadingDoctors(false);
-        return;
-      }
-      
-      const result = await response.json();
-      
-      if (result?.success && Array.isArray(result.data)) {
-        setDoctors(mapDoctorOptions(result.data));
-      } else {
-        setDoctors([]);
-      }
+      const nextDoctors = await request;
+      doctorCache.set(cacheKey, { data: nextDoctors, fetchedAt: Date.now() });
+      doctorCache.set(baseCacheKey, { data: nextDoctors, fetchedAt: Date.now() });
+      setDoctors(nextDoctors);
+      return nextDoctors;
     } catch (error) {
-      console.error('[useDoctors] Failed to load doctors:', error);
-      if (error instanceof TypeError && error.message === 'Failed to fetch') {
-        console.error('[useDoctors] Network error - backend server may not be running at', STAFF_API);
+      console.error("[useDoctors] Failed to load doctors:", error);
+      if (error instanceof TypeError && error.message === "Failed to fetch") {
+        console.error("[useDoctors] Network error - backend server may not be running at", STAFF_API);
       }
       setDoctors([]);
+      return [];
     } finally {
       setIsLoadingDoctors(false);
     }
-  }, [publicBooking]);
+  }, [baseCacheKey, enabled, publicBooking]);
 
   useEffect(() => {
-    loadDoctors();
-  }, [loadDoctors, refreshKey]);
+    if (!enabled) {
+      setIsLoadingDoctors(false);
+      return;
+    }
 
-  return { doctors, isLoadingDoctors, reloadDoctors: loadDoctors };
+    loadDoctors(refreshKey !== undefined);
+  }, [enabled, loadDoctors, refreshKey]);
+
+  return { doctors, isLoadingDoctors, reloadDoctors: () => loadDoctors(true) };
+}
+
+async function fetchDoctors(publicBooking: boolean, token: string | null) {
+  const headers: HeadersInit = {
+    "Content-Type": "application/json",
+  };
+
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(publicBooking ? PUBLIC_DOCTORS_API : STAFF_API, {
+    headers,
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    if ((response.status === 401 || response.status === 403) && !publicBooking) {
+      const publicResponse = await fetch(PUBLIC_DOCTORS_API);
+      if (publicResponse.ok) {
+        const publicResult = await publicResponse.json();
+        if (publicResult?.success && Array.isArray(publicResult.data)) {
+          return mapDoctorOptions(publicResult.data);
+        }
+      }
+      return [];
+    }
+
+    console.error("[useDoctors] Fetch failed with status:", response.status, response.statusText);
+    return [];
+  }
+
+  const result = await response.json();
+  return result?.success && Array.isArray(result.data) ? mapDoctorOptions(result.data) : [];
 }
 
 function isDoctorStaff(staff: Partial<Staff>) {
@@ -112,6 +155,7 @@ function mapDoctorOptions(staffMembers: Partial<Staff>[]): DoctorOption[] {
       specialization: staff.specialization,
       email: staff.email,
       profilePicture: getStaffProfilePicture(staff),
+      profilePictureUrl: getStaffProfilePicture(staff),
       bio: staff.bio,
     }));
 }

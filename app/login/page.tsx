@@ -218,7 +218,7 @@ export default function PatientLoginPage() {
                 <p className="text-xs font-semibold text-green-900 mb-2">Demo Credentials:</p>
                 <p className="text-xs text-green-800 font-mono">
                   <strong>Username:</strong> [Your Name]<br />
-                  <strong>Password:</strong> patient123
+                  <strong>Password:</strong> villahermosa123
                 </p>
               </div>
 

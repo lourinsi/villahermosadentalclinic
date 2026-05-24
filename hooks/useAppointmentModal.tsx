@@ -3,6 +3,7 @@
 import { apiUrl } from "@/lib/api";
 
 import { createContext, useContext, useState, ReactNode, useCallback, useMemo } from "react";
+import { BookingCreationMode, isPastAppointmentDate } from "@/components/sharedBookingLogic";
 import { useAppointments, Appointment, AppointmentFilters } from "./useAppointments";
 
 interface AppointmentModalContextType {
@@ -20,6 +21,7 @@ interface AppointmentModalContextType {
   newAppointmentPatientId?: string;
   newAppointmentDoctorName?: string;
   newAppointmentServiceType?: string;
+  newAppointmentCreationMode?: BookingCreationMode;
   openCreateModal: (date?: Date, time?: string, doctorName?: string) => void;
   closeCreateModal: () => void;
   openScheduleModal: (patientName?: string, patientId?: string) => void;
@@ -61,6 +63,7 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [lastAddedPatient, setLastAddedPatient] = useState<any | null>(null);
   const [lastAddedPatientAt, setLastAddedPatientAt] = useState<number | null>(null);
+  const [hasRequestedAppointments, setHasRequestedAppointments] = useState(false);
 
   const [newAppointmentDate, setNewAppointmentDate] = useState<Date>();
   const [newAppointmentTime, setNewAppointmentTime] = useState<string>();
@@ -68,13 +71,21 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
   const [newAppointmentPatientId, setNewAppointmentPatientId] = useState<string>();
   const [newAppointmentDoctorName, setNewAppointmentDoctorName] = useState<string>();
   const [newAppointmentServiceType, setNewAppointmentServiceType] = useState<string>();
+  const [newAppointmentCreationMode, setNewAppointmentCreationMode] = useState<BookingCreationMode>(
+    "standard"
+  );
 
   const [filters, setFilters] = useState<AppointmentFilters | undefined>(undefined);
 
-  const { appointments, isLoading, addAppointment, updateAppointment, deleteAppointment } = useAppointments(refreshTrigger, filters);
+  const { appointments, isLoading, addAppointment, updateAppointment, deleteAppointment } = useAppointments(
+    refreshTrigger,
+    filters,
+    { enabled: hasRequestedAppointments }
+  );
 
   const refreshAppointments = useCallback((newFilters?: AppointmentFilters) => {
-    setFilters(newFilters);
+    setHasRequestedAppointments(true);
+    setFilters((currentFilters) => newFilters === undefined ? currentFilters : newFilters);
     setRefreshTrigger(prev => prev + 1);
   }, []);
 
@@ -90,10 +101,20 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
     setNewAppointmentDate(date);
     setNewAppointmentTime(time);
     if (doctorName !== undefined) setNewAppointmentDoctorName(doctorName ?? "");
+    // If a date is provided and it's a past date, open the modal in 'past' creation mode.
+    try {
+      const creationMode: BookingCreationMode = isPastAppointmentDate(date) ? "past" : "standard";
+      setNewAppointmentCreationMode(creationMode);
+    } catch (err) {
+      setNewAppointmentCreationMode("standard");
+    }
     setCreateModalOpen(true);
   }, []);
 
-  const closeCreateModal = useCallback(() => setCreateModalOpen(false), []);
+  const closeCreateModal = useCallback(() => {
+    setCreateModalOpen(false);
+    setNewAppointmentCreationMode("standard");
+  }, []);
 
   const openScheduleModal = useCallback((patientName?: string, patientId?: string) => {
     setNewAppointmentPatientName(patientName);
@@ -200,6 +221,7 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
     newAppointmentPatientName,
     newAppointmentPatientId,
     newAppointmentDoctorName,
+    newAppointmentCreationMode,
     newAppointmentServiceType,
     openCreateModal,
     closeCreateModal,
@@ -239,6 +261,7 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
     newAppointmentPatientName,
     newAppointmentPatientId,
     newAppointmentDoctorName,
+    newAppointmentCreationMode,
     newAppointmentServiceType,
     openCreateModal,
     closeCreateModal,
