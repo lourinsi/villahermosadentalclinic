@@ -72,6 +72,11 @@ function NotificationsOpened({
     onViewAppointmentSnapshot?.(appointmentId, notification);
   };
 
+  const handleUpdateAppointmentStatus = (appointmentId: string, status: string, notificationId: string) => {
+    setIsPopoverOpen(false);
+    onUpdateAppointmentStatus?.(appointmentId, status, notificationId);
+  };
+
   const renderItem = (notification: Notification) => (
     <NotificationItem
       key={notification.id}
@@ -81,7 +86,7 @@ function NotificationsOpened({
       onDelete={onDelete}
       onDeleteWithResult={onDeleteWithResult}
       onRestore={onRestore}
-      onUpdateAppointmentStatus={onUpdateAppointmentStatus}
+      onUpdateAppointmentStatus={handleUpdateAppointmentStatus}
       onEditAppointment={onEditAppointment}
       onViewAppointmentSnapshot={handleViewAppointmentSnapshot}
       onReschedule={onReschedule}

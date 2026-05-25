@@ -206,9 +206,9 @@ export function CalendarView({
   const filteredAppointments = useMemo(() => {
     let statusesToFilter = statusFilterList.length > 0 ? statusFilterList : [selectedStatus];
     
-    // Handle "My Calendar" filter - shows both scheduled and reserved
+    // Handle "My Calendar" filter - shows scheduled, reserved, completed, and TBD appointments
     if (statusesToFilter.includes("my-calendar")) {
-      statusesToFilter = ["scheduled", "reserved"];
+      statusesToFilter = ["scheduled", "reserved", "completed", "tbd"];
     }
     
     let filtered = displayedAppointments

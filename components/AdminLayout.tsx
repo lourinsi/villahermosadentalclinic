@@ -10,10 +10,11 @@ import { toast } from "sonner";
 import NotificationsOpened from "./notificationsOpened";
 import BookingModalWrapper from "./BookingModalWrapper";
 import AppointmentHistoryView from "./AppointmentHistoryView";
+import ApproveRejectDialog from "./ApproveRejectDialog";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
-import { Appointment } from "@/hooks/useAppointments";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
+import { useNotificationApprovalDialog } from "@/hooks/useNotificationApprovalDialog";
 
 const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   const pathname = usePathname();
@@ -22,10 +23,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   const { mode, toggleMode } = useBookingModalMode();
   const { notifications, markAsRead, markAsUnread, deleteNotification, deleteNotificationWithResult, markAllAsRead, deleteAllNotifications, refreshNotifications } = useNotifications();
   const { 
-    updateAppointment, 
-    refreshAppointments, 
     appointments, 
-    openEditModal, 
     openEditModalById,
     isEditModalOpen,
     isCreateModalOpen,
@@ -50,19 +48,15 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
   const isBookingModalOpen = isEditModalOpen || isCreateModalOpen;
-
-  const handleUpdateAppointmentStatus = async (appointmentId: string, status: string, notificationId: string) => {
-    try {
-      await updateAppointment(appointmentId, { status: status as Appointment["status"] });
-      toast.success(`Appointment status updated to ${status}`);
-      await markAsRead(notificationId);
-      refreshAppointments();
-      refreshNotifications();
-    } catch (error) {
-      toast.error("Failed to update appointment status");
-      console.error(error);
-    }
-  };
+  const {
+    approvalDialogAppointment,
+    approvalDialogMode,
+    isApprovalDialogOpen,
+    isApprovalDialogProcessing,
+    openApprovalDialog,
+    closeApprovalDialog,
+    confirmApprovalAction,
+  } = useNotificationApprovalDialog({ markAsRead, refreshNotifications });
 
   const handleEditAppointment = async (appointmentId: string) => {
     console.log(`[AdminLayout] Attempting to edit appointment: ${appointmentId}`);
@@ -170,7 +164,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
             notifications={notifications} 
             unreadCount={unreadCount} 
             portal="admin" 
-            onUpdateAppointmentStatus={handleUpdateAppointmentStatus}
+            onUpdateAppointmentStatus={openApprovalDialog}
             onMarkAsRead={markAsRead}
             onMarkAsUnread={markAsUnread}
             onDelete={deleteNotification}
@@ -195,6 +189,14 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
           onOpenAppointment={handleOpenSnapshotAppointment}
           isAppointmentOpen={isSnapshotAppointmentOpen}
           isHistorical={appointmentSnapshotIsHistorical}
+        />
+        <ApproveRejectDialog
+          open={isApprovalDialogOpen}
+          onOpenChange={closeApprovalDialog}
+          mode={approvalDialogMode}
+          appointment={approvalDialogAppointment}
+          isProcessing={isApprovalDialogProcessing}
+          onConfirm={confirmApprovalAction}
         />
         
         {/* Support editing appointments from notifications */}

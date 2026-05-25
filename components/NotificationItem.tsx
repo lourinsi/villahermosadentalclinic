@@ -45,6 +45,77 @@ interface NotificationItemProps {
   variant?: 'full' | 'compact';
 }
 
+type NotificationChangeSummaryItem = {
+  field: string;
+  label: string;
+  from?: string;
+  to?: string;
+};
+
+const ignoredChangeFields = new Set(["changedAt", "updatedAt"]);
+
+const labelForChangeField = (field: string) => {
+  const labels: Record<string, string> = {
+    paymentStatus: "Payment",
+    customType: "Treatment",
+  };
+
+  if (labels[field]) return labels[field];
+
+  return field
+    .replace(/([A-Z])/g, " $1")
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .replace(/^\w/, (char) => char.toUpperCase());
+};
+
+const getNotificationChangeSummary = (notification: Notification): NotificationChangeSummaryItem[] => {
+  const metadata: any = notification.metadata || {};
+
+  if (Array.isArray(metadata.changeSummary)) {
+    return metadata.changeSummary
+      .filter((change: any) => change && (change.from || change.to))
+      .map((change: any) => ({
+        field: String(change.field || change.label || "change"),
+        label: String(change.label || labelForChangeField(String(change.field || "change"))),
+        from: change.from !== undefined && change.from !== null ? String(change.from) : undefined,
+        to: change.to !== undefined && change.to !== null ? String(change.to) : undefined,
+      }));
+  }
+
+  const changedFields = metadata.changedFields;
+  if (!changedFields || typeof changedFields !== "object") return [];
+
+  return Object.entries(changedFields).flatMap<NotificationChangeSummaryItem>(([field, value]: [string, any]) => {
+    if (ignoredChangeFields.has(field) || value === undefined || value === null || value === "") {
+      return [];
+    }
+
+    if (typeof value === "object" && ("from" in value || "to" in value)) {
+      return [{
+        field,
+        label: labelForChangeField(field),
+        from: value.from !== undefined && value.from !== null ? String(value.from) : undefined,
+        to: value.to !== undefined && value.to !== null ? String(value.to) : undefined,
+      }];
+    }
+
+    return [{
+      field,
+      label: labelForChangeField(field),
+      from: undefined,
+      to: String(value),
+    }];
+  });
+};
+
+const formatChangeValue = (change: NotificationChangeSummaryItem) => {
+  if (change.from && change.to) return `${change.from} -> ${change.to}`;
+  if (change.to) return `Now ${change.to}`;
+  if (change.from) return `Was ${change.from}`;
+  return "Updated";
+};
+
 export function NotificationItem({
   notification,
   onMarkAsRead,
@@ -68,6 +139,21 @@ export function NotificationItem({
   const isActionTaken = ['cancelled', 'completed', 'scheduled'].includes(status);
   const isLog = notification.isLog;
   const appointmentId = notification.metadata?.appointmentId;
+  const changeSummary = getNotificationChangeSummary(notification);
+  const hasStatusChange = changeSummary.some((change) => change.field === "status");
+  const isCreatedRequest = Boolean(notification.metadata?.isRequest && changeSummary.length === 0);
+  const shouldShowAppointmentActions = Boolean(
+    notification.type === 'appointment' &&
+    appointmentId &&
+    portal !== 'patient' &&
+    !isLog &&
+    !notification.deleted &&
+    onUpdateAppointmentStatus &&
+    (hasStatusChange || isCreatedRequest) &&
+    (status === 'reserved' || status === 'tbd')
+  );
+  const visibleChangeSummary = isCompact ? changeSummary.slice(0, 4) : changeSummary;
+  const hiddenChangeCount = changeSummary.length - visibleChangeSummary.length;
   const canOpenAppointment = Boolean(
     appointmentId &&
     (notification.type === 'appointment' || notification.type === 'payment') &&
@@ -118,9 +204,6 @@ export function NotificationItem({
       : !notification.isRead ? 'bg-violet-50/40' : ''
   }`;
 
-  const acceptStatuses = new Set(['cancelled', 'topay', 'reserved', 'halfpaid', 'scheduled']);
-  const cancelStatuses = new Set(['scheduled', 'topay', 'reserved', 'halfpaid']);
-
   const openAppointmentDetails = () => {
     if (!appointmentId || !canOpenAppointment) return;
 
@@ -168,11 +251,34 @@ export function NotificationItem({
           </span>
         </div>
 
+        {visibleChangeSummary.length > 0 && (
+          <div className={`${isCompact ? 'mt-1.5 space-y-0.5 text-[10px]' : 'mt-2 space-y-1 text-xs'} text-gray-600`}>
+            {visibleChangeSummary.map((change) => {
+              const value = formatChangeValue(change);
+              const title = `${change.label}: ${value}`;
+
+              return (
+                <div key={`${change.field}-${change.label}`} className="grid grid-cols-[auto,minmax(0,1fr)] gap-x-1.5 leading-snug">
+                  <span className="font-semibold text-gray-700">{change.label}:</span>
+                  <span className={`min-w-0 ${isCompact ? 'line-clamp-1' : 'line-clamp-2'}`} title={title}>
+                    {value}
+                  </span>
+                </div>
+              );
+            })}
+            {hiddenChangeCount > 0 && (
+              <div className="font-medium text-gray-500">
+                +{hiddenChangeCount} more change{hiddenChangeCount === 1 ? "" : "s"}
+              </div>
+            )}
+          </div>
+        )}
+
         {notification.type === 'appointment' &&
          notification.metadata?.appointmentId &&
          portal !== 'patient' &&
          !isLog &&
-         (notification.metadata?.isRequest || !isActionTaken) && (
+         shouldShowAppointmentActions && (
             <div className={`mt-2 flex gap-2`}>
               {onUpdateAppointmentStatus && (
                 <>
@@ -191,7 +297,7 @@ export function NotificationItem({
                       }
                     }}
                   >
-                    {status === 'scheduled' ? 'Accepted' : status === 'reserved' ? 'Accept & Schedule' : 'Accept'}
+                    {status === 'tbd' ? 'Mark Completed' : status === 'reserved' ? 'Accept & Schedule' : 'Accept'}
                   </Button>
                   <Button 
                     size="sm" 
@@ -282,16 +388,16 @@ export function NotificationItem({
                   <>
                     {portal !== 'patient' && onUpdateAppointmentStatus && (
                       <>
-                        {acceptStatuses.has(status) && status !== 'scheduled' && (
+                        {shouldShowAppointmentActions && (
                           <DropdownMenuItem onClick={(e) => {
                             e.stopPropagation();
                             onUpdateAppointmentStatus(notification.metadata!.appointmentId!, 'scheduled', notification.id);
                           }}>
                             <CheckCircle className="h-4 w-4 mr-2 text-green-600" />
-                            <span className="text-sm">{status === 'cancelled' ? 'Re-accept Appointment' : 'Accept Appointment'}</span>
+                            <span className="text-sm">{status === 'tbd' ? 'Mark Completed' : 'Accept Appointment'}</span>
                           </DropdownMenuItem>
                         )}
-                        {cancelStatuses.has(status) && status !== 'cancelled' && (
+                        {shouldShowAppointmentActions && (
                           <DropdownMenuItem onClick={(e) => {
                             e.stopPropagation();
                             onUpdateAppointmentStatus(notification.metadata!.appointmentId!, 'cancelled', notification.id);

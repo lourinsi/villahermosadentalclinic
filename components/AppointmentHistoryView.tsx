@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import ApproveRejectDialog from "./ApproveRejectDialog";
 import { Calendar as CalendarIcon, Clock, Stethoscope, Banknote, CreditCard, UserRound, AlertTriangle, CheckCircle2, RefreshCw, History } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getAppointmentTypeName } from "@/lib/appointmentTypes";
@@ -10,6 +11,7 @@ import { apiUrl } from "@/lib/api";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import { toast } from "sonner";
 import { useDoctors } from "@/hooks/useDoctors";
+import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { formatBookingHistoryStatusLabel, normalizeBookingHistoryStatus, isSignificantBookingPaymentStatus } from "./sharedBookingLogic";
 
 interface AppointmentHistoryViewProps {
@@ -21,6 +23,9 @@ interface AppointmentHistoryViewProps {
   onOpenAppointment?: (appointmentId: string, appointmentSnapshot?: any) => void;
   isAppointmentOpen?: boolean;
   isHistorical?: boolean;
+  actionsDisabled?: boolean;
+  restoreNotificationId?: string;
+  onRestoreNotification?: (notificationId: string) => void | Promise<void>;
 }
 
 type SnapshotState = "historical" | "latest" | "current";
@@ -230,7 +235,7 @@ type DoctorReassignment = {
   currentDoctorName: string;
 };
 
-export default function AppointmentHistoryView({ open, onOpenChange, appointmentSnapshot, logDate, onViewCurrent, onOpenAppointment, isAppointmentOpen, isHistorical }: AppointmentHistoryViewProps) {
+export default function AppointmentHistoryView({ open, onOpenChange, appointmentSnapshot, logDate, onViewCurrent, onOpenAppointment, isAppointmentOpen, isHistorical, actionsDisabled = false, restoreNotificationId, onRestoreNotification }: AppointmentHistoryViewProps) {
   const [displayedSnapshot, setDisplayedSnapshot] = useState<any | null>(appointmentSnapshot);
   const [snapshotState, setSnapshotState] = useState<SnapshotState>(Boolean(isHistorical) ? "historical" : "current");
   const [isFetchingLogs, setIsFetchingLogs] = useState(false);
@@ -240,6 +245,13 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const { doctors } = useDoctors(undefined, { enabled: open });
   const displayedPatientId = displayedSnapshot?.patientId || displayedSnapshot?.patient?.id || "";
   const displayedAppointmentId = displayedSnapshot?.id || displayedSnapshot?.appointmentId || "";
+
+  // Appointment action helpers (approve/reject) using central appointment modal hook
+  const { updateAppointment } = useAppointmentModal();
+  const [isApproveConfirmOpen, setIsApproveConfirmOpen] = useState(false);
+  const [isRejectConfirmOpen, setIsRejectConfirmOpen] = useState(false);
+  const [pendingActionSnapshot, setPendingActionSnapshot] = useState<any | null>(null);
+  const [isProcessingAction, setIsProcessingAction] = useState(false);
 
   useEffect(() => {
     setDisplayedSnapshot(appointmentSnapshot);
@@ -558,7 +570,8 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const changeSuffix = patientChanged ? "Patient Changed" : (changedByName ? `by ${changedByName}` : "");
 
   const appointmentId = displayedAppointmentId;
-  const canOpenAppointment = Boolean(appointmentId && snapshotState === "current" && onOpenAppointment && !isAppointmentOpen);
+  const canOpenAppointment = Boolean(!actionsDisabled && appointmentId && snapshotState === "current" && onOpenAppointment && !isAppointmentOpen);
+  const canRestoreNotification = Boolean(actionsDisabled && restoreNotificationId && onRestoreNotification);
 
   const viewLatestSnapshot = () => {
     if (appointmentId && typeof onViewCurrent === "function") {
@@ -567,6 +580,59 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     }
 
     fetchLatestLogSnapshot();
+  };
+
+  // Action handlers mirroring RequestsView behavior
+  const openApproveConfirm = (snap: any) => {
+    setPendingActionSnapshot(snap);
+    setIsApproveConfirmOpen(true);
+  };
+
+  const openRejectConfirm = (snap: any) => {
+    setPendingActionSnapshot(snap);
+    setIsRejectConfirmOpen(true);
+  };
+
+  const performApprove = async () => {
+    if (!pendingActionSnapshot) return;
+    setIsProcessingAction(true);
+    try {
+      const currentStatus = normalizeBookingHistoryStatus(pendingActionSnapshot?.status || displayedSnapshot?.status || "");
+      let newStatus = "scheduled";
+      if (currentStatus === "tbd") newStatus = "completed";
+      const idToUpdate = String(pendingActionSnapshot.id || displayedAppointmentId || "");
+      await updateAppointment(idToUpdate, { status: newStatus });
+      toast.success("Appointment updated");
+      // trigger a global refresh event used in other views
+      setTimeout(() => window.dispatchEvent(new Event('refreshNotifications')), 500);
+      setIsApproveConfirmOpen(false);
+      onOpenChange(false);
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to update appointment");
+    } finally {
+      setIsProcessingAction(false);
+      setPendingActionSnapshot(null);
+    }
+  };
+
+  const performReject = async () => {
+    if (!pendingActionSnapshot) return;
+    setIsProcessingAction(true);
+    try {
+      const idToUpdate = String(pendingActionSnapshot.id || displayedAppointmentId || "");
+      await updateAppointment(idToUpdate, { status: "cancelled" });
+      toast.success("Appointment cancelled");
+      setTimeout(() => window.dispatchEvent(new Event('refreshNotifications')), 500);
+      setIsRejectConfirmOpen(false);
+      onOpenChange(false);
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to cancel appointment");
+    } finally {
+      setIsProcessingAction(false);
+      setPendingActionSnapshot(null);
+    }
   };
 
   const fetchLatestLogSnapshot = async () => {
@@ -617,11 +683,12 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   };
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px] overflow-hidden">
+      <DialogContent className="w-[95vw] sm:max-w-[520px] overflow-hidden p-0 sm:p-0">
         <DialogHeader>
-          <div className="flex w-full flex-col gap-3 pr-8 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex-1 min-w-0">
+          <div className="flex w-full flex-col gap-3 p-6 pb-2 pr-10 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex-1 min-w-0 pr-2">
               <DialogTitle className="flex flex-wrap items-center gap-2 text-primary">
                 <Clock className="w-5 h-5 shrink-0" />
                 <span className="truncate">Appointment Snapshot</span>
@@ -630,12 +697,12 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                   {stateLabel}
                 </span>
               </DialogTitle>
-              <DialogDescription className="truncate">
+              <DialogDescription className="truncate text-xs sm:text-sm">
                 {timestampPrefix} {snapshotDate}{changeSuffix ? ` ${changeSuffix}` : ""}
               </DialogDescription>
             </div>
 
-            <div className="flex items-center gap-2 shrink-0 sm:ml-4">
+            <div className="flex items-center gap-2 shrink-0 sm:ml-2">
               {canOpenAppointment ? (
                 <Button
                   className="h-9 rounded-xl bg-blue-600 px-4 font-bold text-white shadow-sm hover:bg-blue-700"
@@ -662,7 +729,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         </DialogHeader>
 
         {isPastSnapshot ? (
-          <div className="mt-2 mb-3 p-3 rounded-md bg-amber-50 border border-amber-200 text-amber-900 text-sm flex items-start gap-2">
+          <div className="mx-6 mt-2 mb-3 p-3 rounded-md bg-amber-50 border border-amber-200 text-amber-900 text-[13px] flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 flex-shrink-0" />
             <div>
               This is an older payment log. Use "Latest" to open the current appointment details before making decisions.
@@ -670,7 +737,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
           </div>
         ) : null}
 
-        <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto pr-2">
+        <div className="grid gap-4 px-6 py-4 max-h-[60vh] overflow-y-auto pr-4 custom-scrollbar">
           {/* Schedule Info */}
           <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-3">
             <div className="flex items-center gap-3">
@@ -763,8 +830,8 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
           </div>
 
           {/* Status & Financials */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 min-w-0">
               <Label className="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Status</Label>
               <div className="mt-1">
                  <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
@@ -775,11 +842,11 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                   {formatBookingHistoryStatusLabel(nextStatus || displayedSnapshot.status).toUpperCase()}
                 </span>
                 {prevStatus && nextStatus && prevStatusNorm && nextStatusNorm && !isInsignificantStatus(prevStatusNorm) && prevStatusNorm !== nextStatusNorm ? (
-                  <p className="mt-1 text-xs text-slate-600">{formatBookingHistoryStatusLabel(prevStatus)} → {formatBookingHistoryStatusLabel(nextStatus)}</p>
+                  <p className="mt-1 text-[11px] text-slate-600 truncate" title={`${formatBookingHistoryStatusLabel(prevStatus)} → ${formatBookingHistoryStatusLabel(nextStatus)}`}>{formatBookingHistoryStatusLabel(prevStatus)} → {formatBookingHistoryStatusLabel(nextStatus)}</p>
                 ) : null}
               </div>
             </div>
-            <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+            <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 min-w-0">
               <Label className="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Payment</Label>
               <div className="mt-1">
                 <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
@@ -790,7 +857,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                   {formatBookingHistoryStatusLabel(nextPaymentStatus || displayedSnapshot.paymentStatus).toUpperCase()}
                 </span>
                 {prevPaymentStatus && nextPaymentStatus && prevPaymentStatusNorm && nextPaymentStatusNorm && !isInsignificantStatus(prevPaymentStatusNorm) && prevPaymentStatusNorm !== nextPaymentStatusNorm ? (
-                  <p className="mt-1 text-xs text-slate-600">{formatBookingHistoryStatusLabel(prevPaymentStatus)} → {formatBookingHistoryStatusLabel(nextPaymentStatus)}</p>
+                  <p className="mt-1 text-[11px] text-slate-600 truncate" title={`${formatBookingHistoryStatusLabel(prevPaymentStatus)} → ${formatBookingHistoryStatusLabel(nextPaymentStatus)}`}>{formatBookingHistoryStatusLabel(prevPaymentStatus)} → {formatBookingHistoryStatusLabel(nextPaymentStatus)}</p>
                 ) : null}
               </div>
             </div>
@@ -859,12 +926,63 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
           </div>
         </div>
 
-        <DialogFooter className="gap-2">
+        <DialogFooter className="gap-2 p-6 pt-2">
+          {/* Accept/Cancel buttons for reserved appointments (current, not historical, and modal not open) */}
+          {snapshotState === "current" &&
+            !actionsDisabled &&
+            !isAppointmentOpen &&
+            (nextStatusNorm === "reserved" || nextStatusNorm === "tbd") && (
+              <>
+                <Button
+                  className="flex-1 bg-emerald-600 text-white hover:bg-emerald-700"
+                  onClick={() => openApproveConfirm(displayedSnapshot)}
+                >
+                  Accept
+                </Button>
+                <Button
+                  className="flex-1 bg-red-600 text-white hover:bg-red-700"
+                  onClick={() => openRejectConfirm(displayedSnapshot)}
+                  variant="outline"
+                >
+                  Cancel
+                </Button>
+              </>
+            )}
+          {canRestoreNotification ? (
+            <Button
+              className="flex-1 bg-violet-600 text-white hover:bg-violet-700"
+              onClick={async () => {
+                await onRestoreNotification?.(restoreNotificationId!);
+                onOpenChange(false);
+              }}
+            >
+              Restore Notification
+            </Button>
+          ) : null}
           <Button onClick={() => onOpenChange(false)} variant="secondary" className="flex-1">
             Close Snapshot
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <ApproveRejectDialog
+      open={isApproveConfirmOpen}
+      onOpenChange={setIsApproveConfirmOpen}
+      mode="approve"
+      appointment={displayedSnapshot}
+      onConfirm={performApprove}
+      isProcessing={isProcessingAction}
+    />
+
+    <ApproveRejectDialog
+      open={isRejectConfirmOpen}
+      onOpenChange={setIsRejectConfirmOpen}
+      mode="reject"
+      appointment={displayedSnapshot}
+      onConfirm={performReject}
+      isProcessing={isProcessingAction}
+    />
+    </>
   );
 }

@@ -59,6 +59,7 @@ import {
   AlertDialogTitle,
   AlertDialogFooter as Footer,
 } from "./ui/alert-dialog";
+import ApproveRejectDialog from "./ApproveRejectDialog";
 import PastAppointmentButton from "./PastAppointmentButton";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
@@ -1436,79 +1437,14 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={isApproveConfirmOpen} onOpenChange={setIsApproveConfirmOpen}>
-        <AlertDialogContent 
-          className="rounded-2xl border-none shadow-2xl"
-          onEscapeKeyDown={(e) => e.preventDefault()}
-        >
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-2xl font-black text-gray-900 uppercase tracking-tight">
-              {pendingApproveAppointment?.status === "tbd" ? "Mark as Completed?" : "Approve Appointment?"}
-            </AlertDialogTitle>
-            <AlertDialogDescription className="text-gray-500 font-medium">
-              {pendingApproveAppointment?.status === "tbd" ? (
-                <>Are you sure you want to mark this appointment for <strong>{pendingApproveAppointment?.patientName}</strong> as <strong>Completed</strong>?</>
-              ) : (
-                <>Are you sure you want to approve this appointment for <strong>{pendingApproveAppointment?.patientName}</strong>? The status will be set to <strong>Scheduled</strong>.</>
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          
-          {/* Payment Status Summary - show for all statuses */}
-          <div className="bg-amber-50 p-3 rounded-lg border border-amber-200 mb-4">
-            <p className="text-sm font-medium text-amber-900">
-              {(() => {
-                const paymentStatus = canonicalStatus(pendingApproveAppointment?.paymentStatus || "unpaid");
-                const patientName = pendingApproveAppointment?.patientName || "Patient";
-                
-                if (paymentStatus === "paid") {
-                  return `✓ ${patientName} has paid in full.`;
-                } else if (paymentStatus === "half-paid") {
-                  return `⚠ ${patientName} has made a partial payment.`;
-                } else if (paymentStatus === "pay-at-clinic") {
-                  return `📍 ${patientName} will pay at the clinic.`;
-                } else {
-                  return `✗ ${patientName} has not paid yet.`;
-                }
-              })()}
-            </p>
-          </div>
-
-          <div className={`p-4 rounded-lg border space-y-2 ${pendingApproveAppointment?.status === "tbd" ? "bg-emerald-50 border-emerald-200" : "bg-blue-50 border-blue-200"}`}>
-            <div className="text-sm space-y-2">
-              <div className="flex justify-between">
-                <span className="text-gray-600">Service:</span>
-                <span className="font-semibold text-gray-900">{pendingApproveAppointment ? getAppointmentTypeName(pendingApproveAppointment.type, pendingApproveAppointment.customType) : ""}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Date & Time:</span>
-                <span className="font-semibold text-gray-900">{pendingApproveAppointment?.date} at {pendingApproveAppointment?.time}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Doctor:</span>
-                <span className="font-semibold text-gray-900">{pendingApproveAppointment?.doctor}</span>
-              </div>
-              <div className={`border-t pt-2 ${pendingApproveAppointment?.status === "tbd" ? "border-emerald-100" : "border-blue-100"}`}>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Current Status:</span>
-                  <div>
-                    {getStatusBadge(pendingApproveAppointment?.status || "reserved")}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <AlertDialogFooter className="gap-2">
-            <AlertDialogCancel className="rounded-xl border-gray-100 font-bold uppercase text-xs tracking-wider">Cancel</AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={confirmApprove}
-              className={`text-white rounded-xl font-bold uppercase text-xs tracking-wider ${pendingApproveAppointment?.status === "tbd" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-emerald-600 hover:bg-emerald-700"}`}
-            >
-              {pendingApproveAppointment?.status === "tbd" ? "Yes, Mark as Completed" : "Yes, Approve"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ApproveRejectDialog
+        open={isApproveConfirmOpen}
+        onOpenChange={setIsApproveConfirmOpen}
+        mode="approve"
+        appointment={pendingApproveAppointment}
+        onConfirm={confirmApprove}
+        isProcessing={false}
+      />
       <AppointmentHistoryView
         open={isAppointmentHistoryOpen}
         onOpenChange={(open) => {
@@ -1523,46 +1459,14 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         isHistorical={appointmentSnapshotIsHistorical}
       />
 
-      <AlertDialog open={isRejectConfirmOpen} onOpenChange={setIsRejectConfirmOpen}>
-        <AlertDialogContent 
-          className="rounded-2xl border-none shadow-2xl"
-          onEscapeKeyDown={(e) => e.preventDefault()}
-        >
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-2xl font-black text-gray-900 uppercase tracking-tight">Reject Appointment?</AlertDialogTitle>
-            <AlertDialogDescription className="text-gray-500 font-medium">
-              Are you sure you want to reject this appointment for <strong>{pendingRejectAppointment?.patientName}</strong>? The status will be set to <strong>Cancelled</strong>.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          
-          {/* Appointment Details */}
-          <div className="bg-red-50 p-4 rounded-lg border border-red-200 space-y-2">
-            <div className="text-sm space-y-2">
-              <div className="flex justify-between">
-                <span className="text-gray-600">Service:</span>
-                <span className="font-semibold text-gray-900">{pendingRejectAppointment ? getAppointmentTypeName(pendingRejectAppointment.type, pendingRejectAppointment.customType) : ""}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Date & Time:</span>
-                <span className="font-semibold text-gray-900">{pendingRejectAppointment?.date} at {pendingRejectAppointment?.time}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Doctor:</span>
-                <span className="font-semibold text-gray-900">{pendingRejectAppointment?.doctor}</span>
-              </div>
-            </div>
-          </div>
-          <AlertDialogFooter className="gap-2">
-            <AlertDialogCancel className="rounded-xl border-gray-100 font-bold uppercase text-xs tracking-wider">Cancel</AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={confirmReject}
-              className="bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold uppercase text-xs tracking-wider"
-            >
-              Yes, Reject
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ApproveRejectDialog
+        open={isRejectConfirmOpen}
+        onOpenChange={setIsRejectConfirmOpen}
+        mode="reject"
+        appointment={pendingRejectAppointment}
+        onConfirm={confirmReject}
+        isProcessing={false}
+      />
     </div>
   );
 }

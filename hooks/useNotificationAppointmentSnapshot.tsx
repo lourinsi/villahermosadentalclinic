@@ -54,6 +54,8 @@ export function useNotificationAppointmentSnapshot(appointments: AppointmentSnap
   const [appointmentSnapshot, setAppointmentSnapshot] = useState<any | null>(null);
   const [appointmentSnapshotLogDate, setAppointmentSnapshotLogDate] = useState("");
   const [appointmentSnapshotIsHistorical, setAppointmentSnapshotIsHistorical] = useState(false);
+  const [appointmentSnapshotNotificationId, setAppointmentSnapshotNotificationId] = useState("");
+  const [appointmentSnapshotNotificationDeleted, setAppointmentSnapshotNotificationDeleted] = useState(false);
 
   const findLocalAppointment = (appointmentId: string) =>
     appointments.find((appointment) => String(appointment.id) === String(appointmentId));
@@ -62,6 +64,8 @@ export function useNotificationAppointmentSnapshot(appointments: AppointmentSnap
     setAppointmentSnapshot(null);
     setAppointmentSnapshotLogDate("");
     setAppointmentSnapshotIsHistorical(false);
+    setAppointmentSnapshotNotificationId("");
+    setAppointmentSnapshotNotificationDeleted(false);
   };
 
   const handleViewCurrentSnapshot = async (appointmentId: string) => {
@@ -73,6 +77,8 @@ export function useNotificationAppointmentSnapshot(appointments: AppointmentSnap
       setAppointmentSnapshot(snapshot);
       setAppointmentSnapshotLogDate(snapshot?.updatedAt || snapshot?.createdAt || new Date().toISOString());
       setAppointmentSnapshotIsHistorical(false);
+      setAppointmentSnapshotNotificationId("");
+      setAppointmentSnapshotNotificationDeleted(false);
       setIsAppointmentHistoryOpen(true);
     } catch (error) {
       console.error("[Notifications] Failed to load current appointment snapshot:", error);
@@ -86,6 +92,8 @@ export function useNotificationAppointmentSnapshot(appointments: AppointmentSnap
     setAppointmentSnapshot(appointment);
     setAppointmentSnapshotLogDate(appointment.updatedAt || appointment.createdAt || new Date().toISOString());
     setAppointmentSnapshotIsHistorical(false);
+    setAppointmentSnapshotNotificationId("");
+    setAppointmentSnapshotNotificationDeleted(false);
     setIsAppointmentHistoryOpen(true);
   };
 
@@ -132,6 +140,8 @@ export function useNotificationAppointmentSnapshot(appointments: AppointmentSnap
       setAppointmentSnapshot(snapshot);
       setAppointmentSnapshotLogDate(snapshotLogDate || snapshot?.changedAt || snapshot?.updatedAt || snapshot?.createdAt || new Date().toISOString());
       setAppointmentSnapshotIsHistorical(isHistorical);
+      setAppointmentSnapshotNotificationId(notification.id);
+      setAppointmentSnapshotNotificationDeleted(Boolean(notification.deleted));
       setIsAppointmentHistoryOpen(true);
     } catch (error) {
       console.error("[Notifications] Error loading appointment snapshot:", error);
@@ -146,6 +156,8 @@ export function useNotificationAppointmentSnapshot(appointments: AppointmentSnap
     appointmentSnapshotId: getAppointmentIdFromSnapshot(appointmentSnapshot),
     appointmentSnapshotLogDate,
     appointmentSnapshotIsHistorical,
+    appointmentSnapshotNotificationId,
+    appointmentSnapshotNotificationDeleted,
     handleViewCurrentSnapshot,
     handleViewAppointmentSnapshot,
     handleViewAppointment,
