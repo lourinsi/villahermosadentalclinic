@@ -602,16 +602,17 @@ export function Dashboard({ portal }: { portal?: string }) {
         isHistorical={appointmentSnapshotIsHistorical}
       />
 
-      {/* Booking Modal */}
-      <BookingModalWrapper
-        open={bookingModalOpen}
-        onOpenChange={setBookingModalOpen}
-        appointmentToEdit={selectedAppointment}
-        onBooked={() => {
-          setSelectedAppointment(null);
-          setBookingModalOpen(false);
-        }}
-      />
+      {bookingModalOpen && (
+        <BookingModalWrapper
+          open={bookingModalOpen}
+          onOpenChange={setBookingModalOpen}
+          appointmentToEdit={selectedAppointment}
+          onBooked={() => {
+            setSelectedAppointment(null);
+            setBookingModalOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }

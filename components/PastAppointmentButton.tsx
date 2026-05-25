@@ -61,21 +61,23 @@ export function PastAppointmentButton({
         <Plus className="h-3.5 w-3.5 opacity-70" />
       </Button>
 
-      <BookingModalWrapper
-        open={open}
-        onOpenChange={setOpen}
-        title="Add Past Appointment"
-        defaultDate={defaults?.date}
-        defaultTime={defaults?.time}
-        doctorName={defaults?.doctorName}
-        defaultPatientId={patientId}
-        appointmentCreationMode="past"
-        onBooked={(appointment) => {
-          refreshAppointments();
-          onCreated?.(appointment);
-          setOpen(false);
-        }}
-      />
+      {open && (
+        <BookingModalWrapper
+          open={open}
+          onOpenChange={setOpen}
+          title="Add Past Appointment"
+          defaultDate={defaults?.date}
+          defaultTime={defaults?.time}
+          doctorName={defaults?.doctorName}
+          defaultPatientId={patientId}
+          appointmentCreationMode="past"
+          onBooked={(appointment) => {
+            refreshAppointments();
+            onCreated?.(appointment);
+            setOpen(false);
+          }}
+        />
+      )}
     </>
   );
 }

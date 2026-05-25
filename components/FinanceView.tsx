@@ -19,6 +19,7 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
+import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { 
   DollarSign, 
   TrendingUp, 
@@ -31,7 +32,8 @@ import {
   Eye,
   Plus,
   Receipt,
-  Filter
+  Filter,
+  User
 } from "lucide-react";
 
 type ApiResponse<T> = {
@@ -187,6 +189,83 @@ const formatTransactionTimestamp = (value?: string) => {
 const hasTimeComponent = (value?: string) =>
   Boolean(value && !/^\d{4}-\d{2}-\d{2}$/.test(value));
 
+const resolveImageSource = (source?: string) => {
+  if (!source) return undefined;
+  if (
+    source.startsWith("http") ||
+    source.startsWith("data:") ||
+    source.startsWith("blob:")
+  ) {
+    return source;
+  }
+  return apiUrl(source);
+};
+
+const getAnyImageFromSnapshot = (snapshot: any) =>
+  resolveImageSource(
+    snapshot?.patientProfile ||
+    snapshot?.patientProfilePicture ||
+    snapshot?.patientPhoto ||
+    snapshot?.patientImage ||
+    snapshot?.patientAvatar ||
+    snapshot?.patient?.profilePicture ||
+    snapshot?.profilePicture ||
+    snapshot?.patient?.profilePictureUrl ||
+    snapshot?.patient?.photoUrl ||
+    snapshot?.patient?.avatar ||
+    snapshot?.patient?.imageUrl ||
+    snapshot?.patient?.photo
+  );
+
+const getAvatarFromSnapshot = (snapshot: any, nameToMatch?: string) => {
+  if (!snapshot) return undefined;
+
+  const patientName =
+    snapshot.patientName ||
+    snapshot.patient?.name ||
+    snapshot.patient?.fullName ||
+    [snapshot.patient?.firstName, snapshot.patient?.lastName].filter(Boolean).join(" ");
+
+  const doctorName =
+    snapshot.doctorName ||
+    snapshot.doctor?.name ||
+    snapshot.doctor?.fullName ||
+    snapshot.doctor?.username;
+
+  const normalizedMatch = nameToMatch?.toLowerCase().trim() || "";
+  const normalizedPatient = String(patientName || "").toLowerCase().trim();
+  const normalizedDoctor = String(doctorName || "").toLowerCase().trim();
+
+  if (normalizedMatch && normalizedMatch === normalizedPatient) {
+    return resolveImageSource(
+      snapshot.patientProfile ||
+      snapshot.patientProfilePicture ||
+      snapshot.patientPhoto ||
+      snapshot.patientImage ||
+      snapshot.patientAvatar ||
+      snapshot.patient?.profilePicture ||
+      snapshot.patient?.profilePictureUrl ||
+      snapshot.patient?.photo ||
+      snapshot.patient?.photoUrl ||
+      snapshot.patient?.avatar ||
+      snapshot.profilePicture
+    );
+  }
+
+  if (normalizedMatch && normalizedMatch === normalizedDoctor || normalizedMatch === `dr. ${normalizedDoctor}`) {
+    return resolveImageSource(
+      snapshot.doctorProfile ||
+      snapshot.doctorProfilePicture ||
+      snapshot.doctorPhoto ||
+      snapshot.doctor?.profilePicture ||
+      snapshot.doctor?.profilePictureUrl ||
+      snapshot.doctorImage
+    );
+  }
+
+  return undefined;
+};
+
 
 // Define interfaces for fetched data
 export interface RevenueEntry {
@@ -257,6 +336,7 @@ export interface RecentTransaction {
   appointmentSnapshot?: any;
   logDate?: string;
   changedByName?: string;
+  changedByAvatar?: string;
   source?: string;
 }
 
@@ -279,6 +359,7 @@ export function FinanceView() {
   const [inventoryData, setInventoryData] = useState<InventoryItem[]>([]);
   const [payrollData, setPayrollData] = useState<PayrollEntry[]>([]);
   const [recentTransactions, setRecentTransactions] = useState<RecentTransaction[]>([]);
+  const [patientImages, setPatientImages] = useState<Record<string, string | undefined>>({});
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingExpense, setIsSavingExpense] = useState(false);
@@ -322,6 +403,37 @@ export function FinanceView() {
       setInventoryData(inventoryData || []);
       setPayrollData(payrollData || []);
       setRecentTransactions(transactionsData || []);
+
+      // Load patient images for any transactions that reference a patient
+      try {
+        const txs = transactionsData || [];
+        const patientIds = new Set<string>();
+        txs.forEach((t: RecentTransaction) => {
+          const snap = t.appointmentSnapshot;
+          const id = snap?.patientId || snap?.patient?.id || snap?.patientId || undefined;
+          if (id) patientIds.add(String(id));
+        });
+
+        // Fetch missing patient images
+        const idsToFetch = Array.from(patientIds).filter((id) => !patientImages[id]);
+        if (idsToFetch.length > 0) {
+          await Promise.all(
+            idsToFetch.map(async (id) => {
+              try {
+                const patient = await fetchApiData<any>(`/api/patients/${encodeURIComponent(id)}`, "patient record");
+                const src = resolveImageSource(
+                  patient?.profilePicture || patient?.profilePictureUrl || patient?.photo || patient?.image || patient?.avatar
+                );
+                if (src) setPatientImages((prev) => ({ ...prev, [id]: src }));
+              } catch (e) {
+                // ignore individual patient fetch failures
+              }
+            })
+          );
+        }
+      } catch (e) {
+        // non-fatal
+      }
     } catch (err) {
       console.error("Error fetching finance data:", err);
       const message = err instanceof Error && err.message.includes("401")
@@ -512,8 +624,16 @@ export function FinanceView() {
       // Prefer any snapshot attached to the transaction
       let snapshot = transactionToView.appointmentSnapshot || null;
       const resolvedAppointmentId = appointmentId || getAppointmentIdFromSnapshot(snapshot);
-      // Consider snapshot historical if transaction has an explicit logDate or the attached snapshot has log metadata
-      let isHistorical = Boolean(transactionToView.logDate || (snapshot && (snapshot.changedAt || snapshot.changedByName || snapshot._isHistorical)));
+      // Determine whether this snapshot should be treated as historical (older log).
+      // Priority: explicit _isHistorical flag (from fetchSnapshotFromLogs) > logDate alone > default false
+      let isHistorical = false;
+      if (snapshot && Object.prototype.hasOwnProperty.call(snapshot, "_isHistorical")) {
+        // Snapshot has explicit flag from fetchSnapshotFromLogs; trust it (handles latest log correctly)
+        isHistorical = Boolean(snapshot._isHistorical);
+      } else if (transactionToView.logDate && !snapshot) {
+        // No snapshot yet, but we have a logDate; assume it will be historical until proven otherwise
+        isHistorical = true;
+      }
 
       // If no snapshot and we have a logDate, try reconstructing from logs
       if (!snapshot && resolvedAppointmentId && transactionToView.logDate) {
@@ -521,7 +641,7 @@ export function FinanceView() {
           const fromLogs = await fetchSnapshotFromLogs(resolvedAppointmentId, transactionToView.logDate);
           if (fromLogs) {
             snapshot = fromLogs;
-            isHistorical = true;
+            isHistorical = Boolean(fromLogs._isHistorical);
           }
         } catch (e) {
           console.warn("Failed to build snapshot from logs:", e);
@@ -1214,12 +1334,21 @@ export function FinanceView() {
                         ? formatTransactionTimestamp(transaction.logDate)
                         : "";
 
+                      // Resolve avatar src: prefer explicit changedByAvatar, then snapshots, then fetched patient images
+                      const snap = transaction.appointmentSnapshot as any;
+                      const snapPatientId = snap?.patientId || snap?.patient?.id || snap?.patientId;
+                      const avatarSrc =
+                        transaction.changedByAvatar ||
+                        getAvatarFromSnapshot(snap, transaction.changedByName) ||
+                        getAnyImageFromSnapshot(snap) ||
+                        (snapPatientId ? patientImages[String(snapPatientId)] : undefined);
+
                       return (
                         <div
                           key={transaction.id}
-                          className="flex items-center justify-between gap-4 p-4 border rounded-lg"
+                          className="flex items-center justify-between gap-4 p-4 border rounded-lg hover:bg-gray-50 transition-colors"
                         >
-                          <div className="flex min-w-0 items-center space-x-4">
+                          <div className="flex min-w-0 flex-1 items-center space-x-4">
                             <div
                               className={`w-10 h-10 rounded-full flex flex-shrink-0 items-center justify-center ${
                                 transaction.type === "income"
@@ -1233,40 +1362,51 @@ export function FinanceView() {
                                 <ArrowDownRight className="h-5 w-5 text-red-600" />
                               )}
                             </div>
-                            <div className="min-w-0">
-                              <div className="font-medium truncate">{transaction.description}</div>
-                              <div className="text-sm text-muted-foreground">
-                                {transaction.date} | {transaction.method}
+                            <div className="min-w-0 flex-1">
+                              <div className="font-medium truncate text-gray-900">{transaction.description}</div>
+                              <div className="text-sm text-muted-foreground flex items-center gap-2">
+                                <span>{transaction.date}</span>
+                                <span>•</span>
+                                <span>{transaction.method}</span>
                               </div>
                               {savedAtLabel ? (
-                                <div className="text-xs text-muted-foreground">
-                                  Saved {savedAtLabel}
-                                  {transaction.changedByName ? ` by ${transaction.changedByName}` : ""}
+                                <div className="mt-2 flex items-center gap-2">
+                                  <Avatar className="h-8 w-8 border rounded-md overflow-hidden">
+                                    <AvatarImage src={avatarSrc} alt={transaction.changedByName} className="object-cover" />
+                                    <AvatarFallback className="bg-violet-100 text-[10px] text-violet-700 rounded-md">
+                                      {transaction.changedByName ? transaction.changedByName.split(' ').map(n => n[0]).join('').toUpperCase() : <User className="h-3 w-3" />}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                  <div className="text-xs text-muted-foreground">
+                                    <span className="font-medium text-gray-700">{transaction.changedByName || "System"}</span>
+                                    <span className="mx-1">•</span>
+                                    <span>Saved {savedAtLabel}</span>
+                                  </div>
                                 </div>
                               ) : null}
                             </div>
                           </div>
-                          <div className="flex flex-shrink-0 items-center gap-3">
+                          <div className="flex flex-shrink-0 items-center gap-4">
+                            <div
+                              className={`text-right text-lg font-bold ${
+                                transaction.type === "income"
+                                  ? "text-green-600"
+                                  : "text-red-600"
+                              }`}
+                            >
+                              {transaction.type === "income" ? "+" : "-"}
+                              {formatCurrency(Math.abs(transaction.amount))}
+                            </div>
                             <Button
-                              variant="outline"
+                              variant="ghost"
                               size="icon"
-                              className="h-8 w-8"
+                              className="h-8 w-8 text-muted-foreground hover:text-violet-600"
                               disabled={isLoadingThisAppointment}
                               title={appointmentId || transaction.appointmentSnapshot ? "View appointment snapshot" : "No appointment linked"}
                               onClick={() => handleViewAppointmentSnapshot(transaction)}
                             >
                               <Eye className="h-4 w-4" />
                             </Button>
-                            <div
-                              className={`min-w-[110px] text-right text-lg font-medium ${
-                                transaction.type === "income"
-                                  ? "text-green-600"
-                                  : "text-red-600"
-                              }`}
-                            >
-                              {transaction.type === "income" ? "+" : ""}
-                              {formatCurrency(Math.abs(transaction.amount))}
-                            </div>
                           </div>
                         </div>
                       );

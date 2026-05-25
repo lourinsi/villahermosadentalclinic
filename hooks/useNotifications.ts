@@ -4,18 +4,31 @@ import { Notification } from "@/lib/notification-types";
 import { toast } from "sonner";
 import { useAuth } from "./useAuth";
 
-export const useNotifications = () => {
+interface UseNotificationsOptions {
+  enabled?: boolean;
+  includeDeleted?: boolean;
+  limit?: number;
+}
+
+export const useNotifications = (options?: UseNotificationsOptions) => {
   const { user } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const enabled = options?.enabled ?? true;
+  const includeDeleted = options?.includeDeleted ?? false;
+  const limit = options?.limit ?? (includeDeleted ? undefined : 20);
 
   const userId = user?.patientId || user?.staffId || user?.username;
 
   const fetchNotifications = useCallback(async () => {
+    if (!enabled) {
+      setIsLoading(false);
+      return;
+    }
+
     // Don't proceed if userId is not available
     if (!userId) {
-      console.log("[useNotifications] userId not available, skipping fetch");
       setIsLoading(false);
       setError(null);
       setNotifications([]);
@@ -25,9 +38,11 @@ export const useNotifications = () => {
     try {
       setIsLoading(true);
       setError(null);
-      console.log(`[useNotifications] Fetching notifications for userId: ${userId}`);
-  const response = await fetch(apiUrl(`/api/notifications?userId=${userId}&includeDeleted=true`), { credentials: 'include' });
-      console.log(`[useNotifications] Response status: ${response.status}`);
+      const params = new URLSearchParams({ userId });
+      if (includeDeleted) params.set("includeDeleted", "true");
+      if (limit) params.set("limit", String(limit));
+
+      const response = await fetch(apiUrl(`/api/notifications?${params.toString()}`), { credentials: 'include' });
       if (!response.ok) {
         const text = await response.text();
         console.error(`[useNotifications] Fetch failed: ${response.status} - ${text}`);
@@ -35,14 +50,7 @@ export const useNotifications = () => {
       }
 
       const data = await response.json();
-      console.log(`[useNotifications] Response data:`, data);
-      console.log(`[useNotifications] Total notifications received: ${data.data.length}`);
-      console.log(`[useNotifications] Deleted notifications received: ${data.data.filter((n: Notification) => n.deleted).length}`);
       if (data.success) {
-        console.log(`[useNotifications] Successfully fetched ${data.data.length} notifications for userId: ${userId}`);
-        if (userId === 'admin') {
-          console.log("[useNotifications] Admin notifications detail:", data.data);
-        }
         setNotifications(data.data);
       }
     } catch (error) {
@@ -53,13 +61,13 @@ export const useNotifications = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [userId]);
+  }, [enabled, includeDeleted, limit, userId]);
 
   // Listen for global notification changes (from other hook instances) and refetch
   useEffect(() => {
     const onNotificationsChanged = () => {
       // Re-fetch to keep this hook instance in sync with others
-      if (userId) fetchNotifications();
+      if (enabled && userId) fetchNotifications();
     };
 
     // Create a shared bus on the window object to avoid multiple isolated instances
@@ -75,13 +83,13 @@ export const useNotifications = () => {
     return () => {
       bus.removeEventListener("notifications-changed", onNotificationsChanged as EventListener);
     };
-  }, [fetchNotifications, userId]);
+  }, [enabled, fetchNotifications, userId]);
 
   useEffect(() => {
-    if (userId) {
+    if (enabled && userId) {
       fetchNotifications();
     }
-  }, [userId, fetchNotifications]);
+  }, [enabled, userId, fetchNotifications]);
 
   const markAsRead = async (id: string) => {
     try {
@@ -107,7 +115,6 @@ export const useNotifications = () => {
 
   const markAsUnread = async (id: string) => {
     try {
-      console.log(`[useNotifications] Marking notification ${id} as unread`);
       const response = await fetch(apiUrl(`/api/notifications/${id}`), {
         method: "PUT",
         credentials: 'include',
@@ -117,7 +124,6 @@ export const useNotifications = () => {
 
       if (!response.ok) throw new Error("Failed to mark notification as unread");
       
-      console.log(`[useNotifications] Successfully marked notification ${id} as unread`);
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: false } : n));
       toast.success("Marked as unread");
     // notify other hook instances

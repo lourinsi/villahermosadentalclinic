@@ -5,7 +5,6 @@ import { Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { useAuth } from "@/hooks/useAuth";
-import { useAppointments } from "@/hooks/useAppointments";
 import { CalendarView } from "./CalendarView";
 import { Suspense } from "react";
 import PastAppointmentButton from "./PastAppointmentButton";
@@ -18,9 +17,8 @@ interface CalendarPageLayoutProps {
 }
 
 export function CalendarPageLayout({ portal, doctorName, defaultStatusFilter }: CalendarPageLayoutProps) {
-  const { openCreateModal } = useAppointmentModal();
+  const { openCreateModal, appointments } = useAppointmentModal();
   const { user } = useAuth();
-  const { appointments } = useAppointments();
   const router = useRouter();
 
   // Find next available time slot for doctor

@@ -119,8 +119,30 @@ export function CalendarView({
   const [appointmentToDelete, setAppointmentToDelete] = useState<string | null>(null);
   const { doctors, isLoadingDoctors } = useDoctors(undefined, { publicBooking: portal === 'public' });
 
+  // Check if a given date (and optional time) is in the past relative to now
+  const isPastDateTime = useCallback((date?: Date, time?: string) => {
+    if (!date) return false;
+    const now = new Date();
+
+    // Compare date-only if no time provided
+    if (!time) {
+      const check = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      return check.getTime() < today.getTime();
+    }
+
+    const [hours, minutes] = time.split(':').map(Number);
+    const checkDt = new Date(date.getFullYear(), date.getMonth(), date.getDate(), hours, minutes);
+    return checkDt.getTime() < now.getTime();
+  }, []);
+
   const handleCreateAppointment = useCallback(
     (date?: Date, time?: string, doctorName?: string) => {
+      // For public portal, prevent creating appointments in the past
+      if (portal === 'public' && isPastDateTime(date, time)) {
+        return;
+      }
+
       if (onCreateAppointment) {
         onCreateAppointment(date, time, doctorName);
         return;
@@ -128,7 +150,7 @@ export function CalendarView({
 
       openCreateModal(date, time, doctorName);
     },
-    [onCreateAppointment, openCreateModal]
+    [onCreateAppointment, openCreateModal, portal, isPastDateTime]
   );
 
   const handleOpenAppointment = useCallback(
@@ -184,9 +206,9 @@ export function CalendarView({
   const filteredAppointments = useMemo(() => {
     let statusesToFilter = statusFilterList.length > 0 ? statusFilterList : [selectedStatus];
     
-    // Handle "My Calendar" filter - shows both scheduled and reserved
+    // Handle "My Calendar" filter - shows scheduled, reserved, completed, and TBD appointments
     if (statusesToFilter.includes("my-calendar")) {
-      statusesToFilter = ["scheduled", "reserved"];
+      statusesToFilter = ["scheduled", "reserved", "completed", "tbd"];
     }
     
     let filtered = displayedAppointments
@@ -504,29 +526,30 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
     };
 
     return (
-      <div className="space-y-0 relative">
-  {timeSlots.map((timeSlot) => {
-          const appointmentsStartingAtSlot = dayAppointments.filter((apt: Appointment) => apt.time === timeSlot);
-          const currentSlotIsCovered = isSlotCovered(timeSlot); // Check if the 30-min slot is covered
+        <div className="space-y-0 relative">
+    {timeSlots.map((timeSlot) => {
+            const appointmentsStartingAtSlot = dayAppointments.filter((apt: Appointment) => apt.time === timeSlot);
+            const currentSlotIsCovered = isSlotCovered(timeSlot); // Check if the 30-min slot is covered
+            const isSlotPast = isPastDateTime(selectedDate, timeSlot);
 
-          return (
-            <div key={timeSlot} className="flex items-start min-h-[64px] border-b border-gray-100 relative group">
-              {/* Plus button for occupied slots - upper right */}
-              {!currentSlotIsCovered && (
-                /* Wide position for empty slots: centered in the main area */
-                <div
-                  className="absolute inset-y-2 left-32 right-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-10 hover:bg-violet-50/50 rounded-xl border-2 border-dashed border-transparent hover:border-violet-200/50 group/plus"
-                  onClick={() => handleCreateAppointment(selectedDate, timeSlot, selectedDoctor !== 'all' ? selectedDoctor : undefined)}
-                >
-                  <Plus className="h-6 w-6 text-violet-300 transition-colors group-hover/plus:text-violet-600" />
-                </div>
-              )}
+            return (
+              <div key={timeSlot} className="flex items-start min-h-[64px] border-b border-gray-100 relative group">
+                {/* Plus button for occupied slots - upper right */}
+                {!currentSlotIsCovered && !(portal === 'public' && isSlotPast) && (
+                  /* Wide position for empty slots: centered in the main area */
+                  <div
+                    className="absolute inset-y-2 left-32 right-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-10 hover:bg-violet-50/50 rounded-xl border-2 border-dashed border-transparent hover:border-violet-200/50 group/plus"
+                    onClick={() => handleCreateAppointment(selectedDate, timeSlot, selectedDoctor !== 'all' ? selectedDoctor : undefined)}
+                  >
+                    <Plus className="h-6 w-6 text-violet-300 transition-colors group-hover/plus:text-violet-600" />
+                  </div>
+                )}
 
-              {/* Time Label */}
+                {/* Time Label */}
               <div className="w-28 pl-4 pt-2 text-sm text-muted-foreground font-medium sticky left-0 bg-white z-10 pointer-events-none">
                 <div>{formatTime(timeSlot)}</div>
                 {/* Plus button for occupied slots - underneath time */}
-                {currentSlotIsCovered && (
+                {currentSlotIsCovered && !(portal === 'public' && isSlotPast) && (
                   <div className="mt-2 opacity-0 group-hover:opacity-100 transition-all pointer-events-auto">
                     <button
                       className="bg-white p-1 rounded-md shadow-sm hover:bg-violet-50/50 hover:border-violet-200 border border-transparent cursor-pointer flex items-center justify-center"
@@ -682,37 +705,38 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                           break;
                       }
                   }
-                  
-                  return (
-                    <div 
-                      key={idx} 
-                      className="flex-1 border-l border-gray-100 relative min-h-[80px] group"
-                    >
-                        {/* Plus button for occupied slots - upper right */}
-                        {currentSlotIsCovered && (
-                            <div className="absolute right-1 top-1 opacity-0 group-hover:opacity-100 transition-all z-30">
-                                <button
-                                    className=" "
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleCreateAppointment(day, timeSlot);
-                                    }}
-                                    aria-label={`Add appointment at ${timeSlot}`}
-                                >
-                                    <Plus className="h-4 w-4 text-violet-300 group-hover:text-violet-600" />
-                                </button>
-                            </div>
-                        )}
+                  const isSlotPast = isPastDateTime(day, timeSlot);
 
-                        {/* Centered plus button for empty slots */}
-                        {!currentSlotIsCovered && (
-                            <div
-                                className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-10 hover:bg-violet-50/50 flex items-center justify-center"
-                                onClick={() => handleCreateAppointment(day, timeSlot)}
-                            >
-                                <Plus className="h-5 w-5 text-violet-300" />
-                            </div>
-                        )}
+                  return (
+                  <div 
+                    key={idx} 
+                    className="flex-1 border-l border-gray-100 relative min-h-[80px] group"
+                  >
+                    {/* Plus button for occupied slots - upper right */}
+                    {currentSlotIsCovered && !(portal === 'public' && isSlotPast) && (
+                      <div className="absolute right-1 top-1 opacity-0 group-hover:opacity-100 transition-all z-30">
+                        <button
+                          className=" "
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCreateAppointment(day, timeSlot);
+                          }}
+                          aria-label={`Add appointment at ${timeSlot}`}
+                        >
+                          <Plus className="h-4 w-4 text-violet-300 group-hover:text-violet-600" />
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Centered plus button for empty slots */}
+                    {!currentSlotIsCovered && !(portal === 'public' && isSlotPast) && (
+                      <div
+                        className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-all cursor-pointer z-10 hover:bg-violet-50/50 flex items-center justify-center"
+                        onClick={() => handleCreateAppointment(day, timeSlot)}
+                      >
+                        <Plus className="h-5 w-5 text-violet-300" />
+                      </div>
+                    )}
 
                       <div className="relative w-full h-full">
 
@@ -822,14 +846,16 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
           const dayAppointments = getAppointmentsForDate(item.date);
           const sortedDayAppointments = [...dayAppointments].sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
           const isToday = item.date.toDateString() === new Date().toDateString();
+          const isPastDay = isPastDateTime(item.date);
 
           return (
             <div
               key={idx}
-              className={`min-h-[120px] p-2 border-r border-b border-gray-200 transition-colors cursor-pointer ${
+              className={`min-h-[120px] p-2 border-r border-b border-gray-200 transition-colors ${
                 item.currentMonth ? 'bg-white hover:bg-gray-50' : 'bg-gray-50/50 text-gray-400'
-              }`}
+              } ${portal === 'public' && isPastDay ? 'opacity-60 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}`}
               onClick={() => {
+                if (portal === 'public' && isPastDay) return;
                 setSelectedDate(item.date);
                 setViewMode("day");
               }}

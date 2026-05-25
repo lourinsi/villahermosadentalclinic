@@ -4,9 +4,12 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "./ui/button";
 import { Clock, Calendar } from "lucide-react";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { useDoctors } from "@/hooks/useDoctors";
 import { Appointment } from "@/hooks/useAppointments";
 import { getAppointmentTypeName } from "@/lib/appointment-types";
 import { parseBackendDateToLocal } from "@/lib/utils";
+import { apiUrl } from "@/lib/api";
 
 interface NextAppointmentCardProps {
   appointment: Appointment | null;
@@ -28,6 +31,8 @@ export function NextAppointmentCard({
   const router = useRouter();
   const [currentIndex, setCurrentIndex] = useState(0);
   
+  // Ensure hooks order remains consistent across renders by calling useDoctors unconditionally.
+  const { doctors } = useDoctors(undefined, { enabled: role === "patient" });
   const displayAppointments = appointment ? [appointment, ...sameTimeAppointments] : [];
   const doctorsRoute =
     role === "patient" ? "/patient/doctors" :
@@ -95,6 +100,66 @@ export function NextAppointmentCard({
   const currentAppointment = displayAppointments[currentIndex];
   const hasMultiple = displayAppointments.length > 1;
 
+  const resolveImageSource = (source?: string) => {
+    if (!source) return undefined;
+    if (source.startsWith("http") || source.startsWith("data:") || source.startsWith("blob:")) return source;
+    return apiUrl(source);
+  };
+
+  const pickImageSource = (...sources: unknown[]) => {
+    for (const source of sources) {
+      if (typeof source !== "string") continue;
+      const trimmed = source.trim();
+      if (trimmed) return trimmed;
+    }
+
+    return undefined;
+  };
+
+  // Only compute patient image candidate when viewing as doctor/admin
+  const patientImageCandidate = (role === "doctor" || role === "admin")
+    ? pickImageSource(
+        (currentAppointment as any)?.patientProfile,
+        (currentAppointment as any)?.patientProfilePicture,
+        (currentAppointment as any)?.patientPhoto,
+        (currentAppointment as any)?.patientImage,
+        (currentAppointment as any)?.patientAvatar,
+        (currentAppointment as any)?.profilePicture,
+        (currentAppointment as any)?.patient?.profilePicture,
+        (currentAppointment as any)?.patient?.profilePictureUrl,
+        (currentAppointment as any)?.patient?.photo,
+        (currentAppointment as any)?.patient?.avatar
+      )
+    : undefined;
+
+  const resolvedPatientImage = resolveImageSource(patientImageCandidate as string | undefined);
+
+  // Only compute doctor image candidate for patient role (we reveal doctor's photo to patients)
+  const doctorImageCandidate = role === "patient"
+    ? pickImageSource(
+        (currentAppointment as any)?.doctorProfile,
+        (currentAppointment as any)?.doctorProfilePicture,
+        (currentAppointment as any)?.doctorPhoto,
+        (currentAppointment as any)?.doctorImage,
+        (currentAppointment as any)?.doctor?.profilePicture,
+        (currentAppointment as any)?.doctor?.profilePictureUrl,
+        // try to find in loaded doctors list
+        doctors?.find((d: any) => String(d.name) === String(currentAppointment.doctor) || String(d.id) === String(currentAppointment.doctor))?.profilePicture,
+        doctors?.find((d: any) => String(d.name) === String(currentAppointment.doctor) || String(d.id) === String(currentAppointment.doctor))?.profilePictureUrl
+      )
+    : undefined;
+
+  const resolvedDoctorImage = resolveImageSource(doctorImageCandidate as string | undefined);
+
+  const getInitials = (name?: string) => {
+    if (!name) return "?";
+    const parts = name.split(" ").filter(Boolean);
+    if (parts.length === 0) return "?";
+    const first = parts[0].charAt(0);
+    const last = parts.length > 1 ? parts[parts.length - 1].charAt(0) : "";
+    return (first + last).toUpperCase();
+  };
+
   // Doctor/Admin view - show patient details
   if (role === "doctor" || role === "admin") {
     const cardContent = (
@@ -117,15 +182,16 @@ export function NextAppointmentCard({
               </p>
             </div>
             
-            <div className="h-20 w-20 rounded-2xl bg-emerald-50 flex items-center justify-center border-2 border-emerald-100/50 shadow-inner group-hover:rotate-3 transition-transform duration-500">
-              <div className="text-center">
-                <div className="text-2xl font-black text-emerald-700">
-                  {currentAppointment.patientName.split(" ")[0].charAt(0)}
-                  {currentAppointment.patientName.split(" ").pop()?.charAt(0)}
-                </div>
-                <div className="text-[8px] font-black uppercase tracking-widest text-emerald-600/70 mt-0.5">Patient</div>
-              </div>
-            </div>
+            <Avatar className="h-20 w-20 rounded-2xl bg-emerald-50 flex items-center justify-center border-2 border-emerald-100/50 shadow-inner group-hover:rotate-3 transition-transform duration-500 overflow-hidden">
+              {resolvedPatientImage ? (
+                <AvatarImage src={resolvedPatientImage} alt={`${currentAppointment.patientName} photo`} className="object-cover" />
+              ) : (
+                <AvatarFallback className="bg-emerald-50 text-center">
+                  <div className="text-2xl font-black text-emerald-700">{getInitials(currentAppointment.patientName)}</div>
+                  <div className="text-[8px] font-black uppercase tracking-widest text-emerald-600/70 mt-0.5">Patient</div>
+                </AvatarFallback>
+              )}
+            </Avatar>
           </div>
 
           <div className="mt-auto flex flex-col md:flex-row items-center justify-between gap-6">
@@ -215,9 +281,15 @@ export function NextAppointmentCard({
             <p className="text-gray-500 font-bold text-lg">with Dr. {currentAppointment.doctor}</p>
           </div>
           
-          <div className="h-20 w-20 rounded-2xl bg-violet-50 flex items-center justify-center border-2 border-violet-100/50 shadow-inner group-hover:-rotate-3 transition-transform duration-500">
-            <Calendar className="h-10 w-10 text-violet-400 opacity-60" />
-          </div>
+          <Avatar className="h-20 w-20 rounded-2xl bg-violet-50 flex items-center justify-center border-2 border-violet-100/50 shadow-inner group-hover:-rotate-3 transition-transform duration-500 overflow-hidden">
+            {resolvedDoctorImage ? (
+              <AvatarImage src={resolvedDoctorImage} alt={String(currentAppointment.doctor || '')} className="object-cover" />
+            ) : (
+              <AvatarFallback className="bg-violet-50 text-center">
+                <Calendar className="h-10 w-10 text-violet-400 opacity-60" />
+              </AvatarFallback>
+            )}
+          </Avatar>
         </div>
 
         <div className="mt-auto flex flex-col md:flex-row items-center justify-between gap-6">

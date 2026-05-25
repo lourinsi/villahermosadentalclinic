@@ -29,7 +29,6 @@ import {
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { PatientDetailsModal, PatientDetailsRef, Patient } from "./PatientDetailsModal";
-import { EditPaymentModal } from "./EditPaymentModal";
 import BookingModalWrapper from "./BookingModalWrapper";
 import { Appointment } from "../hooks/useAppointments";
 import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
@@ -69,7 +68,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   const patientDetailsRef = useRef<PatientDetailsRef | null>(null);
   const itemsPerPage = 10;
   const { user } = useAuth();
-  const { openAddPatientModal, refreshPatients, refreshTrigger, appointments } = useAppointmentModal();
+  const { openAddPatientModal, refreshPatients, refreshTrigger, appointments, refreshAppointments, newAppointmentCreationMode } = useAppointmentModal();
 
   // BookingModal state
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
@@ -110,6 +109,17 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
 
     fetchDoctorAppointments();
   }, [doctorFilter, refreshTrigger]);
+
+  // Ensure appointments are loaded so `nextAppointment` can be computed
+  useEffect(() => {
+    // Request appointments once when the view mounts so the patient list
+    // can calculate next appointments from the shared appointments state.
+    try {
+      refreshAppointments();
+    } catch (err) {
+      console.warn("Failed to request appointments:", err);
+    }
+  }, [refreshAppointments]);
 
   const fetchPatients = React.useCallback(async (page = 1) => {
     // Add a timeout so the fetch can't hang indefinitely in the client
@@ -159,15 +169,54 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
           const lastVisitFromApt = completedAppointments.length > 0 ? completedAppointments[0].date : null;
           const effectiveLastVisit = lastVisitFromApt || patient.lastVisit || "";
 
-          // Automatic Inactive Status: more than a year since last visit
+          // Prefer server-provided balance/status if present, otherwise compute locally
+          const serverBalance = (patient as any).balance;
+          const balance = typeof serverBalance === "number" ? serverBalance : patientAppointments.reduce((sum: number, apt: Appointment) => {
+            const b = Number(apt.balance ?? 0) || 0;
+            return sum + b;
+          }, 0);
+
+          // Determine status. We generally prefer server-provided value, but treat
+          // `overdue` as authoritative only when at least one appointment actually
+          // has paymentStatus === 'overdue'. This prevents incorrect labels when
+          // the patient record was set to overdue erroneously.
+          const hasOverdue = patientAppointments.some((apt: Appointment) => {
+            if ((apt as any).deleted) return false;
+            const aptPaymentStatus = String((apt as any).paymentStatus || "").toLowerCase();
+            // Only mark overdue when the appointment's paymentStatus is explicitly 'overdue'
+            return aptPaymentStatus === "overdue";
+          });
+
           let status = patient.status || "active";
-          if (effectiveLastVisit) {
-            const lastVisitDate = parseBackendDateToLocal(effectiveLastVisit);
-            const oneYearAgo = new Date();
-            oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-            if (lastVisitDate < oneYearAgo) {
-              status = "inactive";
+
+          if (patient.status) {
+            // Server provided a status. If it's 'overdue' ensure there's an actual
+            // overdue appointment; otherwise fall back to active/inactive.
+            if (String(patient.status).toLowerCase() === "overdue" && !hasOverdue) {
+              // re-evaluate inactive based on last visit date, otherwise default to active
+              status = "active";
+              if (effectiveLastVisit) {
+                const lastVisitDate = parseBackendDateToLocal(effectiveLastVisit);
+                const oneYearAgo = new Date();
+                oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+                if (lastVisitDate < oneYearAgo) {
+                  status = "inactive";
+                }
+              }
             }
+            // else keep server-provided status as-is
+          } else {
+            // No server status: compute locally
+            if (effectiveLastVisit) {
+              const lastVisitDate = parseBackendDateToLocal(effectiveLastVisit);
+              const oneYearAgo = new Date();
+              oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+              if (lastVisitDate < oneYearAgo) {
+                status = "inactive";
+              }
+            }
+
+            if (hasOverdue) status = "overdue";
           }
 
           return {
@@ -176,7 +225,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
             lastVisit: effectiveLastVisit,
             nextAppointment: nextApt,
             status: status,
-            balance: 0,
+            balance: balance,
           };
         });
 
@@ -628,7 +677,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
     }}
   />
 
-      <EditPaymentModal />
+      
 
       <Dialog open={isPatientDeleteDialogOpen} onOpenChange={setIsPatientDeleteDialogOpen}>
         <DialogContent className="max-w-md">
@@ -756,31 +805,34 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
         </DialogContent>
       </Dialog>
 
-      <BookingModalWrapper
-        open={bookingModalOpen}
-        onOpenChange={setBookingModalOpen}
-        defaultDate={nextAvailableDate}
-        defaultTime={nextAvailableTime}
-        doctorName={nextAvailableDoctor}
-        defaultPatientId={bookingDefaultPatientId ?? (selectedPatient?.id ? String(selectedPatient.id) : undefined)}
-        appointmentToEdit={selectedAppointmentToEdit}
-        onBooked={() => {
-          setSelectedAppointmentToEdit(null);
-          setNextAvailableDate(undefined);
-          setNextAvailableTime(undefined);
-          setNextAvailableDoctor("");
-          setBookingDefaultPatientId(undefined);
-          refreshPatients();
-        }}
-        onDeleted={() => {
-          setSelectedAppointmentToEdit(null);
-          setNextAvailableDate(undefined);
-          setNextAvailableTime(undefined);
-          setNextAvailableDoctor("");
-          setBookingDefaultPatientId(undefined);
-          refreshPatients();
-        }}
-      />
+      {bookingModalOpen && (
+        <BookingModalWrapper
+          open={bookingModalOpen}
+          onOpenChange={setBookingModalOpen}
+          defaultDate={nextAvailableDate}
+          defaultTime={nextAvailableTime}
+          doctorName={nextAvailableDoctor}
+          defaultPatientId={bookingDefaultPatientId ?? (selectedPatient?.id ? String(selectedPatient.id) : undefined)}
+          appointmentToEdit={selectedAppointmentToEdit}
+          onBooked={() => {
+            setSelectedAppointmentToEdit(null);
+            setNextAvailableDate(undefined);
+            setNextAvailableTime(undefined);
+            setNextAvailableDoctor("");
+            setBookingDefaultPatientId(undefined);
+            refreshPatients();
+          }}
+          onDeleted={() => {
+            setSelectedAppointmentToEdit(null);
+            setNextAvailableDate(undefined);
+            setNextAvailableTime(undefined);
+            setNextAvailableDoctor("");
+            setBookingDefaultPatientId(undefined);
+            refreshPatients();
+          }}
+          appointmentCreationMode={newAppointmentCreationMode}
+        />
+      )}
 
 
     </div>

@@ -10,7 +10,7 @@ import { Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { Appointment } from "@/hooks/useAppointments";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { isCartAppointmentStatus, isReservedAppointmentStatus } from "@/lib/appointment-status";
-import type { BookingCreationMode } from "./sharedBookingLogic";
+import { normalizeBookingDuration, type BookingCreationMode } from "./sharedBookingLogic";
 
 interface TimePickerModalProps {
   open: boolean;
@@ -198,7 +198,7 @@ export function TimePickerModal({
       const isBlockedByDateMode = isPastMode ? isFuture : isPast;
       
       const slotMinutes = timeToMinutes(slot);
-      const slotEndMinutes = slotMinutes + (Number(duration) || 30);
+      const slotEndMinutes = slotMinutes + normalizeBookingDuration(duration);
       
       let isBooked = false;
       let isTentative = false;
@@ -208,7 +208,7 @@ export function TimePickerModal({
       
       for (const apt of activeAppointments) {
         const aptStart = timeToMinutes(apt.time);
-        const aptEnd = aptStart + (apt.duration || 30);
+        const aptEnd = aptStart + normalizeBookingDuration(apt.duration);
         
         if (slotMinutes < aptEnd && slotEndMinutes > aptStart) {
           // Check if this is a doctor conflict or a patient conflict

@@ -4,15 +4,16 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth.tsx";
 import { useBookingModalMode } from "@/hooks/useBookingModalMode";
 import { Button } from "@/components/ui/button";
-import { LogOut, User, LayoutDashboard, Calendar, Users, Bell, ClipboardList } from "lucide-react";
+import { LogOut, User, LayoutDashboard, Calendar, Users, Bell, ClipboardList, Settings } from "lucide-react";
 import { toast } from "sonner";
 import NotificationsOpened from "./notificationsOpened";
 import BookingModalWrapper from "./BookingModalWrapper";
 import AppointmentHistoryView from "./AppointmentHistoryView";
+import ApproveRejectDialog from "./ApproveRejectDialog";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
-import { Appointment } from "@/hooks/useAppointments";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
+import { useNotificationApprovalDialog } from "@/hooks/useNotificationApprovalDialog";
 
 const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
   const pathname = usePathname();
@@ -21,10 +22,7 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
   const { mode, toggleMode } = useBookingModalMode();
   const { notifications, markAsRead, markAsUnread, deleteNotification, deleteNotificationWithResult, markAllAsRead, deleteAllNotifications, refreshNotifications } = useNotifications();
   const { 
-    updateAppointment, 
-    refreshAppointments, 
     appointments, 
-    openEditModal, 
     openEditModalById,
     isEditModalOpen,
     isCreateModalOpen,
@@ -34,6 +32,7 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
     newAppointmentDate,
     newAppointmentTime,
     newAppointmentDoctorName
+    , newAppointmentCreationMode
   } = useAppointmentModal();
   const {
     isAppointmentHistoryOpen,
@@ -48,19 +47,16 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
   } = useNotificationAppointmentSnapshot(appointments);
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
-
-  const handleUpdateAppointmentStatus = async (appointmentId: string, status: string, notificationId: string) => {
-    try {
-      await updateAppointment(appointmentId, { status: status as Appointment["status"] });
-      toast.success(`Appointment status updated to ${status}`);
-      await markAsRead(notificationId);
-      refreshAppointments();
-      refreshNotifications();
-    } catch (error) {
-      toast.error("Failed to update appointment status");
-      console.error(error);
-    }
-  };
+  const isBookingModalOpen = isEditModalOpen || isCreateModalOpen;
+  const {
+    approvalDialogAppointment,
+    approvalDialogMode,
+    isApprovalDialogOpen,
+    isApprovalDialogProcessing,
+    openApprovalDialog,
+    closeApprovalDialog,
+    confirmApprovalAction,
+  } = useNotificationApprovalDialog({ markAsRead, refreshNotifications });
 
   const handleEditAppointment = async (appointmentId: string) => {
     console.log(`[DoctorLayout] Attempting to edit appointment: ${appointmentId}`);
@@ -102,6 +98,7 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
     { href: "/doctor/calendar", label: "My Schedule", icon: Calendar },
     { href: "/doctor/patients", label: "My Patients", icon: Users },
     { href: "/doctor/notifications", label: "Notifications", icon: Bell },
+    { href: "/doctor/settings", label: "Settings", icon: Settings },
   ];
 
   return (
@@ -119,6 +116,7 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
                 <li key={item.href}>
                   <Link
                     href={item.href}
+                    prefetch={false}
                     className={`flex items-center gap-3 px-4 py-3 mx-2 rounded-lg transition-colors ${
                       isActive
                         ? "bg-violet-900 text-white"
@@ -168,7 +166,7 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
             notifications={notifications} 
             unreadCount={unreadCount} 
             portal="doctor" 
-            onUpdateAppointmentStatus={handleUpdateAppointmentStatus}
+            onUpdateAppointmentStatus={openApprovalDialog}
             onMarkAsRead={markAsRead}
             onMarkAsUnread={markAsUnread}
             onDelete={deleteNotification}
@@ -194,21 +192,32 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
           isAppointmentOpen={isSnapshotAppointmentOpen}
           isHistorical={appointmentSnapshotIsHistorical}
         />
+        <ApproveRejectDialog
+          open={isApprovalDialogOpen}
+          onOpenChange={closeApprovalDialog}
+          mode={approvalDialogMode}
+          appointment={approvalDialogAppointment}
+          isProcessing={isApprovalDialogProcessing}
+          onConfirm={confirmApprovalAction}
+        />
         
         {/* Support editing appointments from notifications */}
-        <BookingModalWrapper 
-          open={isEditModalOpen || isCreateModalOpen} 
-          onOpenChange={(open) => {
-            if (!open) {
-              closeEditModal();
-              closeCreateModal();
-            }
-          }}
-          appointmentToEdit={selectedAppointment}
-          defaultDate={newAppointmentDate}
-          defaultTime={newAppointmentTime}
-          doctorName={newAppointmentDoctorName}
-        />
+        {isBookingModalOpen && (
+          <BookingModalWrapper
+            open={isBookingModalOpen}
+            onOpenChange={(open) => {
+              if (!open) {
+                closeEditModal();
+                closeCreateModal();
+              }
+            }}
+            appointmentToEdit={selectedAppointment}
+            defaultDate={newAppointmentDate}
+            defaultTime={newAppointmentTime}
+            doctorName={newAppointmentDoctorName}
+            appointmentCreationMode={newAppointmentCreationMode}
+          />
+        )}
       </div>
     </div>
   );

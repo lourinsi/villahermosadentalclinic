@@ -59,25 +59,27 @@ export default function PublicDoctorAvailabilityPage({
         />
       </main>
 
-      <BookingModalWrapper
-        open={isBookingModalOpen}
-        onOpenChange={(open) => {
-          setIsBookingModalOpen(open);
-          if (!open) {
-            setSelectedAppointment(null);
-            setDefaultDate(undefined);
-            setDefaultTime(undefined);
-          }
-        }}
-        title="Book Your Appointment"
-        bookingMode="public"
-        doctorName={doctorName}
-        defaultDate={defaultDate}
-        defaultTime={defaultTime}
-        appointmentToEdit={selectedAppointment}
-        onBooked={handleBooked as any}
-        onDeleted={handleBooked as any}
-      />
+      {isBookingModalOpen && (
+        <BookingModalWrapper
+          open={isBookingModalOpen}
+          onOpenChange={(open) => {
+            setIsBookingModalOpen(open);
+            if (!open) {
+              setSelectedAppointment(null);
+              setDefaultDate(undefined);
+              setDefaultTime(undefined);
+            }
+          }}
+          title="Book Your Appointment"
+          bookingMode="public"
+          doctorName={doctorName}
+          defaultDate={defaultDate}
+          defaultTime={defaultTime}
+          appointmentToEdit={selectedAppointment}
+          onBooked={handleBooked as any}
+          onDeleted={handleBooked as any}
+        />
+      )}
 
       <Footer />
     </div>

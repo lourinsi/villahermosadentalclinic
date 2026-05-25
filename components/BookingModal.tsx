@@ -20,6 +20,7 @@ import { formatTimeTo12h, TIME_SLOTS } from "@/lib/time-slots";
 import { APPOINTMENT_PRICES, getAppointmentTypeName } from "@/lib/appointmentTypes";
 import { toast } from 'sonner';
 import useSharedBookingLogic, {
+  ALLOWED_BOOKING_DURATIONS,
   DEFAULT_APPOINTMENT_TYPE_DURATIONS as appointmentTypeDurations,
   PAST_APPOINTMENT_STATUS_VALUES,
   findNextAvailableBookingSlot,
@@ -32,6 +33,7 @@ import useSharedBookingLogic, {
   getBookingCancellationConfig,
   getBookingConflictWarnings,
   getBookingHistoryPaymentStatusChange,
+  getBookingHistoryNotes,
   getBookingCreateDate,
   getBookingCreateTime,
   getBookingDefaultDate,
@@ -48,6 +50,7 @@ import useSharedBookingLogic, {
   isPastAppointmentDate,
   isSignificantBookingPaymentStatus,
   normalizeBookingDoctorName as normalizeDoctorName,
+  normalizeBookingDuration,
   normalizePastAppointmentStatus,
   shouldShowBookingHistoryLog,
   toBookingPatientOption as toPatientOption,
@@ -147,11 +150,48 @@ const getBookingHistoryBriefDetail = (log: any, userRole?: string) => {
   const details: string[] = [];
   if (scheduleChanged) details.push("Schedule changed");
   if (doctorChanged) details.push("Doctor changed");
+  const treatmentChanged = Boolean(
+    (log?.newState?.type && log.previousState && String(log.newState.type) !== String(log.previousState.type)) ||
+    (log?.newState?.customType && log.previousState && String(log.newState.customType) !== String(log.previousState.customType))
+  );
+  if (treatmentChanged) details.push("Treatment changed");
+
+  // patient change detection
+  const prev = log?.previousState;
+  const next = log?.newState;
+  const isPatientChange = (() => {
+    if (!prev || !next) return false;
+    const resolvePatient = (s: any) => {
+      if (!s) return "";
+      if (typeof s.patient === "string") return s.patient;
+      if (s.patient?.id) return String(s.patient.id);
+      if (s.patient?.name) return String(s.patient.name);
+      if (s.patientId) return String(s.patientId);
+      if (s.patientName) return String(s.patientName || s.patient_name);
+      const first = s.patientFirstName || s.patient?.firstName;
+      const last = s.patientLastName || s.patient?.lastName;
+      if (first || last) return [first, last].filter(Boolean).join(" ");
+      return "";
+    };
+
+    const pPrev = String(resolvePatient(prev) || "").trim();
+    const pNext = String(resolvePatient(next) || "").trim();
+    return Boolean(pPrev && pNext && pPrev !== pNext);
+  })();
+  if (isPatientChange) details.push("Patient Changed");
+
+  // price change detection
+  const prevPrice = prev ? Number(prev.price ?? prev.amount ?? 0) : null;
+  const nextPrice = next ? Number(next.price ?? next.amount ?? 0) : null;
+  const priceChanged = prevPrice !== null && nextPrice !== null && Number(prevPrice) !== Number(nextPrice);
+  if (priceChanged) details.push("Price changed");
+
   if (statusChanged) details.push("Appointment status updated");
   if (paymentStatusChange.changed) details.push("Payment status updated");
   if (amount > 0) details.push("Payment recorded");
 
-  if (details.length > 0) return details.slice(0, 2).join(" - ");
+  if (details.length > 0) return details.slice(0, 5).join(" - ");
+  if (userRole === "patient") return "Appointment details updated";
   if (userRole === "patient") return "Appointment details updated";
   return `Appointment updated by ${log?.changedByName || log?.changedBy || "Staff"}`;
 };
@@ -184,6 +224,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [modalStep, setModalStep] = useState<"details" | "payment">("details");
   const [paymentMethod, setPaymentMethod] = useState<string>("");
   const [amountToPay, setAmountToPay] = useState<string>("");
+  const [overpayPulse, setOverpayPulse] = useState(false);
   const [appointmentStatus, setAppointmentStatus] = useState<string>("scheduled");
   const [paymentStatus, setPaymentStatus] = useState<string>("unpaid");
   const [statusChangedByUser, setStatusChangedByUser] = useState<number>(0);
@@ -543,16 +584,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       !isCartAppointmentStatus(apt.status)
     );
     
-    // DEBUG: Log the filtering process
-    console.log('[BookingModal] 🔍 DOCTOR NAME MATCHING DEBUG:', {
-      selectedDoctor,
-      targetDoctor,
-      totalDailyAppointments: dailyAppointments.length,
-      allDoctorNames: Array.from(new Set(dailyAppointments.map(apt => apt.doctor))),
-      normalizedDoctorNames: Array.from(new Set(dailyAppointments.map(apt => normalizeName(apt.doctor)))),
-      matchedCount: doctorAppts.length
-    });
-
     for (const apt of doctorAppts) {
       // Parse the appointment date - it might be YYYY-MM-DD format
       let aptStart: Date;
@@ -564,7 +595,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         aptStart = new Date(apt.date);
       }
       
-      const aptDurationMins = parseInt(String(apt.duration), 10) || 30;
+      const aptDurationMins = normalizeBookingDuration(apt.duration);
       const aptEnd = new Date(aptStart.getTime() + aptDurationMins * 60000);
 
       // Check if times overlap
@@ -606,7 +637,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         aptStart = new Date(apt.date);
       }
       
-      const aptDurationMins = parseInt(String(apt.duration), 10) || 30;
+      const aptDurationMins = normalizeBookingDuration(apt.duration);
       const aptEnd = new Date(aptStart.getTime() + aptDurationMins * 60000);
       
       if (slotStartDate < aptEnd && slotEndDate > aptStart) {
@@ -633,7 +664,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       return;
     }
 
-    const durationMins = parseInt(duration, 10) || 30;
+    const durationMins = normalizeBookingDuration(duration);
     const conflict = getDurationConflictInfo(durationMins);
     
     if (conflict.hasConflict) {
@@ -643,8 +674,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     }
 
     // Log available durations when time is set
-    const availableDurations = [30, 60, 90, 120].filter(dur => isDurationAvailable(dur));
-    const unavailableDurations = [30, 60, 90, 120].filter(dur => !isDurationAvailable(dur));
+    const availableDurations = ALLOWED_BOOKING_DURATIONS.filter(dur => isDurationAvailable(dur));
+    const unavailableDurations = ALLOWED_BOOKING_DURATIONS.filter(dur => !isDurationAvailable(dur));
     
     console.log('[BookingModal] ⏱️ DURATION AVAILABILITY AT TIME:', {
       doctor: selectedDoctor,
@@ -682,7 +713,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           } else {
             aptStart = new Date(apt.date);
           }
-          const aptDurationMins = parseInt(String(apt.duration), 10) || 30;
+          const aptDurationMins = normalizeBookingDuration(apt.duration);
           const aptEnd = new Date(aptStart.getTime() + aptDurationMins * 60000);
           return slotStart < aptEnd && slotEnd > aptStart;
         });
@@ -720,7 +751,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         aptStart = new Date(apt.date);
       }
       
-      const aptDurationMins = parseInt(String(apt.duration), 10) || 30;
+      const aptDurationMins = normalizeBookingDuration(apt.duration);
       const aptEnd = new Date(aptStart.getTime() + aptDurationMins * 60000);
 
       // Check if times overlap
@@ -736,7 +767,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const getPatientConflictInfo = useCallback(() => {
     if (!selectedTime || !selectedDate) return { hasConflict: false };
     
-    const durationMins = parseInt(duration, 10) || 30;
+    const durationMins = normalizeBookingDuration(duration);
     const hasConflict = checkPatientConflict(selectedTime, durationMins);
     if (!hasConflict) return { hasConflict: false };
 
@@ -756,7 +787,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         aptStart = new Date(apt.date);
       }
       
-      const aptDurationMins = parseInt(String(apt.duration), 10) || 30;
+      const aptDurationMins = normalizeBookingDuration(apt.duration);
       const aptEnd = new Date(aptStart.getTime() + aptDurationMins * 60000);
       
       if (slotStartDate < aptEnd && slotEndDate > aptStart) {
@@ -795,7 +826,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const computePatientConflicts = useCallback((): Set<string> => {
     if (!selectedTime || !selectedDate) return new Set();
     
-    const durationMins = parseInt(duration, 10) || 30;
+    const durationMins = normalizeBookingDuration(duration);
     const [hours, minutes] = selectedTime.split(':').map(Number);
     const slotStartDate = new Date(selectedDate);
     slotStartDate.setHours(hours, minutes, 0, 0);
@@ -815,7 +846,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         aptStart = new Date(apt.date);
       }
       
-      const aptDurationMins = parseInt(String(apt.duration), 10) || 30;
+      const aptDurationMins = normalizeBookingDuration(apt.duration);
       const aptEnd = new Date(aptStart.getTime() + aptDurationMins * 60000);
       
       if (slotStartDate < aptEnd && slotEndDate > aptStart) {
@@ -828,39 +859,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     return conflictingPatientIds;
   }, [selectedTime, selectedDate, duration, dailyAppointments]);
 
-  const patientConflictSet = computePatientConflicts();
-
-  // Log patient conflicts when date/time changes
-  useEffect(() => {
-    if (!open || !selectedDate || !selectedTime) return;
-
-    const durationMins = parseInt(duration, 10) || 30;
-    const dateStr = selectedDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-    const disabledPatients = Array.from(patientConflictSet);
-    const enabledPatients = patients.filter(p => !patientConflictSet.has(p.id));
-
-    console.log('[BookingModal] 👥 PATIENT AVAILABILITY:', {
-      date: dateStr,
-      time: selectedTime,
-      duration: `${durationMins} mins`,
-      totalPatients: patients.length,
-      availablePatients: enabledPatients.length,
-      disabledPatients: disabledPatients.length,
-      available: enabledPatients.map(p => p.name),
-      disabled: disabledPatients.map(id => {
-        const patient = patients.find(p => p.id === id);
-        const appts = patientAppointments.filter((apt: any) => apt.patientId === id);
-        return {
-          name: patient?.name,
-          conflicts: appts.map((apt: any) => ({
-            time: apt.time,
-            duration: `${apt.duration} mins`,
-            doctor: apt.doctor
-          }))
-        };
-      })
-    });
-  }, [selectedDate, selectedTime, duration, patientConflictSet, patients, patientAppointments, open]);
+  const patientConflictSet = useMemo(() => computePatientConflicts(), [computePatientConflicts]);
 
   // Update duration when appointment type changes - always reset to default when type changes
   useEffect(() => {
@@ -869,7 +868,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       return;
     }
     // Always set default duration when appointment type changes
-    const defaultDur = appointmentTypeDurations[appointmentType] || 30;
+    const defaultDur = normalizeBookingDuration(appointmentTypeDurations[appointmentType]);
     setDuration(String(defaultDur));
   }, [appointmentType]);
 
@@ -901,29 +900,47 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   // BUT: Skip if doctorName was explicitly passed (e.g., from DoctorAvailabilityView)
   useEffect(() => {
     if (!open) return;
-    
-    // Only auto-preselect if user is NOT a doctor
-    if (user?.role === 'doctor') return;
-    
-    // If doctorName prop was explicitly passed, don't auto-select a different doctor
-    // The doctorName will be synced via the other useEffect that watches doctorName prop
+
+    // If a specific doctorName prop was provided, honor it
     if (doctorName) {
-      console.log('[BookingModal] 📋 Skipping auto-doctor-selection: doctorName explicitly passed from props');
+      console.log('[BookingModal] 📋 Using doctorName prop for preselection');
+      setSelectedDoctor(doctorName);
       return;
     }
-    
+
+    // If the logged-in user is a doctor, preselect them as the doctor for the booking
+    if (user?.role === 'doctor') {
+      const docName = (user as any)?.username || (user as any)?.name || '';
+      if (docName) {
+        console.log('[BookingModal] 🩺 Preselecting logged-in doctor:', docName);
+        setSelectedDoctor(docName);
+      }
+      return;
+    }
+
     // Only auto-preselect if no doctor is currently selected
     if (selectedDoctor) return;
-    
+
     // Only auto-preselect if editing an appointment (use doctor from appointment)
     if (appointmentToEdit?.doctor) return;
-    
+
     // Auto-preselect first available doctor (only when NO doctorName prop passed)
     if (doctors && doctors.length > 0) {
       console.log('[BookingModal] 🏥 Auto-selecting first available doctor');
       setSelectedDoctor(doctors[0].name);
     }
-  }, [open, user?.role, doctors, selectedDoctor, appointmentToEdit?.doctor, doctorName]);
+  }, [open, user?.role, user?.username, doctors, selectedDoctor, appointmentToEdit?.doctor, doctorName]);
+
+  // Determine which doctors should be visible/selectable.
+  // For doctor users, prefer showing only the logged-in doctor's record if it exists.
+  const visibleDoctors = (() => {
+    if (user?.role === 'doctor') {
+      const docKey = (user as any)?.username || (user as any)?.name || '';
+      const filtered = (doctors || []).filter((d: any) => normalizeDoctorName(d.name) === normalizeDoctorName(docKey));
+      return filtered.length > 0 ? filtered : (doctors || []);
+    }
+    return doctors || [];
+  })();
 
   // Run auto-preselection logic. Once a date/time exists, schedule is authoritative:
   // doctor selection may surface conflicts, but it must not jump to another slot.
@@ -1187,7 +1204,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       
       // Always set the stored price (whether custom or standard type)
       setCustomPrice(String(appointmentToEdit.price || 0));
-      setDuration(String(appointmentToEdit.duration || 30));
+      setDuration(String(normalizeBookingDuration(appointmentToEdit.duration)));
       // Prefill discount if it exists in the appointment (from discount field)
       setDiscount(String(appointmentToEdit.discount || 0));
   // For both editing and creating via the BookingModal we intentionally
@@ -1249,6 +1266,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const discountedPrice = Math.max(0, finalPrice - Number(discount));
   const remainingBalance = Math.max(0, discountedPrice - previouslyPaidAmount);
   const paymentAmountNow = paymentMethod === "Pay at Clinic" ? 0 : (parseFloat(amountToPay) || 0);
+  const isOverpay = paymentMethod !== "Pay at Clinic" && paymentAmountNow > remainingBalance;
   const bookingConflictWarnings = getBookingConflictWarnings({
     durationConflict,
     patientConflict,
@@ -1308,6 +1326,14 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
   // Second step: show summary confirmation before saving
   const handleConfirmPayment = async () => {
+    // Prevent overpayment: do not proceed if entered amount exceeds remaining balance
+    const amountRaw = amountToPay.trim() === '' ? '0' : amountToPay;
+    const amount = paymentMethod === "Pay at Clinic" ? 0 : (parseFloat(amountRaw) || 0);
+    if (amount > remainingBalance) {
+      toast.error(`Amount exceeds remaining balance. Maximum allowed: ₱${remainingBalance.toLocaleString()}`);
+      return;
+    }
+
     handleNextStep();
   };
 
@@ -1381,6 +1407,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     setIsConfirmSummaryOpen(false);
     try {
       const dateStr = formatDateToYYYYMMDD(selectedDate);
+      const bookingDuration = normalizeBookingDuration(duration);
       
       // Handle "Pay at Clinic" - set amount to pay as 0
       let amountPaidRaw = amountToPay.trim() === '' ? '0' : amountToPay;
@@ -1388,6 +1415,13 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         amountPaidRaw = '0';
       }
       const amountPaid = parseFloat(amountPaidRaw) || 0;
+
+      // Final validation: prevent overpayment
+      if (amountPaid > remainingBalance) {
+        toast.error(`Amount exceeds remaining balance. Maximum allowed: ₱${remainingBalance.toLocaleString()}`);
+        setIsBooking(false);
+        return;
+      }
 
       console.log('[BookingModal Payment] Payment confirmation:', {
         amountToPay,
@@ -1434,7 +1468,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               time: selectedTime,
               type: getAppointmentTypeIndex(appointmentType),
               customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-              duration: Number(duration) || 30,
+              duration: bookingDuration,
               price: finalPrice,
               discount: Number(discount) || 0,
               notes,
@@ -1454,7 +1488,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               time: selectedTime,
               type: getAppointmentTypeIndex(appointmentType),
               customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-              duration: Number(duration) || 30,
+              duration: bookingDuration,
               price: finalPrice,
               discount: Number(discount) || 0,
               notes,
@@ -1527,7 +1561,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
               patient: selectedPatientRecord || { id: selectedPatient, name: selectedPatient },
               date: dateStr,
               time: selectedTime,
-              duration: Number(duration) || 30,
+              duration: bookingDuration,
               type: getAppointmentTypeIndex(appointmentType),
               customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
               doctor: selectedDoctor || "",
@@ -1555,7 +1589,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 patientId: selectedPatientRecord?.id,
                 date: dateStr,
                 time: selectedTime,
-                duration: Number(duration) || 30,
+                duration: bookingDuration,
                 type: getAppointmentTypeIndex(appointmentType),
                 customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
                 doctor: selectedDoctor || "",
@@ -1596,7 +1630,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                   patient: selectedPatientRecord || { id: selectedPatient, name: selectedPatient },
                   date: dateStr,
                   time: selectedTime,
-                  duration: Number(duration) || 30,
+                  duration: bookingDuration,
                   type: getAppointmentTypeIndex(appointmentType),
                   customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
                   doctor: selectedDoctor || '',
@@ -1617,7 +1651,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 patient: selectedPatientRecord || { id: selectedPatient, name: selectedPatient },
                 date: dateStr,
                 time: selectedTime,
-                duration: Number(duration) || 30,
+                duration: bookingDuration,
                 type: getAppointmentTypeIndex(appointmentType),
                 customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
                 doctor: selectedDoctor || '',
@@ -1641,7 +1675,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             time: selectedTime,
             type: getAppointmentTypeIndex(appointmentType),
             customType: appointmentType === "Other" ? customAppointmentTypeName : undefined,
-            duration: Number(duration) || 30,
+            duration: bookingDuration,
             price: finalPrice,
             discount: Number(discount) || 0,
             notes,
@@ -1660,7 +1694,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
           };
 
           const newSlotStart = timeToMinutes(selectedTime);
-          const newSlotEnd = newSlotStart + (Number(duration) || 30);
+          const newSlotEnd = newSlotStart + bookingDuration;
 
           const pendingToCancel = dailyAppointments.filter((apt: any) => {
             // Only cancel cart appointments
@@ -1673,7 +1707,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
             if (apt.date !== dateStr) return false;
             // That overlap with the new appointment
             const aptStart = timeToMinutes(apt.time);
-            const aptEnd = aptStart + (apt.duration || 30);
+            const aptEnd = aptStart + normalizeBookingDuration(apt.duration);
             return newSlotStart < aptEnd && newSlotEnd > aptStart;
           });
 
@@ -2067,26 +2101,32 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                         </button>
                       </div>
 
-                      {/* Doctor - Select Dropdown */}
+                      {/* Doctor - Select Dropdown (hidden for logged-in doctors) */}
                       <div className="flex items-center justify-between gap-3 pb-3 border-b border-gray-100">
                         <div className="flex items-center gap-3">
                           <Stethoscope className="h-4 w-4 text-blue-600" />
                           <span className="text-xs font-bold text-gray-600 uppercase">Doctor</span>
                         </div>
-                        <Select value={selectedDoctor} onValueChange={(newDoctor) => {
-                          setSelectedDoctor(newDoctor);
-                        }} disabled={isDoctorSelectionLocked}>
-                          <SelectTrigger className="h-9 w-auto rounded-lg border-gray-300 text-sm font-semibold px-3 bg-white hover:bg-gray-50 transition-colors">
-                            <SelectValue placeholder="Select doctor" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {doctors.map((doc) => (
-                              <SelectItem key={doc.id} value={doc.name}>
-                                {doc.name.replace(/^Dr\.\s+/i, "Dr. ")}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        {isDoctorSelectionLocked ? (
+                          <span className="inline-flex h-9 items-center rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900">
+                            {displayDoctor}
+                          </span>
+                        ) : (
+                          <Select value={selectedDoctor} onValueChange={(newDoctor) => {
+                            setSelectedDoctor(newDoctor);
+                          }}>
+                            <SelectTrigger className="h-9 w-auto rounded-lg border-gray-300 text-sm font-semibold px-3 bg-white hover:bg-gray-50 transition-colors">
+                              <SelectValue placeholder="Select doctor" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {visibleDoctors.map((doc: any) => (
+                                <SelectItem key={doc.id} value={doc.name}>
+                                  {doc.name.replace(/^Dr\.\s+/i, "Dr. ")}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
                       </div>
 
                       {/* Duration - Integrated in schedule card */}
@@ -2096,7 +2136,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                             <Clock className="h-4 w-4 text-blue-600" />
                             <span className="text-xs font-bold text-gray-600 uppercase">Duration</span>
                           </div>
-                          <Select value={duration} onValueChange={setDuration} disabled={isPatientReadonly}>
+                          <Select value={duration} onValueChange={(value) => setDuration(String(normalizeBookingDuration(value)))} disabled={isPatientReadonly}>
                             <SelectTrigger className={`h-9 w-auto rounded-lg text-sm font-semibold px-3 transition-colors ${
                               durationConflict 
                                 ? 'border-red-500 bg-red-50 hover:bg-red-50 text-red-700' 
@@ -2107,7 +2147,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                               </SelectValue>
                             </SelectTrigger>
                             <SelectContent>
-                              {[30, 60, 90, 120].map(dur => {
+                              {ALLOWED_BOOKING_DURATIONS.map(dur => {
                                 const hasConflict = !isDurationAvailable(dur);
                                 return (
                                   <SelectItem 
@@ -2188,7 +2228,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                     </div>
                     <div className="space-y-2 max-h-[150px] overflow-y-auto pr-2 custom-scrollbar">
                       {(() => {
-                        console.log(`[HistoryLog] Rendering History: appointmentLogs=${appointmentLogs.length}, paymentLogs=${paymentLogs.length}`);
                         // Merge and deduplicate: if an appointment log exists for the same time as a payment log,
                         // we prefer the appointment log because it can show BOTH status and payment.
                         const allCombinedLogs = [
@@ -2226,7 +2265,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                 (prev as any).newBalance = (current as any).newBalance;
                                 (prev as any).paymentStatus = (current as any).paymentStatus || (prev as any).paymentStatus;
                               }
-                              console.log(`[HistoryLog] Merged payment into existing appointment log: ${prev.id}, amount=${maxAmount}`);
                               continue;
                             } else if (current.logType === 'appointment') {
                               (current as any).amount = maxAmount;
@@ -2234,7 +2272,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                               (prev as any).amount = maxAmount;
                               // Replace the previous payment log with this richer appointment log
                               filteredLogs[filteredLogs.length - 1] = current;
-                              console.log(`[HistoryLog] Replaced payment log with merged appointment log: ${current.id}, amount=${maxAmount}`);
                               continue;
                             }
                           }
@@ -2245,7 +2282,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                           const paidAmount = getBookingHistoryAmount(log);
                           const isInitialCreation = isBookingInitialHistoryLog(log);
                           const badges = getBookingHistoryBadges(log);
-                          console.log(`[HistoryLog] Render Card: id=${log.id} badges=${badges.map((badge) => badge.label).join(',')} logType=${log.logType} amount=${paidAmount} initial=${isInitialCreation}`);
+                          const historyNotes = getBookingHistoryNotes(log);
 
                           return (
                             <div key={log.id} className="p-2.5 bg-gray-50 rounded-lg border border-gray-200 text-[11px] space-y-1.5 shadow-sm">
@@ -2284,7 +2321,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                         ? { ...appointmentToEdit, ...log.newState, amount: log.amount, paymentStatus: log.paymentStatus || log.newState?.paymentStatus, previousState: log.previousState, newState: log.newState, changeType: log.changeType, logType: log.logType, changedAt: log.changedAt, changedByName: (log as any).changedByName }
                                         : { ...appointmentToEdit, ...log.previousState, amount: log.amount, paymentStatus: log.paymentStatus || log.newState?.paymentStatus || log.previousState?.paymentStatus, previousState: log.previousState, newState: log.newState, changeType: log.changeType, logType: log.logType, changedAt: log.changedAt, changedByName: (log as any).changedByName };
                                       
-                                      console.log('[HistoryLog] Opening historical snapshot:', historicalData.id);
                                       setSnapshotToView(historicalData);
                                       setSnapshotIsHistorical(index !== 0);
                                       setIsSnapshotModalOpen(true);
@@ -2306,16 +2342,12 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                                     <p className="mb-1 text-[10px] text-gray-600">
                                       {getBookingHistoryBriefDetail(log, user?.role)}
                                     </p>
-                                    {/* Show notes if they exist in newState AND are not empty (show even if unchanged from previousState) */}
-                                    {(log.newState?.notes && log.newState.notes.trim() !== '' && log.newState.notes.trim() !== '-') && (
-                                      <div className="mt-1.5 p-1.5 bg-blue-50/50 rounded border border-blue-100/50">
-                                        <p className="text-[10px] text-blue-800 font-semibold mb-0.5">Notes:</p>
-                                        <p className="text-[10px] text-gray-600 italic line-clamp-2">
-                                          {log.newState.notes}
-                                        </p>
-                                      </div>
-                                    )}
                                   </div>
+                                )}
+                                {historyNotes && (
+                                  <p className="mt-1 truncate text-[10px] font-semibold text-gray-500" title={historyNotes}>
+                                    Notes: {historyNotes}
+                                  </p>
                                 )}
                               </div>
                             </div>
@@ -2434,6 +2466,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                     placeholder={`Enter amount (e.g. ${remainingBalance})`}
                     value={amountToPay}
                     onChange={(e: any) => setAmountToPay(e.target.value)}
+                    max={remainingBalance}
                     className="font-bold text-lg h-12"
                     disabled={paymentMethod === "Pay at Clinic"}
                   />
@@ -2539,8 +2572,19 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
                 )}
                 
                 <Button
-                  className="bg-green-600 hover:bg-green-700 text-white gap-2 h-11 px-8 rounded-lg shadow-lg shadow-green-100"
-                  onClick={handleConfirmPayment}
+                  className={`bg-green-600 hover:bg-green-700 text-white gap-2 h-11 px-8 rounded-lg shadow-lg shadow-green-100 ${isOverpay ? 'opacity-80 cursor-pointer' : ''} ${overpayPulse ? 'ring-2 ring-red-400 animate-pulse' : ''}`}
+                  onClick={() => {
+                    if (isBooking) return;
+                    if (isOverpay) {
+                      toast.error(`Amount exceeds remaining balance. Maximum allowed: ₱${remainingBalance.toLocaleString()}`);
+                      setOverpayPulse(true);
+                      setTimeout(() => setOverpayPulse(false), 700);
+                      return;
+                    }
+
+                    handleConfirmPayment();
+                  }}
+                  aria-disabled={isOverpay}
                   disabled={isBooking}
                 >
                   {isBooking ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Confirm Booking'}

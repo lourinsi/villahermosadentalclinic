@@ -13,22 +13,33 @@ export function GlobalBookingModalWrapper() {
   const {
     isPatientBookingModalOpen,
     closePatientBookingModal,
+    isCreateModalOpen,
+    closeCreateModal,
     newAppointmentDate,
     newAppointmentTime,
     newAppointmentDoctorName,
+    newAppointmentCreationMode,
   } = useAppointmentModal();
+
+  // Open modal for either patient-specific booking flow or the generic create flow
+  const shouldOpen = Boolean(isPatientBookingModalOpen || isCreateModalOpen);
+  if (!shouldOpen) return null;
+
+  const handleOpenChange = (open: boolean) => {
+    if (!open) {
+      if (isPatientBookingModalOpen) closePatientBookingModal();
+      if (isCreateModalOpen) closeCreateModal();
+    }
+  };
 
   return (
     <BookingModalWrapper
-      open={isPatientBookingModalOpen}
-      onOpenChange={(open) => {
-        if (!open) {
-          closePatientBookingModal();
-        }
-      }}
+      open={shouldOpen}
+      onOpenChange={handleOpenChange}
       defaultDate={newAppointmentDate}
       defaultTime={newAppointmentTime}
       doctorName={newAppointmentDoctorName}
+      appointmentCreationMode={isCreateModalOpen ? newAppointmentCreationMode : undefined}
     />
   );
 }

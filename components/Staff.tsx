@@ -17,9 +17,10 @@ import { Textarea } from "./ui/textarea";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Appointment } from "../hooks/useAppointments";
 import AddStaffModalWrapper from "./AddStaffModalWrapper";
-import BookingModalWrapper from "./BookingModalWrapper";
+import AppointmentHistoryView from "./AppointmentHistoryView";
+import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
+import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { getStaffInitials, staffPasswordManagerIgnoreProps } from "./sharedAddStaffLogic";
-import { parseLocalDateOnly } from "./sharedBookingLogic";
 import {
   Users,
   UserPlus,
@@ -197,6 +198,32 @@ export function StaffView() {
   const [isLoadingSchedule, setIsLoadingSchedule] = useState(false);
   const [scheduleAppointment, setScheduleAppointment] = useState<Appointment | null>(null);
   const [isScheduleAppointmentOpen, setIsScheduleAppointmentOpen] = useState(false);
+
+  // Appointment snapshot / history handling for staff schedule
+  const {
+    isAppointmentHistoryOpen,
+    setIsAppointmentHistoryOpen,
+    appointmentSnapshot,
+    appointmentSnapshotId,
+    appointmentSnapshotLogDate,
+    appointmentSnapshotIsHistorical,
+    handleViewCurrentSnapshot,
+    handleViewAppointment,
+    resetAppointmentSnapshot,
+  } = useNotificationAppointmentSnapshot(staffAppointments);
+
+  const {
+    openEditModalById,
+    isEditModalOpen,
+    selectedAppointment,
+  } = useAppointmentModal();
+
+  const isSnapshotAppointmentOpen = Boolean(
+    isEditModalOpen &&
+    appointmentSnapshotId &&
+    selectedAppointment?.id &&
+    String(selectedAppointment.id) === String(appointmentSnapshotId)
+  );
 
   const fetchAllStaffData = async () => {
     setIsLoading(true);
@@ -577,13 +604,29 @@ export function StaffView() {
   };
 
   const openScheduleAppointment = (appointment: Appointment) => {
-    setScheduleAppointment(appointment);
-    setIsScheduleAppointmentOpen(true);
+    // Open the appointment history view instead of the booking/edit modal
+    handleViewAppointment(appointment);
   };
 
   const handleScheduleAppointmentOpenChange = (open: boolean) => {
     setIsScheduleAppointmentOpen(open);
     if (!open) setScheduleAppointment(null);
+  };
+
+  const handleEditAppointment = async (appointmentId: string) => {
+    try {
+      await openEditModalById(appointmentId);
+    } catch (error) {
+      console.error("Error opening appointment for edit:", error);
+      toast.error("Appointment not found or could not be loaded");
+    }
+  };
+
+  const handleOpenSnapshotAppointment = async (appointmentId: string) => {
+    // Close the history view and open the edit modal for the appointment
+    setIsAppointmentHistoryOpen(false);
+    resetAppointmentSnapshot();
+    await handleEditAppointment(appointmentId);
   };
 
   const refreshScheduleAppointments = () => {
@@ -1726,19 +1769,19 @@ export function StaffView() {
         </DialogContent>
       </Dialog>
 
-      {scheduleAppointment ? (
-        <BookingModalWrapper
-          key={`${scheduleAppointment.id || "appointment"}-${scheduleAppointment.date}-${scheduleAppointment.time}`}
-          open={isScheduleAppointmentOpen}
-          onOpenChange={handleScheduleAppointmentOpenChange}
-          appointmentToEdit={scheduleAppointment}
-          defaultDate={parseLocalDateOnly(scheduleAppointment.date) || undefined}
-          defaultTime={scheduleAppointment.time}
-          doctorName={scheduleStaff?.name}
-          onBooked={refreshScheduleAppointments}
-          onDeleted={refreshScheduleAppointments}
-        />
-      ) : null}
+      <AppointmentHistoryView
+        open={isAppointmentHistoryOpen}
+        onOpenChange={(open) => {
+          setIsAppointmentHistoryOpen(open);
+          if (!open) resetAppointmentSnapshot();
+        }}
+        appointmentSnapshot={appointmentSnapshot}
+        logDate={appointmentSnapshotLogDate}
+        onViewCurrent={handleViewCurrentSnapshot}
+        onOpenAppointment={handleOpenSnapshotAppointment}
+        isAppointmentOpen={isSnapshotAppointmentOpen}
+        isHistorical={appointmentSnapshotIsHistorical}
+      />
 
     </div>
   );

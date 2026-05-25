@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import { formatDateToYYYYMMDD } from "@/lib/utils";
 import { Appointment } from "@/hooks/useAppointments";
 import { isCartAppointmentStatus } from "@/lib/appointment-status";
-import type { BookingCreationMode } from "./sharedBookingLogic";
+import { normalizeBookingDuration, type BookingCreationMode } from "./sharedBookingLogic";
 
 interface DatePickerModalProps {
   open: boolean;
@@ -61,7 +61,7 @@ export function DatePickerModal({
     if (!selectedTime || !duration) return false;
 
     const dateStr = formatDateToYYYYMMDD(date);
-    const durationMins = parseInt(duration, 10) || 30;
+    const durationMins = normalizeBookingDuration(duration);
     
     // Parse selected time to get slot start (format: "HH:MM")
     const [hours, minutes] = selectedTime.split(':').map(Number);
@@ -79,7 +79,7 @@ export function DatePickerModal({
       const [aptHours, aptMinutes] = apt.time.split(':').map(Number);
       const aptStart = new Date(date);
       aptStart.setHours(aptHours, aptMinutes, 0, 0);
-      const aptDurationMins = parseInt(String(apt.duration), 10) || 30;
+      const aptDurationMins = normalizeBookingDuration(apt.duration);
       const aptEnd = new Date(aptStart.getTime() + aptDurationMins * 60000);
 
       // Check if times overlap

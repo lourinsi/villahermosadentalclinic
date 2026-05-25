@@ -7,7 +7,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { Eraser, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Plus, Trash2, MoreVertical, CalendarDays } from "lucide-react";
 import { toast } from "sonner";
-import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
+import { parseBackendDateToLocal, formatDateToYYYYMMDD, calculateAgeFromDOB } from "../lib/utils";
 import ConfirmDialog from "./ConfirmDialog";
 
 // NOTE: Dental chart state - stores which sections of which teeth are colored
@@ -60,9 +60,12 @@ const chartDatePickerClassNames = {
 interface DentalChartProps {
   records: ChartRecord[];
   onSaveRecords: (records: ChartRecord[]) => void;
+  // Optional patient date-of-birth (YYYY-MM-DD or Date). If omitted,
+  // the chart will default to showing both permanent and primary teeth.
+  patientDateOfBirth?: string | Date | null;
 }
 
-export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
+export function DentalChart({ records, onSaveRecords, patientDateOfBirth }: DentalChartProps) {
   const isChartEmpty = useCallback((state: Record<number, ToothState>): boolean => {
     for (const tooth in state) {
       const toothState = state[tooth];
@@ -110,6 +113,11 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+
+  // Determine whether to show primary (deciduous) teeth.
+  // If we can't determine age, default to showing both (original behavior).
+  const _age = calculateAgeFromDOB(patientDateOfBirth);
+  const showPrimary = _age === null ? true : _age < 13;
 
   // Load teeth state when index or records change
   useEffect(() => {
@@ -496,19 +504,21 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
                     ))}
                   </div>
                 </div>
-                <div className="flex justify-center items-end space-x-1">
-                  <div className="flex space-x-1 mr-20">
-                    {upperRightPrimary.map((toothNum) => (
-                      <ToothDiagram key={toothNum} toothNumber={toothNum} state={getToothState(toothNum)} onSectionClick={handleSectionClick} size="small" />
-                    ))}
+                {showPrimary && (
+                  <div className="flex justify-center items-end space-x-1">
+                    <div className="flex space-x-1 mr-20">
+                      {upperRightPrimary.map((toothNum) => (
+                        <ToothDiagram key={toothNum} toothNumber={toothNum} state={getToothState(toothNum)} onSectionClick={handleSectionClick} size="small" />
+                      ))}
+                    </div>
+                    <div className="w-px mx-4"></div>
+                    <div className="flex space-x-1 ml-20">
+                      {upperLeftPrimary.map((toothNum) => (
+                        <ToothDiagram key={toothNum} toothNumber={toothNum} state={getToothState(toothNum)} onSectionClick={handleSectionClick} size="small" />
+                      ))}
+                    </div>
                   </div>
-                  <div className="w-px mx-4"></div>
-                  <div className="flex space-x-1 ml-20">
-                    {upperLeftPrimary.map((toothNum) => (
-                      <ToothDiagram key={toothNum} toothNumber={toothNum} state={getToothState(toothNum)} onSectionClick={handleSectionClick} size="small" />
-                    ))}
-                  </div>
-                </div>
+                )}
               </div>
 
               <div className="border-t-2 border-gray-100"></div>
@@ -516,19 +526,21 @@ export function DentalChart({ records, onSaveRecords }: DentalChartProps) {
               {/* Lower Teeth */}
               <div className="space-y-4">
                 <h3 className="text-sm font-medium text-center">Lower Teeth</h3>
-                <div className="flex justify-center items-start space-x-1">
-                  <div className="flex space-x-1 mr-20">
-                    {lowerRightPrimary.map((toothNum) => (
-                      <ToothDiagram key={toothNum} toothNumber={toothNum} state={getToothState(toothNum)} onSectionClick={handleSectionClick} size="small" />
-                    ))}
+                {showPrimary && (
+                  <div className="flex justify-center items-start space-x-1">
+                    <div className="flex space-x-1 mr-20">
+                      {lowerRightPrimary.map((toothNum) => (
+                        <ToothDiagram key={toothNum} toothNumber={toothNum} state={getToothState(toothNum)} onSectionClick={handleSectionClick} size="small" />
+                      ))}
+                    </div>
+                    <div className="w-px mx-4"></div>
+                    <div className="flex space-x-1 ml-20">
+                      {lowerLeftPrimary.map((toothNum) => (
+                        <ToothDiagram key={toothNum} toothNumber={toothNum} state={getToothState(toothNum)} onSectionClick={handleSectionClick} size="small" />
+                      ))}
+                    </div>
                   </div>
-                  <div className="w-px mx-4"></div>
-                  <div className="flex space-x-1 ml-20">
-                    {lowerLeftPrimary.map((toothNum) => (
-                      <ToothDiagram key={toothNum} toothNumber={toothNum} state={getToothState(toothNum)} onSectionClick={handleSectionClick} size="small" />
-                    ))}
-                  </div>
-                </div>
+                )}
                 <div className="flex justify-center items-start space-x-1">
                   <div className="flex space-x-1">
                     {lowerRightAdult.map((toothNum) => (

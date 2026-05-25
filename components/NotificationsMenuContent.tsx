@@ -1,6 +1,5 @@
 "use client";
 
-import React from "react";
 import { Check, Trash2 } from "lucide-react";
 import {
   DropdownMenuItem,
@@ -15,22 +14,16 @@ interface Props {
 }
 
 export default function NotificationsMenuContent({ showMarkAll = true, onMarkAllAsRead, onDeleteAll, className, renderMode = "radix" }: Props) {
-  React.useEffect(() => {
-    if (renderMode !== "inline") return;
-    console.log('[NotificationsMenuContent] inline mount');
-    return () => console.log('[NotificationsMenuContent] inline unmount');
-  }, [renderMode]);
-
   if (renderMode === "inline") {
     return (
       <div className={`bg-white rounded-md border p-1 shadow-md ${className || ""}`}>
         {showMarkAll && (
-          <button onClick={() => { console.log('[NotificationsMenuContent] inline: Mark all clicked'); onMarkAllAsRead?.(); }} className="flex items-center gap-2 px-3 py-2 text-gray-800 hover:bg-gray-100 rounded">
+          <button onClick={() => onMarkAllAsRead?.()} className="flex items-center gap-2 px-3 py-2 text-gray-800 hover:bg-gray-100 rounded">
             <Check className="h-4 w-4 text-gray-600" />
             <span className="text-sm">Mark all as read</span>
           </button>
         )}
-        <button onClick={() => { console.log('[NotificationsMenuContent] inline: Clear all clicked'); onDeleteAll?.(); }} className="flex items-center gap-2 px-3 py-2 text-red-600 hover:bg-red-50 rounded">
+        <button onClick={() => onDeleteAll?.()} className="flex items-center gap-2 px-3 py-2 text-red-600 hover:bg-red-50 rounded">
           <Trash2 className="h-4 w-4 text-red-600" />
           <span className="text-sm">Clear all notifications</span>
         </button>

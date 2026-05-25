@@ -4,8 +4,9 @@ import AppointmentHistoryView from "@/components/AppointmentHistoryView";
 import { useNotifications } from "@/hooks/useNotifications";
 import { toast } from "sonner";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
-import { Appointment } from '@/hooks/useAppointments';
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
+import { useNotificationApprovalDialog } from "@/hooks/useNotificationApprovalDialog";
+import ApproveRejectDialog from "@/components/ApproveRejectDialog";
 
 type Portal = "patient" | "doctor" | "admin";
 
@@ -26,7 +27,7 @@ export function NotificationPage({ portal }: NotificationPageProps) {
     deleteAllNotifications,
     refreshNotifications,
     restoreNotification
-  } = useNotifications();
+  } = useNotifications({ includeDeleted: true });
 
   const { 
     updateAppointment, 
@@ -45,6 +46,8 @@ export function NotificationPage({ portal }: NotificationPageProps) {
     appointmentSnapshotId,
     appointmentSnapshotLogDate,
     appointmentSnapshotIsHistorical,
+    appointmentSnapshotNotificationId,
+    appointmentSnapshotNotificationDeleted,
     handleViewCurrentSnapshot,
     handleViewAppointmentSnapshot,
     resetAppointmentSnapshot,
@@ -52,22 +55,15 @@ export function NotificationPage({ portal }: NotificationPageProps) {
 
   const isLoading = notificationsLoading || appointmentsLoading;
 
-  const handleUpdateAppointmentStatus = async (appointmentId: string, status: Appointment['status'], notificationId: string) => {
-    try {
-      await updateAppointment(appointmentId, { status });
-      toast.success(`Appointment status updated to ${status}`);
-      
-      // Mark notification as read after action
-      await markAsRead(notificationId);
-      
-      // Refresh local data
-      refreshAppointments();
-      refreshNotifications();
-    } catch (error) {
-      toast.error("Failed to update appointment status");
-      console.error(error);
-    }
-  };
+  const {
+    approvalDialogAppointment,
+    approvalDialogMode,
+    isApprovalDialogOpen,
+    isApprovalDialogProcessing,
+    openApprovalDialog,
+    closeApprovalDialog,
+    confirmApprovalAction,
+  } = useNotificationApprovalDialog({ markAsRead, refreshNotifications });
 
   const handleReschedule = async (appointmentId: string) => {
     console.log(`[NotificationPage] Attempting to view/edit appointment: ${appointmentId}`);
@@ -129,17 +125,16 @@ export function NotificationPage({ portal }: NotificationPageProps) {
   // Portal-specific props
   const portalProps: Record<Portal, any> = {
     patient: {
-      onUpdateAppointmentStatus: handleUpdateAppointmentStatus,
       onViewAppointmentSnapshot: handleViewAppointmentSnapshot,
       onReschedule: handleReschedule,
       onCancelAppointment: handleCancelAppointment,
     },
     doctor: {
-      onUpdateAppointmentStatus: handleUpdateAppointmentStatus,
+      onUpdateAppointmentStatus: openApprovalDialog,
       onViewAppointmentSnapshot: handleViewAppointmentSnapshot,
     },
     admin: {
-      onUpdateAppointmentStatus: handleUpdateAppointmentStatus,
+      onUpdateAppointmentStatus: openApprovalDialog,
       onViewAppointmentSnapshot: handleViewAppointmentSnapshot,
     },
   };
@@ -174,6 +169,17 @@ export function NotificationPage({ portal }: NotificationPageProps) {
         onOpenAppointment={handleOpenSnapshotAppointment}
         isAppointmentOpen={isSnapshotAppointmentOpen}
         isHistorical={appointmentSnapshotIsHistorical}
+        actionsDisabled={appointmentSnapshotNotificationDeleted}
+        restoreNotificationId={appointmentSnapshotNotificationId}
+        onRestoreNotification={handleRestoreNotification}
+      />
+      <ApproveRejectDialog
+        open={isApprovalDialogOpen}
+        onOpenChange={closeApprovalDialog}
+        mode={approvalDialogMode}
+        appointment={approvalDialogAppointment}
+        isProcessing={isApprovalDialogProcessing}
+        onConfirm={confirmApprovalAction}
       />
     </div>
   );

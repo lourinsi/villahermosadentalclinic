@@ -59,6 +59,7 @@ import {
   AlertDialogTitle,
   AlertDialogFooter as Footer,
 } from "./ui/alert-dialog";
+import ApproveRejectDialog from "./ApproveRejectDialog";
 import PastAppointmentButton from "./PastAppointmentButton";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
@@ -70,6 +71,35 @@ interface RequestsViewProps {
 
 const REQUESTS_PER_PAGE = 10;
 const HISTORY_PER_PAGE = 10;
+
+const resolveImageSource = (source?: string) => {
+  if (!source) return undefined;
+  if (
+    source.startsWith("http") ||
+    source.startsWith("data:") ||
+    source.startsWith("blob:")
+  ) {
+    return source;
+  }
+  return apiUrl(source);
+};
+
+const getPatientImage = (appointment: any) => {
+  if (!appointment) return undefined;
+  return (
+    appointment.patientProfile ||
+    appointment.patientProfilePicture ||
+    appointment.patientPhoto ||
+    appointment.patientImage ||
+    appointment.patientAvatar ||
+    appointment.profilePicture ||
+    appointment.patient?.profilePicture ||
+    appointment.patient?.profilePictureUrl ||
+    appointment.patient?.photo ||
+    appointment.patient?.photoUrl ||
+    appointment.patient?.avatar
+  );
+};
 
 export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const {
@@ -198,6 +228,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const [historySearchTerm, setHistorySearchTerm] = useState("");
   const [historyStatusFilter, setHistoryStatusFilter] = useState("all");
   const [historyDateFilter, setHistoryDateFilter] = useState("");
+  const [historyDoctorFilter, setHistoryDoctorFilter] = useState("all");
   const [historySortColumn, setHistorySortColumn] = useState<string | null>(null);
   const [historySortDirection, setHistorySortDirection] = useState<"asc" | "desc">("asc");
   
@@ -423,10 +454,11 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         limit: String(HISTORY_PER_PAGE),
       });
       const search = historySearchTerm.trim();
+      const selectedDoctor = doctorFilter || (historyDoctorFilter !== "all" ? historyDoctorFilter : "");
 
       if (search) params.set("search", search);
       if (historyStatusFilter !== "all") params.set("status", historyStatusFilter);
-      if (doctorFilter) params.set("doctor", doctorFilter);
+      if (selectedDoctor) params.set("doctor", selectedDoctor);
       if (historyDateFilter) {
         params.set("startDate", historyDateFilter);
         params.set("endDate", historyDateFilter);
@@ -520,6 +552,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     historySortColumn,
     historySortDirection,
     historyStatusFilter,
+    historyDoctorFilter,
   ]);
 
   useEffect(() => {
@@ -531,6 +564,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     historySortColumn,
     historySortDirection,
     historyStatusFilter,
+    historyDoctorFilter,
   ]);
 
   useEffect(() => {
@@ -548,6 +582,37 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     refreshRequests();
     refreshHistory();
   }, [refreshHistory, refreshRequests]);
+
+  useEffect(() => {
+    const handleAppointmentsUpdated = (event: Event) => {
+      const updatedAppointment = (event as CustomEvent<{ appointment?: Appointment }>).detail?.appointment;
+
+      if (updatedAppointment?.id) {
+        const normalizedAppointment = {
+          ...updatedAppointment,
+          status: normalizeAppointmentStatus(updatedAppointment.status),
+        };
+
+        const mergeUpdatedAppointment = (items: Appointment[]) =>
+          items.map((appointment) =>
+            String(appointment.id) === String(normalizedAppointment.id)
+              ? { ...appointment, ...normalizedAppointment }
+              : appointment
+          );
+
+        setRequests(mergeUpdatedAppointment);
+        setHistory(mergeUpdatedAppointment);
+      }
+
+      refreshAppointmentLists();
+    };
+
+    window.addEventListener("appointments:updated", handleAppointmentsUpdated as EventListener);
+
+    return () => {
+      window.removeEventListener("appointments:updated", handleAppointmentsUpdated as EventListener);
+    };
+  }, [refreshAppointmentLists]);
 
   const handleApprove = async (appointment: Appointment) => {
     setPendingApproveAppointment(appointment);
@@ -736,10 +801,10 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const sortedHistory = history;
 
   const requestDoctorOptions = useMemo(() => {
-    return Array.from(new Set([...appointments, ...requests].map((appointment) => appointment.doctor).filter(Boolean))).sort();
-  }, [appointments, requests]);
+    return Array.from(new Set([...appointments, ...requests, ...history].map((appointment) => appointment.doctor).filter(Boolean))).sort();
+  }, [appointments, requests, history]);
   const pendingRequestColumnCount = doctorFilter ? 8 : 9;
-  const historyColumnCount = 8;
+  const historyColumnCount = doctorFilter ? 7 : 8;
 
   return (
     <div className="p-6 max-w-[1600px] mx-auto space-y-6">
@@ -923,6 +988,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           <TableCell className="py-4">
                             <div className="flex items-center gap-3">
                               <Avatar className="h-10 w-10 border-2 border-white shadow-sm">
+                                <AvatarImage src={resolveImageSource(getPatientImage(request))} alt={request.patientName} />
                                 <AvatarFallback className="bg-violet-100 text-violet-700 font-bold text-xs uppercase">
                                   {getInitials(request.patientName)}
                                 </AvatarFallback>
@@ -1085,7 +1151,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <Input 
-                      placeholder="Search history..." 
+                      placeholder="Search patient or service..." 
                       className="pl-10 w-64 bg-gray-50 border-gray-100 rounded-xl text-sm"
                       value={historySearchTerm}
                       onChange={(e) => {
@@ -1116,10 +1182,34 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                     </SelectContent>
                   </Select>
 
+                  {!doctorFilter && (
+                    <Select
+                      value={historyDoctorFilter}
+                      onValueChange={(value) => {
+                        setHistoryDoctorFilter(value);
+                        setHistoryCurrentPage(1);
+                      }}
+                    >
+                      <SelectTrigger className="w-[160px] bg-gray-50 border-gray-100 rounded-xl text-sm">
+                        <div className="flex items-center gap-2">
+                          <User className="h-3.5 w-3.5 text-gray-400" />
+                          <SelectValue placeholder="All Doctors" />
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Doctors</SelectItem>
+                        {requestDoctorOptions.map((doc: any) => (
+                          <SelectItem key={doc} value={doc}>{doc}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+
                   <Button variant="ghost" size="icon" className="rounded-xl border border-gray-100" onClick={() => {
                     setHistorySearchTerm("");
                     setHistoryStatusFilter("all");
                     setHistoryDateFilter("");
+                    setHistoryDoctorFilter("all");
                     setHistoryCurrentPage(1);
                   }}>
                     <RotateCcw className="h-4 w-4 text-gray-500" />
@@ -1147,6 +1237,13 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           Schedule {getSortIcon("date", false)}
                         </div>
                       </TableHead>
+                      {!doctorFilter && (
+                        <TableHead className="font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("doctor")}>
+                          <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
+                            Doctor {getSortIcon("doctor", false)}
+                          </div>
+                        </TableHead>
+                      )}
                       <TableHead className="font-bold text-gray-900 cursor-pointer" onClick={() => handleHistorySort("status")}>
                         <div className="flex items-center gap-2 uppercase text-[11px] tracking-wider">
                           Status {getSortIcon("status", false)}
@@ -1195,6 +1292,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           <TableCell className="py-4">
                             <div className="flex items-center gap-3">
                               <Avatar className="h-10 w-10 border-2 border-white shadow-sm">
+                                <AvatarImage src={resolveImageSource(getPatientImage(item))} alt={item.patientName} />
                                 <AvatarFallback className="bg-violet-100 text-violet-700 font-bold text-xs uppercase">
                                   {getInitials(item.patientName)}
                                 </AvatarFallback>
@@ -1214,6 +1312,14 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                               <span className="text-xs text-gray-500 font-medium">{item.time}</span>
                             </div>
                           </TableCell>
+                          {!doctorFilter && (
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <div className="h-1.5 w-1.5 rounded-full bg-violet-400"></div>
+                                <span className="text-sm font-semibold text-gray-700">{item.doctor}</span>
+                              </div>
+                            </TableCell>
+                          )}
                           <TableCell>
                             <Select 
                               value={item.status} 
@@ -1331,79 +1437,14 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={isApproveConfirmOpen} onOpenChange={setIsApproveConfirmOpen}>
-        <AlertDialogContent 
-          className="rounded-2xl border-none shadow-2xl"
-          onEscapeKeyDown={(e) => e.preventDefault()}
-        >
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-2xl font-black text-gray-900 uppercase tracking-tight">
-              {pendingApproveAppointment?.status === "tbd" ? "Mark as Completed?" : "Approve Appointment?"}
-            </AlertDialogTitle>
-            <AlertDialogDescription className="text-gray-500 font-medium">
-              {pendingApproveAppointment?.status === "tbd" ? (
-                <>Are you sure you want to mark this appointment for <strong>{pendingApproveAppointment?.patientName}</strong> as <strong>Completed</strong>?</>
-              ) : (
-                <>Are you sure you want to approve this appointment for <strong>{pendingApproveAppointment?.patientName}</strong>? The status will be set to <strong>Scheduled</strong>.</>
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          
-          {/* Payment Status Summary - show for all statuses */}
-          <div className="bg-amber-50 p-3 rounded-lg border border-amber-200 mb-4">
-            <p className="text-sm font-medium text-amber-900">
-              {(() => {
-                const paymentStatus = canonicalStatus(pendingApproveAppointment?.paymentStatus || "unpaid");
-                const patientName = pendingApproveAppointment?.patientName || "Patient";
-                
-                if (paymentStatus === "paid") {
-                  return `✓ ${patientName} has paid in full.`;
-                } else if (paymentStatus === "half-paid") {
-                  return `⚠ ${patientName} has made a partial payment.`;
-                } else if (paymentStatus === "pay-at-clinic") {
-                  return `📍 ${patientName} will pay at the clinic.`;
-                } else {
-                  return `✗ ${patientName} has not paid yet.`;
-                }
-              })()}
-            </p>
-          </div>
-
-          <div className={`p-4 rounded-lg border space-y-2 ${pendingApproveAppointment?.status === "tbd" ? "bg-emerald-50 border-emerald-200" : "bg-blue-50 border-blue-200"}`}>
-            <div className="text-sm space-y-2">
-              <div className="flex justify-between">
-                <span className="text-gray-600">Service:</span>
-                <span className="font-semibold text-gray-900">{pendingApproveAppointment ? getAppointmentTypeName(pendingApproveAppointment.type, pendingApproveAppointment.customType) : ""}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Date & Time:</span>
-                <span className="font-semibold text-gray-900">{pendingApproveAppointment?.date} at {pendingApproveAppointment?.time}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Doctor:</span>
-                <span className="font-semibold text-gray-900">{pendingApproveAppointment?.doctor}</span>
-              </div>
-              <div className={`border-t pt-2 ${pendingApproveAppointment?.status === "tbd" ? "border-emerald-100" : "border-blue-100"}`}>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Current Status:</span>
-                  <div>
-                    {getStatusBadge(pendingApproveAppointment?.status || "reserved")}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <AlertDialogFooter className="gap-2">
-            <AlertDialogCancel className="rounded-xl border-gray-100 font-bold uppercase text-xs tracking-wider">Cancel</AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={confirmApprove}
-              className={`text-white rounded-xl font-bold uppercase text-xs tracking-wider ${pendingApproveAppointment?.status === "tbd" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-emerald-600 hover:bg-emerald-700"}`}
-            >
-              {pendingApproveAppointment?.status === "tbd" ? "Yes, Mark as Completed" : "Yes, Approve"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ApproveRejectDialog
+        open={isApproveConfirmOpen}
+        onOpenChange={setIsApproveConfirmOpen}
+        mode="approve"
+        appointment={pendingApproveAppointment}
+        onConfirm={confirmApprove}
+        isProcessing={false}
+      />
       <AppointmentHistoryView
         open={isAppointmentHistoryOpen}
         onOpenChange={(open) => {
@@ -1418,46 +1459,14 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         isHistorical={appointmentSnapshotIsHistorical}
       />
 
-      <AlertDialog open={isRejectConfirmOpen} onOpenChange={setIsRejectConfirmOpen}>
-        <AlertDialogContent 
-          className="rounded-2xl border-none shadow-2xl"
-          onEscapeKeyDown={(e) => e.preventDefault()}
-        >
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-2xl font-black text-gray-900 uppercase tracking-tight">Reject Appointment?</AlertDialogTitle>
-            <AlertDialogDescription className="text-gray-500 font-medium">
-              Are you sure you want to reject this appointment for <strong>{pendingRejectAppointment?.patientName}</strong>? The status will be set to <strong>Cancelled</strong>.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          
-          {/* Appointment Details */}
-          <div className="bg-red-50 p-4 rounded-lg border border-red-200 space-y-2">
-            <div className="text-sm space-y-2">
-              <div className="flex justify-between">
-                <span className="text-gray-600">Service:</span>
-                <span className="font-semibold text-gray-900">{pendingRejectAppointment ? getAppointmentTypeName(pendingRejectAppointment.type, pendingRejectAppointment.customType) : ""}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Date & Time:</span>
-                <span className="font-semibold text-gray-900">{pendingRejectAppointment?.date} at {pendingRejectAppointment?.time}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Doctor:</span>
-                <span className="font-semibold text-gray-900">{pendingRejectAppointment?.doctor}</span>
-              </div>
-            </div>
-          </div>
-          <AlertDialogFooter className="gap-2">
-            <AlertDialogCancel className="rounded-xl border-gray-100 font-bold uppercase text-xs tracking-wider">Cancel</AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={confirmReject}
-              className="bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold uppercase text-xs tracking-wider"
-            >
-              Yes, Reject
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ApproveRejectDialog
+        open={isRejectConfirmOpen}
+        onOpenChange={setIsRejectConfirmOpen}
+        mode="reject"
+        appointment={pendingRejectAppointment}
+        onConfirm={confirmReject}
+        isProcessing={false}
+      />
     </div>
   );
 }

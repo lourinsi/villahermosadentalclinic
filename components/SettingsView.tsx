@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -34,6 +34,37 @@ export function SettingsView() {
     desktop: true,
     appointments: true
   });
+
+  // Profile image upload state
+  const [profileImage, setProfileImage] = useState<string | null>(null);
+  const [profileFile, setProfileFile] = useState<File | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (profileImage) {
+        URL.revokeObjectURL(profileImage);
+      }
+    };
+  }, [profileImage]);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (profileImage) {
+      URL.revokeObjectURL(profileImage);
+    }
+    const url = URL.createObjectURL(file);
+    setProfileImage(url);
+    setProfileFile(file);
+  };
+
+  const removeImage = () => {
+    if (profileImage) {
+      URL.revokeObjectURL(profileImage);
+    }
+    setProfileImage(null);
+    setProfileFile(null);
+  };
 
   return (
     <div className="p-6 space-y-6">
@@ -162,6 +193,35 @@ export function SettingsView() {
               <CardTitle>Administrator Profile</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="flex items-center space-x-4">
+                <div>
+                  <label htmlFor="profile-image-input" className="cursor-pointer block">
+                    {profileImage ? (
+                      <img src={profileImage} alt="Profile" className="h-24 w-24 rounded-full object-cover border" />
+                    ) : (
+                      <div className="h-24 w-24 rounded-full bg-gray-200 flex items-center justify-center text-gray-500">Upload</div>
+                    )}
+                  </label>
+                  <input
+                    id="profile-image-input"
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleFileChange}
+                  />
+                  <div className="mt-2">
+                    {profileImage ? (
+                      <Button variant="outline" onClick={removeImage}>Remove Photo</Button>
+                    ) : (
+                      <div className="text-sm text-muted-foreground">Click the avatar to upload</div>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-base font-medium">Profile Photo</div>
+                  <div className="text-sm text-muted-foreground">Add or change your profile picture</div>
+                </div>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="first-name">First Name</Label>

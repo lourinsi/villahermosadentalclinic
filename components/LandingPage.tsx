@@ -253,13 +253,15 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <BookingModalWrapper
-        open={isBookingModalOpen}
-        onOpenChange={setIsBookingModalOpen}
-        title="Book Your Appointment"
-        bookingMode="public"
-        onBooked={() => refreshPublicBookings()}
-      />
+      {isBookingModalOpen && (
+        <BookingModalWrapper
+          open={isBookingModalOpen}
+          onOpenChange={setIsBookingModalOpen}
+          title="Book Your Appointment"
+          bookingMode="public"
+          onBooked={() => refreshPublicBookings()}
+        />
+      )}
 
       <Footer />
     </div>

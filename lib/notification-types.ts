@@ -34,5 +34,22 @@ export interface Notification {
     appointmentDate?: string;
     appointmentTime?: string;
     isRequest?: boolean;
+    doctor?: string;
+    amount?: number;
+    paymentDate?: string;
+    paymentId?: string;
+    cancellationReason?: string;
+    changedFields?: { [key: string]: any };
+    changeSummary?: {
+      field: string;
+      label: string;
+      from?: string;
+      to?: string;
+    }[];
+    appointmentSnapshot?: { [key: string]: any };
+    logDate?: string;
+    isDoctorView?: boolean;
+    isAdminView?: boolean;
+    isPatientView?: boolean;
   };
 }
