@@ -1,4 +1,4 @@
-import { MapPin, Phone, Mail, Facebook, Twitter, Instagram, Linkedin } from "lucide-react";
+import { MapPin, Phone, Mail, Globe, Share2, Rss, Link } from "lucide-react";
 
 export function Footer() {
   return (
@@ -12,10 +12,10 @@ export function Footer() {
               Your smile is our passion.
             </p>
             <div className="flex space-x-4">
-              <Facebook className="h-5 w-5 text-gray-400 hover:text-white cursor-pointer transition-colors" />
-              <Twitter className="h-5 w-5 text-gray-400 hover:text-white cursor-pointer transition-colors" />
-              <Instagram className="h-5 w-5 text-gray-400 hover:text-white cursor-pointer transition-colors" />
-              <Linkedin className="h-5 w-5 text-gray-400 hover:text-white cursor-pointer transition-colors" />
+              <Globe className="h-5 w-5 text-gray-400 hover:text-white cursor-pointer transition-colors" />
+              <Share2 className="h-5 w-5 text-gray-400 hover:text-white cursor-pointer transition-colors" />
+              <Rss className="h-5 w-5 text-gray-400 hover:text-white cursor-pointer transition-colors" />
+              <Link className="h-5 w-5 text-gray-400 hover:text-white cursor-pointer transition-colors" />
             </div>
           </div>
           
