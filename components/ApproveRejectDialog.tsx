@@ -13,8 +13,8 @@ import {
 } from "./ui/alert-dialog";
 import { Badge } from "./ui/badge";
 import { getAppointmentTypeName } from "@/lib/appointmentTypes";
-import { normalizeAppointmentStatus } from "@/lib/appointment-status";
 import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
+import { getAppointmentStatusOptionWithColors } from "@/lib/status-colors";
 
 interface Props {
   open: boolean;
@@ -26,7 +26,7 @@ interface Props {
 }
 
 export default function ApproveRejectDialog({ open, onOpenChange, mode, appointment, isProcessing = false, onConfirm }: Props) {
-  const { statuses, getStatusColors } = useAppointmentStatuses();
+  const { statuses } = useAppointmentStatuses();
 
   const patientName = appointment?.patientName || appointment?.patient?.name || appointment?.patient || "Patient";
   const status = appointment?.status || "reserved";
@@ -57,16 +57,8 @@ export default function ApproveRejectDialog({ open, onOpenChange, mode, appointm
   })();
 
   const renderStatusBadge = (s?: string) => {
-    try {
-      const k = normalizeAppointmentStatus(s);
-      const statusOption = statuses.find((opt) => normalizeAppointmentStatus(opt.value) === k);
-      if (statusOption) {
-        return <Badge className={`${statusOption.bgColor} ${statusOption.textColor} border-none hover:opacity-80 font-medium capitalize`}>{statusOption.label}</Badge>;
-      }
-    } catch (e) {
-      // ignore
-    }
-    return <Badge className="bg-gray-100 text-gray-700 border-none">{String(s || "")}</Badge>;
+    const statusOption = getAppointmentStatusOptionWithColors(s, statuses);
+    return <Badge className={`${statusOption.bgColor} ${statusOption.textColor} border-none hover:opacity-80 font-medium capitalize`}>{statusOption.label || String(s || "")}</Badge>;
   };
 
   return (

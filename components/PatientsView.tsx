@@ -8,6 +8,7 @@ import { Button } from "./ui/button";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { toast } from "sonner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
@@ -43,6 +44,26 @@ import { getAuthHeaders } from "@/lib/auth-headers";
 interface PatientsViewProps {
   doctorFilter?: string; // When set, only show patients this doctor has seen
 }
+
+const getOverdueAppointmentCount = (appointments: Appointment[]) =>
+  appointments.filter((apt: Appointment) => {
+    if ((apt as any).deleted) return false;
+    return String((apt as any).paymentStatus || "").toLowerCase() === "overdue";
+  }).length;
+
+const getPatientStatusTooltip = (status: string, overdueAppointmentCount?: number | null) => {
+  switch (status.toLowerCase()) {
+    case "overdue": {
+      if (typeof overdueAppointmentCount !== "number") return null;
+      const count = Math.max(0, overdueAppointmentCount);
+      return `You have ${count} overdue appointment${count === 1 ? "" : "s"}.`;
+    }
+    case "inactive":
+      return "It's inactive because you haven't had any appointment for over a year.";
+    default:
+      return null;
+  }
+};
 
 export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   const [searchTerm, setSearchTerm] = useState("");
@@ -180,12 +201,9 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
           // `overdue` as authoritative only when at least one appointment actually
           // has paymentStatus === 'overdue'. This prevents incorrect labels when
           // the patient record was set to overdue erroneously.
-          const hasOverdue = patientAppointments.some((apt: Appointment) => {
-            if ((apt as any).deleted) return false;
-            const aptPaymentStatus = String((apt as any).paymentStatus || "").toLowerCase();
-            // Only mark overdue when the appointment's paymentStatus is explicitly 'overdue'
-            return aptPaymentStatus === "overdue";
-          });
+          // Only mark overdue when the appointment's paymentStatus is explicitly 'overdue'
+          const overdueAppointmentCount = getOverdueAppointmentCount(patientAppointments);
+          const hasOverdue = overdueAppointmentCount > 0;
 
           let status = patient.status || "active";
 
@@ -226,6 +244,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
             nextAppointment: nextApt,
             status: status,
             balance: balance,
+            overdueAppointmentCount,
           };
         });
 
@@ -270,18 +289,39 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
     fetchPatients(currentPage);
   }, [currentPage, fetchPatients]);
 
-  const getStatusBadge = (status: string | undefined) => {
+  const getStatusBadge = (status: string | undefined, overdueAppointmentCount?: number | null) => {
     const s = status?.toLowerCase() || "active";
+    let badge: React.ReactNode;
+
     switch (s) {
       case "active":
-        return <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-50">Active</Badge>;
+        badge = <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-50">Active</Badge>;
+        break;
       case "overdue":
-        return <Badge className="bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-50">Overdue</Badge>;
+        badge = <Badge className="bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-50">Overdue</Badge>;
+        break;
       case "inactive":
-        return <Badge className="bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-50">Inactive</Badge>;
+        badge = <Badge className="bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-50">Inactive</Badge>;
+        break;
       default:
-        return <Badge variant="outline" className="capitalize">{s}</Badge>;
+        badge = <Badge variant="outline" className="capitalize">{s}</Badge>;
     }
+
+    const tooltip = getPatientStatusTooltip(s, overdueAppointmentCount);
+    if (!tooltip) return badge;
+
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex cursor-help" title={tooltip} aria-label={tooltip} tabIndex={0}>
+            {badge}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={6} className="max-w-[260px] text-center">
+          {tooltip}
+        </TooltipContent>
+      </Tooltip>
+    );
   };
 
   const handleAddPatient = () => {
@@ -540,7 +580,7 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
                         )}
                       </TableCell>
                       <TableCell className="text-center">
-                        {getStatusBadge(patient.status)}
+                        {getStatusBadge(patient.status, patient.overdueAppointmentCount)}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex flex-col items-end gap-1">

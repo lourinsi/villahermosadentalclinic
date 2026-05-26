@@ -16,6 +16,7 @@ import { isCartAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appoi
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 import { apiUrl } from "@/lib/api";
+import { getDefaultAppointmentStatusColors } from "@/lib/status-colors";
 
 const revenueData = [
   { month: "Jan", revenue: 42000, appointments: 180 },
@@ -452,10 +453,7 @@ export function Dashboard({ portal }: { portal?: string }) {
                         <div className="text-xs font-medium text-gray-500 flex items-center space-x-2 mt-0.5">
                           <span>{getAppointmentTypeName(appointment.type, appointment.customType)}</span>
                           <span className="h-1 w-1 rounded-full bg-gray-300"></span>
-                          <span className={`capitalize ${
-                            appointment.status === 'scheduled' ? 'text-emerald-600' : 
-                            isCartAppointmentStatus(appointment.status) ? 'text-blue-600' : 'text-gray-600'
-                          }`}>{appointment.status}</span>
+                          <span className={`capitalize ${getDefaultAppointmentStatusColors(appointment.status).textColor}`}>{appointment.status}</span>
                         </div>
                         {(viewMode === "week" || viewMode === "month") && (
                           <div className="text-xs text-gray-400 mt-1">

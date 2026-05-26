@@ -1,6 +1,6 @@
 "use client";
 
-import { apiUrl } from "@/lib/api";
+import { apiUrl, API_BASE_URL } from "@/lib/api";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -64,6 +64,11 @@ import PastAppointmentButton from "./PastAppointmentButton";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 import { getAuthHeaders } from "@/lib/auth-headers";
+import {
+  getAppointmentStatusOptionWithColors,
+  getPaymentStatusOptionWithColors,
+  normalizePaymentStatus,
+} from "@/lib/status-colors";
 
 interface RequestsViewProps {
   doctorFilter?: string;
@@ -84,7 +89,7 @@ const resolveImageSource = (source?: string) => {
   return apiUrl(source);
 };
 
-const getPatientImage = (appointment: any) => {
+const getPatientImage = (appointment: any, patientRecord?: any) => {
   if (!appointment) return undefined;
   return (
     appointment.patientProfile ||
@@ -97,7 +102,12 @@ const getPatientImage = (appointment: any) => {
     appointment.patient?.profilePictureUrl ||
     appointment.patient?.photo ||
     appointment.patient?.photoUrl ||
-    appointment.patient?.avatar
+    appointment.patient?.avatar ||
+    // Fallback to fetched patient record
+    patientRecord?.profilePicture ||
+    patientRecord?.profilePictureUrl ||
+    patientRecord?.photo ||
+    patientRecord?.avatar
   );
 };
 
@@ -125,6 +135,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const [historyTotalPages, setHistoryTotalPages] = useState(1);
   const [historyTotal, setHistoryTotal] = useState(0);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const [patientRecordsCache, setPatientRecordsCache] = useState<Record<string, any>>({});
   const {
     isAppointmentHistoryOpen,
     setIsAppointmentHistoryOpen,
@@ -187,9 +198,49 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     }
   }, [APPOINTMENT_STATUSES]);
 
+  // Fetch patient records for requests and history
+  useEffect(() => {
+    const allAppointments = [...requests, ...history];
+    const patientIds = Array.from(new Set(allAppointments.map(apt => apt.patientId).filter(Boolean)));
+
+    if (patientIds.length === 0) return;
+
+    const fetchPatientRecords = async () => {
+      const newCache = { ...patientRecordsCache };
+      
+      for (const patientId of patientIds) {
+        // Skip if already cached
+        if (newCache[patientId]) continue;
+
+        try {
+          const response = await fetch(`${API_BASE_URL}/api/patients/${patientId}`, {
+            credentials: "include",
+            headers: {
+              Authorization: `Bearer ${typeof window !== "undefined" ? localStorage.getItem("authToken") : ""}`,
+            },
+          });
+          if (response.ok) {
+            const data = await response.json();
+            newCache[patientId] = data.data || null;
+          }
+        } catch (error) {
+          console.debug(`Failed to fetch patient record ${patientId}:`, error);
+        }
+      }
+
+      setPatientRecordsCache(newCache);
+    };
+
+    fetchPatientRecords();
+  }, [requests, history]);
+
   // Normalize status strings to canonical backend keys for reliable comparisons
   const canonicalStatus = (s?: string) => {
     return normalizeAppointmentStatus(s);
+  };
+
+  const canonicalPaymentStatus = (s?: string) => {
+    return normalizePaymentStatus(s);
   };
 
   const isPatientCartStatus = (status?: string) => {
@@ -288,8 +339,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
           bVal = canonicalStatus(b.status);
           break;
         case "payment":
-          aVal = canonicalStatus(a.paymentStatus || "unpaid");
-          bVal = canonicalStatus(b.paymentStatus || "unpaid");
+          aVal = canonicalPaymentStatus(a.paymentStatus || "unpaid");
+          bVal = canonicalPaymentStatus(b.paymentStatus || "unpaid");
           break;
         case "booked":
           aVal = a.createdAt ? new Date(a.createdAt).getTime() : Number.MIN_VALUE;
@@ -738,33 +789,23 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   };
 
   const getStatusBadge = (status: string) => {
-    const k = canonicalStatus(status);
-    const statusOption = APPOINTMENT_STATUSES.find(s => canonicalStatus(s.value) === k);
-    
-    if (statusOption) {
-      return (
-        <Badge className={`${statusOption.bgColor} ${statusOption.textColor} border-none hover:opacity-80 font-medium capitalize`}>
-          {statusOption.label}
-        </Badge>
-      );
-    }
-    
-    return <Badge variant="outline" className="font-medium capitalize">{formatAppointmentStatusLabel(status)}</Badge>;
+    const statusOption = getAppointmentStatusOptionWithColors(status, APPOINTMENT_STATUSES);
+
+    return (
+      <Badge className={`${statusOption.bgColor} ${statusOption.textColor} border-none hover:opacity-80 font-medium capitalize`}>
+        {statusOption.label || formatAppointmentStatusLabel(status)}
+      </Badge>
+    );
   };
 
   const getPaymentStatusBadge = (paymentStatus: string | undefined) => {
-    const k = canonicalStatus(paymentStatus || "unpaid");
-    const statusOption = PAYMENT_STATUSES.find(s => canonicalStatus(s.value) === k);
-    
-    if (statusOption) {
-      return (
-        <Badge className={`${statusOption.bgColor} ${statusOption.textColor} border-none hover:opacity-80 font-medium capitalize`}>
-          {statusOption.label}
-        </Badge>
-      );
-    }
-    
-    return <Badge variant="outline" className="font-medium capitalize">{paymentStatus || "Unpaid"}</Badge>;
+    const statusOption = getPaymentStatusOptionWithColors(paymentStatus || "unpaid", PAYMENT_STATUSES);
+
+    return (
+      <Badge className={`${statusOption.bgColor} ${statusOption.textColor} border-none hover:opacity-80 font-medium capitalize`}>
+        {statusOption.label || paymentStatus || "Unpaid"}
+      </Badge>
+    );
   };
 
   const handlePendingSort = (column: string) => {
@@ -988,7 +1029,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           <TableCell className="py-4">
                             <div className="flex items-center gap-3">
                               <Avatar className="h-10 w-10 border-2 border-white shadow-sm">
-                                <AvatarImage src={resolveImageSource(getPatientImage(request))} alt={request.patientName} />
+                                <AvatarImage src={resolveImageSource(getPatientImage(request, patientRecordsCache[request.patientId]))} alt={request.patientName} />
                                 <AvatarFallback className="bg-violet-100 text-violet-700 font-bold text-xs uppercase">
                                   {getInitials(request.patientName)}
                                 </AvatarFallback>
@@ -1292,7 +1333,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           <TableCell className="py-4">
                             <div className="flex items-center gap-3">
                               <Avatar className="h-10 w-10 border-2 border-white shadow-sm">
-                                <AvatarImage src={resolveImageSource(getPatientImage(item))} alt={item.patientName} />
+                                <AvatarImage src={resolveImageSource(getPatientImage(item, patientRecordsCache[item.patientId]))} alt={item.patientName} />
                                 <AvatarFallback className="bg-violet-100 text-violet-700 font-bold text-xs uppercase">
                                   {getInitials(item.patientName)}
                                 </AvatarFallback>

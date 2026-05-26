@@ -45,6 +45,11 @@ import {
 } from "@/lib/appointment-status";
 import { TIME_SLOTS, formatTimeTo12h } from "@/lib/time-slots";
 import { AllAppointmentsView } from "@/components/AllAppointmentsView";
+import {
+  getDefaultAppointmentStatusColors,
+  getStatusBorderColorClass,
+  getStatusDotColorClass,
+} from "@/lib/status-colors";
 
 const formatDateKey = (date: Date) => {
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -118,33 +123,12 @@ const formatMoney = (amount?: number) =>
   `PHP ${(Number(amount) || 0).toLocaleString()}`;
 
 const statusClass = (status?: string) => {
-  switch (normalizeAppointmentStatus(status)) {
-    case "scheduled":
-      return "bg-emerald-100 text-emerald-700 border-emerald-200";
-    case "reserved":
-      return "bg-blue-100 text-blue-700 border-blue-200";
-    case "cancelled":
-      return "bg-red-100 text-red-700 border-red-200";
-    default:
-      return "bg-amber-100 text-amber-700 border-amber-200";
-  }
+  const colors = getDefaultAppointmentStatusColors(status);
+  return `${colors.bgColor} ${colors.textColor} ${getStatusBorderColorClass(colors.bgColor)}`;
 };
 
 const statusDotClass = (status?: string) => {
-  switch (normalizeAppointmentStatus(status)) {
-    case "scheduled":
-      return "bg-emerald-500";
-    case "reserved":
-      return "bg-blue-500";
-    case "cancelled":
-      return "bg-red-500";
-    case "completed":
-      return "bg-sky-500";
-    case "tbd":
-      return "bg-rose-400";
-    default:
-      return "bg-amber-500";
-  }
+  return getStatusDotColorClass(getDefaultAppointmentStatusColors(status).bgColor);
 };
 
 const getWeekDays = (date: Date) => {

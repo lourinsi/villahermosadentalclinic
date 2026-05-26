@@ -3,11 +3,16 @@ import { Appointment } from "../hooks/useAppointments";
 import { useAppointmentStatuses } from "@/hooks/useAppointmentStatuses";
 import { usePaymentStatuses } from "@/hooks/usePaymentStatuses";
 import {
-  CART_APPOINTMENT_STATUS,
   formatAppointmentStatusLabel,
   isCartAppointmentStatus,
-  normalizeAppointmentStatus,
 } from "@/lib/appointment-status";
+import {
+  formatPaymentStatusLabel,
+  getAppointmentStatusBadgeClassName,
+  getAppointmentStatusOptionWithColors,
+  getPaymentStatusBadgeClassName,
+  getStatusDotColorClass,
+} from "@/lib/status-colors";
 import { getAppointmentTypeName } from "../lib/appointment-types";
 import {
   Table,
@@ -63,9 +68,7 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
   };
 
   const displayPaymentStatus = (p?: string) => {
-    if (!p) return 'Unpaid';
-    if (p.toLowerCase() === 'half-paid') return 'Half-paid';
-    return p.charAt(0).toUpperCase() + p.slice(1);
+    return formatPaymentStatusLabel(p);
   };
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [sortKey, setSortKey] = useState<SortKey>("date");
@@ -144,37 +147,11 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
   };
 
   const getStatusBadgeClass = (status: string = "") => {
-    const k = normalizeAppointmentStatus(status);
-    const statusOption = APPOINTMENT_STATUSES.find(s => normalizeAppointmentStatus(s.value) === k);
-    if (statusOption) {
-      return `${statusOption.bgColor} ${statusOption.textColor} border-none`;
-    }
-
-    switch (k) {
-      case "scheduled": return "bg-violet-100 text-violet-700 border-violet-200";
-      case "confirmed": return "bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200";
-      case "completed": return "bg-green-100 text-green-700 border-green-200";
-      case "cancelled": return "bg-red-100 text-red-700 border-red-200";
-      case CART_APPOINTMENT_STATUS: return "bg-orange-100 text-orange-700 border-orange-200";
-      case "to-pay": return "bg-cyan-100 text-cyan-700 border-cyan-200";
-      case "booked": return "bg-emerald-700 text-white border-emerald-800"; // Booked (brighter green)
-      default: return "bg-gray-100 text-gray-700 border-gray-200";
-    }
+    return getAppointmentStatusBadgeClassName(status, APPOINTMENT_STATUSES);
   };
 
   const getPaymentBadgeClass = (status: string = "") => {
-    const k = status.toLowerCase().trim();
-    const statusOption = PAYMENT_STATUSES.find(s => s.value.toLowerCase() === k);
-    if (statusOption) {
-      return `${statusOption.bgColor} ${statusOption.textColor} border-none`;
-    }
-
-    switch (k) {
-      case "paid": return "bg-green-100 text-green-700 border-green-200";
-      case "unpaid": return "bg-orange-100 text-orange-700 border-orange-200";
-      case "half-paid": return "bg-blue-100 text-blue-700 border-blue-200";
-      default: return "bg-gray-100 text-gray-700 border-gray-200";
-    }
+    return getPaymentStatusBadgeClassName(status, PAYMENT_STATUSES);
   };
 
   if (isLoading) {
@@ -327,18 +304,18 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredAndSortedAppointments.map((appointment) => (
+          {filteredAndSortedAppointments.map((appointment) => {
+            const statusAccentClass = getStatusDotColorClass(
+              getAppointmentStatusOptionWithColors(appointment.status, APPOINTMENT_STATUSES).bgColor
+            );
+
+            return (
             <Card
               key={appointment.id}
               className={`hover:shadow-md transition-all border-gray-200 group relative overflow-hidden ${onOpenAppointment ? "cursor-pointer" : ""}`}
               onClick={() => onOpenAppointment?.(appointment)}
             >
-               <div className={`absolute top-0 left-0 w-1 h-full ${
-                appointment.status === "completed" ? "bg-green-500" :
-                appointment.status === "cancelled" ? "bg-red-500" :
-                isCartAppointmentStatus(appointment.status) ? "bg-orange-500" :
-                "bg-brand"
-              }`} />
+               <div className={`absolute top-0 left-0 w-1 h-full ${statusAccentClass}`} />
               
               <CardContent className="p-5 space-y-4">
                 <div className="flex justify-between items-start">
@@ -413,7 +390,8 @@ export const AllAppointmentsView: React.FC<AllAppointmentsViewProps> = ({
                 </div>
               </CardContent>
             </Card>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

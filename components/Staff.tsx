@@ -21,6 +21,7 @@ import AppointmentHistoryView from "./AppointmentHistoryView";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { getStaffInitials, staffPasswordManagerIgnoreProps } from "./sharedAddStaffLogic";
+import { getDefaultAppointmentStatusColors } from "@/lib/status-colors";
 import {
   Users,
   UserPlus,
@@ -595,12 +596,8 @@ export function StaffView() {
   }, [sortedStaffAppointments]);
 
   const getAppointmentStatusClass = (status?: string) => {
-    const normalizedStatus = normalizeFilterValue(status);
-    if (normalizedStatus === "completed") return "bg-green-100 text-green-800";
-    if (normalizedStatus === "scheduled" || normalizedStatus === "confirmed") return "bg-blue-100 text-blue-800";
-    if (normalizedStatus === "cancelled") return "bg-red-100 text-red-800";
-    if (normalizedStatus === "reserved") return "bg-purple-100 text-purple-800";
-    return "bg-yellow-100 text-yellow-800";
+    const colors = getDefaultAppointmentStatusColors(normalizeFilterValue(status));
+    return `${colors.bgColor} ${colors.textColor}`;
   };
 
   const openScheduleAppointment = (appointment: Appointment) => {

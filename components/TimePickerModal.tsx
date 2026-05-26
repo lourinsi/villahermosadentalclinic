@@ -147,6 +147,7 @@ export function TimePickerModal({
   }, [selectedDate, open, viewDate, fetchAppointments]);
 
   const isPastMode = dateSelectionMode === "past";
+  const isEditMode = dateSelectionMode === "edit";
 
   const startOfDay = (date: Date) => {
     const copy = new Date(date);
@@ -159,7 +160,7 @@ export function TimePickerModal({
   const navigateDate = (direction: 'prev' | 'next') => {
     const newDate = new Date(viewDate);
     newDate.setDate(viewDate.getDate() + (direction === 'next' ? 1 : -1));
-    if (isPastMode && isAfterToday(newDate)) return;
+    if (!isEditMode && isPastMode && isAfterToday(newDate)) return;
     setViewDate(newDate);
     if (onDateChange) {
       onDateChange(newDate);
@@ -239,17 +240,18 @@ export function TimePickerModal({
       }
 
       const isSelected = selectedTime === slot && formatDateToYYYYMMDD(viewDate) === formatDateToYYYYMMDD(selectedDate);
+      const isBlockedByMode = isEditMode ? false : isBlockedByDateMode;
       
       return {
         time: slot,
-        isAvailable: (!isBooked || isPending) && !isBlockedByDateMode,
+        isAvailable: (!isBooked || isPending) && !isBlockedByMode,
         isBooked,
         isTentative,
         isPending,
         isPatientConflict,
         isPast,
         isFuture,
-        isBlockedByDateMode,
+        isBlockedByDateMode: isBlockedByMode,
         isSelected,
         appointment
       };
@@ -265,7 +267,7 @@ export function TimePickerModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>{isPastMode ? "Select Past Time" : "Select Time"}</DialogTitle>
+          <DialogTitle>{isPastMode ? "Select Past Time" : isEditMode ? "Select Time" : "Select Time"}</DialogTitle>
         </DialogHeader>
         
         <div className="space-y-3">
@@ -284,7 +286,7 @@ export function TimePickerModal({
             
             <button
               onClick={() => navigateDate('next')}
-              disabled={isPastMode && isAfterToday(new Date(new Date(viewDate).setDate(viewDate.getDate() + 1)))}
+              disabled={!isEditMode && isPastMode && isAfterToday(new Date(new Date(viewDate).setDate(viewDate.getDate() + 1)))}
               className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors border border-gray-100 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <ChevronRight className="h-4 w-4 text-gray-600" />
