@@ -307,7 +307,7 @@ export function Dashboard({ portal }: { portal?: string }) {
                 />
                 <Tooltip 
                   contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
-                  formatter={(value: number | string, name: string) => [
+                  formatter={(value, name) => [
                     name === 'revenue' ? `₱${Number(value).toLocaleString()}` : value,
                     name === 'revenue' ? 'Revenue' : 'Appointments'
                   ]} 
@@ -378,7 +378,7 @@ export function Dashboard({ portal }: { portal?: string }) {
                           <Cell key={`cell-${index}`} fill={entry.color} />
                         ))}
                       </Pie>
-                      <Tooltip formatter={(value: number) => [`${value}%`, 'Percentage']} />
+                      <Tooltip formatter={(value) => [`${value}%`, 'Percentage']} />
                     </PieChart>
                   </ResponsiveContainer>
                   <div className="space-y-2 mt-4">
