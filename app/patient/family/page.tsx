@@ -22,7 +22,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { formatTimeTo12h } from "@/lib/time-slots";
 import { Appointment } from "@/hooks/useAppointments";
-import { isCartAppointmentStatus } from "@/lib/appointment-status";
+import { getAppointmentStatusBadgeClassName } from "@/lib/status-colors";
 
 const FamilyPage = () => {
   const { user, isLoading: authLoading } = useAuth();
@@ -518,9 +518,7 @@ const FamilyPage = () => {
                     </div>
                     <Badge className={`
                       uppercase text-[9px] font-black
-                      ${apt.status === 'confirmed' || apt.status === 'scheduled' ? 'bg-green-100 text-green-700 border-green-200' : 
-                        isCartAppointmentStatus(apt.status) ? 'bg-orange-100 text-orange-700 border-orange-200' : 
-                        'bg-gray-100 text-gray-600 border-gray-200'}
+                      ${getAppointmentStatusBadgeClassName(apt.status)}
                     `}>
                       {apt.status}
                     </Badge>

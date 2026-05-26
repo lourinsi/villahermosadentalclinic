@@ -1,4 +1,10 @@
 import { apiUrl } from "@/lib/api";
+import {
+  DEFAULT_PAYMENT_STATUS_OPTIONS,
+  applyDefaultPaymentStatusColors,
+  getDefaultPaymentStatusColors,
+  normalizePaymentStatus,
+} from "@/lib/status-colors";
 import { useEffect, useState, useCallback } from 'react';
 
 export interface PaymentStatusOption {
@@ -28,15 +34,15 @@ export const usePaymentStatuses = (): UsePaymentStatusesReturn => {
   const [error, setError] = useState<Error | null>(null);
 
   const getPaymentStatusColors = useCallback((status: string): { bgColor: string; textColor: string } => {
-    const statusOption = statuses.find(s => s.value === status);
+    const normalizedStatus = normalizePaymentStatus(status);
+    const statusOption = statuses.find(s => normalizePaymentStatus(s.value) === normalizedStatus);
     if (statusOption?.bgColor && statusOption?.textColor) {
       return {
         bgColor: statusOption.bgColor,
         textColor: statusOption.textColor
       };
     }
-    // Fallback colors
-    return { bgColor: 'bg-gray-50', textColor: 'text-gray-700' };
+    return getDefaultPaymentStatusColors(normalizedStatus);
   }, [statuses]);
 
   const fetchStatuses = useCallback(async () => {
@@ -55,7 +61,7 @@ export const usePaymentStatuses = (): UsePaymentStatusesReturn => {
       const data = await response.json();
       
       if (data.success && Array.isArray(data.data)) {
-        setStatuses(data.data);
+        setStatuses(data.data.map(applyDefaultPaymentStatusColors));
         setError(null);
       } else {
         throw new Error('Invalid response format from server');
@@ -63,51 +69,7 @@ export const usePaymentStatuses = (): UsePaymentStatusesReturn => {
     } catch (err) {
       console.error('Error fetching payment statuses:', err);
       
-      // Fallback to frontend config
-      const fallbackStatuses: PaymentStatusOption[] = [
-        {
-          key: 1,
-          value: "paid",
-          label: "Paid",
-          description: "Payment completed in full",
-          bgColor: "bg-emerald-50",
-          textColor: "text-emerald-700"
-        },
-        {
-          key: 2,
-          value: "unpaid",
-          label: "Unpaid",
-          description: "Payment not yet made",
-          bgColor: "bg-gray-50",
-          textColor: "text-gray-700"
-        },
-        {
-          key: 3,
-          value: "half-paid",
-          label: "Half Paid",
-          description: "Partial payment received",
-          bgColor: "bg-orange-50",
-          textColor: "text-orange-700"
-        },
-        {
-          key: 4,
-          value: "overdue",
-          label: "Overdue",
-          description: "Payment past due date",
-          bgColor: "bg-red-50",
-          textColor: "text-red-700"
-        },
-        {
-          key: 5,
-          value: "pay-at-clinic",
-          label: "Pay at Clinic",
-          description: "Payment to be made at clinic",
-          bgColor: "bg-blue-50",
-          textColor: "text-blue-700"
-        },
-      ];
-      
-      setStatuses(fallbackStatuses);
+      setStatuses(DEFAULT_PAYMENT_STATUS_OPTIONS);
       setError(err instanceof Error ? err : new Error('Unknown error'));
     } finally {
       setIsLoading(false);

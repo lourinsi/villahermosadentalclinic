@@ -22,7 +22,7 @@ export interface Appointment {
   // Status is flexible to accept any value from the backend JSON configuration
   status: string;
   cancellationReason?: string; // Reason why appointment was cancelled
-  paymentStatus?: "paid" | "unpaid" | "overdue" | "half-paid";
+  paymentStatus?: "paid" | "unpaid" | "overdue" | "half-paid" | "pay-at-clinic" | "over-paid";
   balance?: number;
   totalPaid?: number;
   patientProfile?: string;

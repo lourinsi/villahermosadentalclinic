@@ -4,6 +4,11 @@ import {
   CART_APPOINTMENT_STATUS_LABEL,
   normalizeAppointmentStatus,
 } from "@/lib/appointment-status";
+import {
+  DEFAULT_APPOINTMENT_STATUS_OPTIONS,
+  applyDefaultAppointmentStatusColors,
+  getDefaultAppointmentStatusColors,
+} from "@/lib/status-colors";
 import { useEffect, useState, useCallback } from 'react';
 
 export interface AppointmentStatusOption {
@@ -31,16 +36,14 @@ const normalizeStatusOptions = (options: AppointmentStatusOption[]): Appointment
     const isCartStatus = value === CART_APPOINTMENT_STATUS;
     if (byValue.has(value)) continue;
 
-    byValue.set(value, {
+    byValue.set(value, applyDefaultAppointmentStatusColors({
       ...status,
       value,
       label: isCartStatus ? CART_APPOINTMENT_STATUS_LABEL : status.label,
       description: isCartStatus
         ? "In the patient's appointment cart awaiting checkout"
         : status.description,
-      bgColor: isCartStatus ? "bg-orange-100" : status.bgColor,
-      textColor: isCartStatus ? "text-orange-700" : status.textColor,
-    });
+    }));
   }
 
   return Array.from(byValue.values());
@@ -64,8 +67,7 @@ export const useAppointmentStatuses = (): UseAppointmentStatusesReturn => {
         textColor: statusOption.textColor
       };
     }
-    // Fallback colors
-    return { bgColor: 'bg-gray-100', textColor: 'text-gray-700' };
+    return getDefaultAppointmentStatusColors(normalizedStatus);
   }, [statuses]);
 
   const fetchStatuses = useCallback(async () => {
@@ -92,59 +94,7 @@ export const useAppointmentStatuses = (): UseAppointmentStatusesReturn => {
     } catch (err) {
       console.error('Error fetching appointment statuses:', err);
       
-      // Fallback to frontend config with colors
-      const fallbackStatuses: AppointmentStatusOption[] = [
-        {
-          key: 1,
-          value: "scheduled",
-          label: "Scheduled",
-          description: "Confirmed and scheduled",
-          bgColor: "bg-emerald-100",
-          textColor: "text-emerald-700"
-        },
-        {
-          key: 2,
-          value: CART_APPOINTMENT_STATUS,
-          label: CART_APPOINTMENT_STATUS_LABEL,
-          description: "In the patient's appointment cart awaiting checkout",
-          bgColor: "bg-orange-100",
-          textColor: "text-orange-700"
-        },
-        {
-          key: 3,
-          value: "reserved",
-          label: "Reserved",
-          description: "Reserved awaiting payment or clinic confirmation",
-          bgColor: "bg-amber-100",
-          textColor: "text-amber-700"
-        },
-        {
-          key: 4,
-          value: "cancelled",
-          label: "Cancelled",
-          description: "Appointment cancelled",
-          bgColor: "bg-red-100",
-          textColor: "text-red-700"
-        },
-        {
-          key: 5,
-          value: "completed",
-          label: "Completed",
-          description: "Appointment completed",
-          bgColor: "bg-blue-100",
-          textColor: "text-blue-700"
-        },
-        {
-          key: 6,
-          value: "tbd",
-          label: "TBD",
-          description: "Past appointment awaiting completion status",
-          bgColor: "bg-red-100",
-          textColor: "text-red-700"
-        },
-      ];
-      
-      setStatuses(normalizeStatusOptions(fallbackStatuses));
+      setStatuses(normalizeStatusOptions(DEFAULT_APPOINTMENT_STATUS_OPTIONS));
       setError(err instanceof Error ? err : new Error('Unknown error'));
     } finally {
       setIsLoading(false);

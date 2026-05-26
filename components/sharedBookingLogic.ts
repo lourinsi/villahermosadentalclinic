@@ -6,6 +6,13 @@ import {
   isCartAppointmentStatus,
   normalizeAppointmentStatus,
 } from "@/lib/appointment-status";
+import {
+  DEFAULT_APPOINTMENT_STATUS_OPTIONS as DEFAULT_APPOINTMENT_STATUS_COLOR_OPTIONS,
+  DEFAULT_PAYMENT_STATUS_OPTIONS as DEFAULT_PAYMENT_STATUS_COLOR_OPTIONS,
+  getDefaultAppointmentStatusColors,
+  getDefaultPaymentStatusColors,
+  normalizePaymentStatus,
+} from "@/lib/status-colors";
 
 export {
   CART_APPOINTMENT_STATUS,
@@ -111,22 +118,9 @@ export type BookingStatusOption = {
   textColor?: string;
 };
 
-export const DEFAULT_APPOINTMENT_STATUS_OPTIONS: BookingStatusOption[] = [
-  { key: 1, value: "scheduled", label: "Scheduled", description: "Confirmed and scheduled", bgColor: "bg-emerald-100", textColor: "text-emerald-700" },
-  { key: 2, value: CART_APPOINTMENT_STATUS, label: CART_APPOINTMENT_STATUS_LABEL, description: "In the patient's appointment cart awaiting checkout", bgColor: "bg-orange-100", textColor: "text-orange-700" },
-  { key: 3, value: "reserved", label: "Reserved", description: "Reserved awaiting payment or clinic confirmation", bgColor: "bg-amber-100", textColor: "text-amber-700" },
-  { key: 4, value: "cancelled", label: "Cancelled", description: "Appointment cancelled", bgColor: "bg-red-100", textColor: "text-red-700" },
-  { key: 5, value: "completed", label: "Completed", description: "Appointment completed", bgColor: "bg-blue-100", textColor: "text-blue-700" },
-  { key: 6, value: "tbd", label: "TBD", description: "Past appointment awaiting completion status", bgColor: "bg-red-100", textColor: "text-red-700" },
-];
+export const DEFAULT_APPOINTMENT_STATUS_OPTIONS: BookingStatusOption[] = DEFAULT_APPOINTMENT_STATUS_COLOR_OPTIONS;
 
-export const DEFAULT_PAYMENT_STATUS_OPTIONS: BookingStatusOption[] = [
-  { key: 1, value: "paid", label: "Paid", description: "Payment completed in full", bgColor: "bg-emerald-50", textColor: "text-emerald-700" },
-  { key: 2, value: "unpaid", label: "Unpaid", description: "Payment not yet made", bgColor: "bg-gray-50", textColor: "text-gray-700" },
-  { key: 3, value: "half-paid", label: "Half Paid", description: "Partial payment received", bgColor: "bg-orange-50", textColor: "text-orange-700" },
-  { key: 4, value: "overdue", label: "Overdue", description: "Payment past due date", bgColor: "bg-red-50", textColor: "text-red-700" },
-  { key: 5, value: "pay-at-clinic", label: "Pay at Clinic", description: "Payment to be made at clinic", bgColor: "bg-blue-50", textColor: "text-blue-700" },
-];
+export const DEFAULT_PAYMENT_STATUS_OPTIONS: BookingStatusOption[] = DEFAULT_PAYMENT_STATUS_COLOR_OPTIONS;
 
 export const ALLOWED_BOOKING_DURATIONS = [30, 60, 90, 120] as const;
 export type BookingDuration = typeof ALLOWED_BOOKING_DURATIONS[number];
@@ -317,14 +311,16 @@ export function getBookingStatusLabel<T extends { value: string; label: string }
 const buildCurrentStatusOption = <T extends BookingStatusOption>(
   value: string,
   label: string,
-  description: string
+  description: string,
+  statusType: "appointment" | "payment" = "appointment"
 ): T => ({
   key: 0,
   value,
   label,
   description,
-  bgColor: "bg-gray-100",
-  textColor: "text-gray-700",
+  ...(statusType === "payment"
+    ? getDefaultPaymentStatusColors(value)
+    : getDefaultAppointmentStatusColors(value)),
 }) as T;
 
 export function getBookingAppointmentStatusConfig<T extends BookingStatusOption>({
@@ -361,7 +357,8 @@ export function getBookingAppointmentStatusConfig<T extends BookingStatusOption>
           buildCurrentStatusOption<T>(
             currentAppointmentStatusValue,
             getBookingStatusLabel(currentAppointmentStatusValue, selectableAppointmentStatusOptions),
-            "Current appointment status"
+            "Current appointment status",
+            "appointment"
           ),
           ...selectableAppointmentStatusOptions,
         ]
@@ -384,22 +381,23 @@ export function getBookingPaymentStatusConfig<T extends BookingStatusOption>({
   statusOptions: T[];
   fallbackStatusOptions?: T[];
 }) {
-  const currentPaymentStatusValue = paymentStatus || existingStatus || "unpaid";
+  const currentPaymentStatusValue = normalizePaymentStatus(paymentStatus || existingStatus || "unpaid");
   const fetchedPaymentStatusOptions = statusOptions.length > 0 ? statusOptions : fallbackStatusOptions;
   const basePaymentStatusOptions = [
     ...fetchedPaymentStatusOptions,
     ...fallbackStatusOptions.filter(
-      (fallbackStatus) => !fetchedPaymentStatusOptions.some((status) => status.value === fallbackStatus.value)
+      (fallbackStatus) => !fetchedPaymentStatusOptions.some((status) => normalizePaymentStatus(status.value) === fallbackStatus.value)
     ),
   ];
   const paymentStatusOptions =
     currentPaymentStatusValue &&
-    !basePaymentStatusOptions.some((status) => status.value === currentPaymentStatusValue)
+    !basePaymentStatusOptions.some((status) => normalizePaymentStatus(status.value) === currentPaymentStatusValue)
       ? [
           buildCurrentStatusOption<T>(
             currentPaymentStatusValue,
             getBookingStatusLabel(currentPaymentStatusValue, basePaymentStatusOptions),
-            "Current payment status"
+            "Current payment status",
+            "payment"
           ),
           ...basePaymentStatusOptions,
         ]

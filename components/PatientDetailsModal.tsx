@@ -9,6 +9,7 @@ import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { usePaymentModal } from "@/hooks/usePaymentModal";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
@@ -70,6 +71,11 @@ import { parseBackendDateToLocal } from "../lib/utils";
 import { getAuthHeaders } from "@/lib/auth-headers";
 import { PastAppointmentButton } from "./PastAppointmentButton";
 import AppointmentHistoryView from "./AppointmentHistoryView";
+import {
+  getAppointmentStatusOptionWithColors,
+  getPaymentStatusOptionWithColors,
+  normalizePaymentStatus,
+} from "@/lib/status-colors";
 
 export interface Patient {
   id?: string;
@@ -84,6 +90,7 @@ export interface Patient {
   lastVisit?: string;
   nextAppointment?: string | null;
   status?: string;
+  overdueAppointmentCount?: number;
   insurance?: string;
   balance?: number;
   createdAt?: string;
@@ -133,6 +140,26 @@ const getInitials = (name?: string) => {
     .toUpperCase();
 };
 
+const getOverdueAppointmentCount = (appointments: Appointment[]) =>
+  appointments.filter((apt: Appointment) => {
+    if ((apt as any).deleted) return false;
+    return String((apt as any).paymentStatus || "").toLowerCase() === "overdue";
+  }).length;
+
+const getPatientStatusTooltip = (status: string, overdueAppointmentCount?: number | null) => {
+  switch (status.toLowerCase()) {
+    case "overdue": {
+      if (typeof overdueAppointmentCount !== "number") return null;
+      const count = Math.max(0, overdueAppointmentCount);
+      return `You have ${count} overdue appointment${count === 1 ? "" : "s"}.`;
+    }
+    case "inactive":
+      return "It's inactive because you haven't had any appointment for over a year.";
+    default:
+      return null;
+  }
+};
+
 export type PatientDetailsRef = {
   save: () => Promise<boolean>;
   changedFields: Record<string, { old: any; new: any }>;
@@ -177,6 +204,11 @@ export function PatientDetailsModal({
   const { refreshTrigger } = useAppointmentModal();
   const displayedBalance = serverPatient?.balance ?? patient?.balance ?? 0;
   const displayedStatus = serverPatient?.status ?? patient?.status ?? "active";
+  const [modalOverdueAppointmentCount, setModalOverdueAppointmentCount] = useState<number | null>(patient?.overdueAppointmentCount ?? null);
+  const displayedOverdueAppointmentCount =
+    modalOverdueAppointmentCount ??
+    serverPatient?.overdueAppointmentCount ??
+    patient?.overdueAppointmentCount;
 
   const handleSave = async () => {
     const refObject = detailsRef && typeof detailsRef === "object" && "current" in detailsRef ? detailsRef : null;
@@ -218,18 +250,91 @@ export function PatientDetailsModal({
     return () => { mounted = false; };
   }, [open, patient?.id, refreshTrigger]);
 
-  const getStatusBadge = (status: string | undefined) => {
+  useEffect(() => {
+    let mounted = true;
+
+    const loadOverdueAppointmentCount = async () => {
+      if (!open) {
+        setModalOverdueAppointmentCount(null);
+        return;
+      }
+
+      setModalOverdueAppointmentCount(patient?.overdueAppointmentCount ?? null);
+
+      if (!patient?.id) return;
+
+      try {
+        const patientName = patient.name || [patient.firstName, patient.lastName].filter(Boolean).join(" ");
+        const endpoint = doctorFilter
+          ? `/api/appointments?doctor=${encodeURIComponent(doctorFilter)}`
+          : `/api/appointments?patientId=${encodeURIComponent(String(patient.id))}`;
+        const res = await fetch(apiUrl(endpoint), { credentials: 'include' });
+        const json = await res.json();
+
+        if (!mounted) return;
+
+        if (json && json.success && Array.isArray(json.data)) {
+          const patientScopedAppointments = doctorFilter
+            ? json.data.filter((apt: Appointment) =>
+                String(apt.patientId || "") === String(patient.id) ||
+                apt.patientName === patientName
+              )
+            : json.data;
+
+          setModalOverdueAppointmentCount(getOverdueAppointmentCount(patientScopedAppointments));
+        }
+      } catch (err) {
+        console.warn('Failed to fetch overdue appointment count:', err);
+        if (mounted) setModalOverdueAppointmentCount(patient?.overdueAppointmentCount ?? null);
+      }
+    };
+
+    loadOverdueAppointmentCount();
+    return () => { mounted = false; };
+  }, [
+    open,
+    patient?.id,
+    patient?.name,
+    patient?.firstName,
+    patient?.lastName,
+    patient?.overdueAppointmentCount,
+    doctorFilter,
+    refreshTrigger,
+  ]);
+
+  const getStatusBadge = (status: string | undefined, overdueAppointmentCount?: number | null) => {
     const s = status?.toLowerCase() || "active";
+    let badge: React.ReactNode;
+
     switch (s) {
       case "active":
-        return <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-50 shadow-none px-2.5 py-0.5">Active</Badge>;
+        badge = <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-50 shadow-none px-2.5 py-0.5">Active</Badge>;
+        break;
       case "overdue":
-        return <Badge className="bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-50 shadow-none px-2.5 py-0.5">Overdue</Badge>;
+        badge = <Badge className="bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-50 shadow-none px-2.5 py-0.5">Overdue</Badge>;
+        break;
       case "inactive":
-        return <Badge className="bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-50 shadow-none px-2.5 py-0.5">Inactive</Badge>;
+        badge = <Badge className="bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-50 shadow-none px-2.5 py-0.5">Inactive</Badge>;
+        break;
       default:
-        return <Badge variant="outline" className="capitalize px-2.5 py-0.5">{s}</Badge>;
+        badge = <Badge variant="outline" className="capitalize px-2.5 py-0.5">{s}</Badge>;
     }
+
+    const tooltip = getPatientStatusTooltip(s, overdueAppointmentCount);
+    if (!tooltip) return badge;
+
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex cursor-help" title={tooltip} aria-label={tooltip} tabIndex={0}>
+            {badge}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={6} className="max-w-[260px] text-center">
+          {tooltip}
+        </TooltipContent>
+      </Tooltip>
+    );
   };
 
   return (
@@ -257,7 +362,7 @@ export function PatientDetailsModal({
                   <DialogTitle className="text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl">
                     {patientDisplayName}
                   </DialogTitle>
-                  {getStatusBadge(serverPatient?.status ?? patient?.status)}
+                  {getStatusBadge(serverPatient?.status ?? patient?.status, displayedOverdueAppointmentCount)}
                 </div>
                 <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 text-sm font-semibold text-slate-500">
                   {patient?.email ? (
@@ -319,7 +424,7 @@ export function PatientDetailsModal({
               <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(185px,1fr))]">
                 <div className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
                   <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Account Status</span>
-                  <div className="flex items-center pt-0.5">{getStatusBadge(displayedStatus)}</div>
+                  <div className="flex items-center pt-0.5">{getStatusBadge(displayedStatus, displayedOverdueAppointmentCount)}</div>
                 </div>
                 <div className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
                   <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Outstanding Balance</span>
@@ -1090,7 +1195,12 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     const totalPaid = hasTransactionBalance
       ? Math.max(0, price - transactionNewBalance)
       : Number(snapshotBase.totalPaid ?? 0);
-    const balance = hasTransactionBalance ? transactionNewBalance : Math.max(0, price - totalPaid);
+    const snapshotBalance = Number(snapshotBase.balance);
+    const balance = hasTransactionBalance
+      ? transactionNewBalance
+      : Number.isFinite(snapshotBalance)
+        ? snapshotBalance
+        : Math.max(0, price - totalPaid);
     const logDate = transactionRow?.changedAt || transactionRow?.createdAt || transaction?.date || snapshotBase.updatedAt || snapshotBase.createdAt || new Date().toISOString();
     const patientDisplayName =
       snapshotBase.patientName ||
@@ -1158,7 +1268,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       amount: transaction?.amount,
       paymentAmount: transaction?.amount,
       paymentMethod: transaction?.method,
-      paymentStatus: transaction?.status || appointment.paymentStatus,
+      paymentStatus: snapshotBase.paymentStatus || appointment.paymentStatus,
       transactionId: transaction?.transactionId,
       previousBalance: transactionRow?.previousBalance ?? snapshotBase.previousBalance,
       newBalance: transactionRow?.newBalance ?? snapshotBase.newBalance,
@@ -1300,48 +1410,27 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   };
 
   const normalizePaymentStatusValue = (value?: string | null) => {
-    const v = String(value || '').toLowerCase().trim();
-    if (!v) return '';
-    if (v === 'partial' || v === 'partially-paid' || v === 'partial-paid') return 'half-paid';
-    if (v === 'overpaid' || v === 'over-paid') return 'over-paid';
-    if (v === 'halfpaid' || v === 'half_paid') return 'half-paid';
-    return v;
+    return normalizePaymentStatus(value);
   };
 
   const getAppointmentStatusBadge = (status: string) => {
-    const k = String(status || "scheduled").toLowerCase().trim();
-    const statusOption = APPOINTMENT_STATUSES.find(s => s.value.toLowerCase() === k);
+    const statusOption = getAppointmentStatusOptionWithColors(status || "scheduled", APPOINTMENT_STATUSES);
 
-    if (statusOption) {
-      return (
-        <Badge className={`${statusOption.bgColor} ${statusOption.textColor} border-none hover:opacity-80 font-medium capitalize`}>
-          {statusOption.label}
-        </Badge>
-      );
-    }
-
-    return <Badge variant="outline" className="font-medium capitalize">{status}</Badge>;
+    return (
+      <Badge className={`${statusOption.bgColor} ${statusOption.textColor} border-none hover:opacity-80 font-medium capitalize`}>
+        {statusOption.label || status}
+      </Badge>
+    );
   };
 
   const getPaymentStatusBadge = (status: string) => {
-    const k = String(status || "unpaid").toLowerCase().trim();
-    const statusOption = PAYMENT_STATUSES.find(s => s.value.toLowerCase() === k);
+    const statusOption = getPaymentStatusOptionWithColors(status || "unpaid", PAYMENT_STATUSES);
 
-    if (statusOption) {
-      return (
-        <Badge className={`${statusOption.bgColor} ${statusOption.textColor} border-none hover:opacity-80 font-medium capitalize`}>
-          {statusOption.label}
-        </Badge>
-      );
-    }
-
-    // Fallback logic for statuses not in PAYMENT_STATUSES (like over-paid)
-    switch (k) {
-      case 'over-paid':
-        return <Badge className="bg-blue-100 text-blue-800 border-none font-medium">Over-paid</Badge>;
-      default:
-        return <Badge variant="outline" className="font-medium capitalize">{status || "Unpaid"}</Badge>;
-    }
+    return (
+      <Badge className={`${statusOption.bgColor} ${statusOption.textColor} border-none hover:opacity-80 font-medium capitalize`}>
+        {statusOption.label || status || "Unpaid"}
+      </Badge>
+    );
   };
 
   useEffect(() => {
@@ -1598,9 +1687,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
         const mergedHistory = mapped.map((apt) => {
           const transactions = paymentsByAppointment.get(apt.id) || [];
-          const totalPaid = transactions.length > 0
-            ? transactions.reduce((sum, txn) => sum + Number(txn.amount || 0), 0)
-            : Number(apt.totalPaid || 0);
+          const totalPaid = Number(apt.totalPaid || 0);
 
           const price = Number(apt.price || 0);
           let computedPaymentStatus: Appointment["paymentStatus"] | "over-paid";
@@ -1625,9 +1712,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           const snapshotTxn = transactions.find((t) => (t as any).appointmentSnapshot && (t as any).appointmentSnapshot.paymentStatus);
           const snapshotStatus = snapshotTxn ? normalizePaymentStatusValue((snapshotTxn as any).appointmentSnapshot.paymentStatus) : '';
 
-          // Prefer stored appointment.paymentStatus (server) -> snapshot status from payment logs -> computed status
+          // The appointment row should reflect the latest appointment record.
+          // Payment log snapshots are only history rows and must not override it.
           const storedStatus = normalizePaymentStatusValue((apt as any).paymentStatus);
-          const finalPaymentStatus = snapshotStatus || storedStatus || (computedPaymentStatus as string);
+          const finalPaymentStatus = storedStatus || snapshotStatus || (computedPaymentStatus as string);
 
           return {
             ...apt,
@@ -2471,6 +2559,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                         .sort(comparePaymentTransactionsDesc);
                       const isExpanded = expandedTransactions.has(appointment.id);
                       const visibleTransactions = isExpanded ? sortedTransactions : sortedTransactions.slice(0, 1);
+                      const appointmentBalance = Number((appointment as any).balance);
+                      const displayedBalance = Number.isFinite(appointmentBalance)
+                        ? appointmentBalance
+                        : Math.max(0, Number(appointment.price || 0) - Number(appointment.totalPaid || 0));
 
                       // Resolve doctor image for this appointment entry (snapshot fields first, then staff list)
                       const resolveDoctorImageFor = (apt: any) => {
@@ -2519,9 +2611,9 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                               <div>
                                 <div className="text-sm font-medium">Total: ${appointment.price}</div>
                                 <div className="text-sm text-muted-foreground">Paid: ${appointment.totalPaid}</div>
-                                {(appointment.price || 0) - (appointment.totalPaid || 0) > 0 && (
+                                {displayedBalance > 0 && (
                                   <div className="text-sm font-medium text-red-600">
-                                    Balance: ${(appointment.price || 0) - (appointment.totalPaid || 0)}
+                                    Balance: ${displayedBalance}
                                   </div>
                                 )}
                               </div>

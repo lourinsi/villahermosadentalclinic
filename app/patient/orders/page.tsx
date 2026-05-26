@@ -28,6 +28,11 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { DateRange } from "react-day-picker";
 import { cn } from "@/lib/utils";
+import {
+    formatPaymentStatusLabel,
+    getAppointmentStatusBadgeClassName,
+    getPaymentStatusBadgeClassName,
+} from "@/lib/status-colors";
 
 const OrdersContent = () => {
     const searchParams = useSearchParams();
@@ -421,29 +426,15 @@ const OrdersContent = () => {
                                     <div className="flex flex-col items-end gap-2">
                                         <Badge 
                                             variant="secondary"
-                                            className={`font-medium ${
-                                                appointment.status === 'completed' ? 'bg-emerald-100 text-emerald-700' :
-                                                appointment.status === 'cancelled' ? 'bg-red-100 text-red-700' :
-                                                appointment.status === 'scheduled' ? 'bg-blue-100 text-blue-700' :
-                                                appointment.status === 'reserved' ? 'bg-amber-100 text-amber-700' :
-                                                'bg-gray-100 text-gray-700'
-                                            }`}
+                                            className={`font-medium ${getAppointmentStatusBadgeClassName(appointment.status, APPOINTMENT_STATUSES)}`}
                                         >
                                             {displayStatus(appointment.status)}
                                         </Badge>
                                         {appointment.paymentStatus && (
                                             <Badge 
-                                                className={`font-medium ${
-                                                    appointment.paymentStatus === 'paid' 
-                                                        ? 'bg-green-100 text-green-700' 
-                                                        : appointment.paymentStatus === 'half-paid'
-                                                        ? 'bg-orange-100 text-orange-700'
-                                                        : appointment.paymentStatus === 'overdue'
-                                                        ? 'bg-red-100 text-red-700'
-                                                        : 'bg-gray-100 text-gray-700'
-                                }`}
+                                                className={`font-medium ${getPaymentStatusBadgeClassName(appointment.paymentStatus)}`}
                                             >
-                                                {appointment.paymentStatus.toUpperCase()}
+                                                {formatPaymentStatusLabel(appointment.paymentStatus).toUpperCase()}
                                             </Badge>
                                         )}
                                     </div>

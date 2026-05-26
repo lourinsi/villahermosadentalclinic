@@ -64,6 +64,11 @@ import PastAppointmentButton from "./PastAppointmentButton";
 import AppointmentHistoryView from "./AppointmentHistoryView";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
 import { getAuthHeaders } from "@/lib/auth-headers";
+import {
+  getAppointmentStatusOptionWithColors,
+  getPaymentStatusOptionWithColors,
+  normalizePaymentStatus,
+} from "@/lib/status-colors";
 
 interface RequestsViewProps {
   doctorFilter?: string;
@@ -234,6 +239,10 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     return normalizeAppointmentStatus(s);
   };
 
+  const canonicalPaymentStatus = (s?: string) => {
+    return normalizePaymentStatus(s);
+  };
+
   const isPatientCartStatus = (status?: string) => {
     return isCartAppointmentStatus(status);
   };
@@ -330,8 +339,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
           bVal = canonicalStatus(b.status);
           break;
         case "payment":
-          aVal = canonicalStatus(a.paymentStatus || "unpaid");
-          bVal = canonicalStatus(b.paymentStatus || "unpaid");
+          aVal = canonicalPaymentStatus(a.paymentStatus || "unpaid");
+          bVal = canonicalPaymentStatus(b.paymentStatus || "unpaid");
           break;
         case "booked":
           aVal = a.createdAt ? new Date(a.createdAt).getTime() : Number.MIN_VALUE;
@@ -780,33 +789,23 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   };
 
   const getStatusBadge = (status: string) => {
-    const k = canonicalStatus(status);
-    const statusOption = APPOINTMENT_STATUSES.find(s => canonicalStatus(s.value) === k);
-    
-    if (statusOption) {
-      return (
-        <Badge className={`${statusOption.bgColor} ${statusOption.textColor} border-none hover:opacity-80 font-medium capitalize`}>
-          {statusOption.label}
-        </Badge>
-      );
-    }
-    
-    return <Badge variant="outline" className="font-medium capitalize">{formatAppointmentStatusLabel(status)}</Badge>;
+    const statusOption = getAppointmentStatusOptionWithColors(status, APPOINTMENT_STATUSES);
+
+    return (
+      <Badge className={`${statusOption.bgColor} ${statusOption.textColor} border-none hover:opacity-80 font-medium capitalize`}>
+        {statusOption.label || formatAppointmentStatusLabel(status)}
+      </Badge>
+    );
   };
 
   const getPaymentStatusBadge = (paymentStatus: string | undefined) => {
-    const k = canonicalStatus(paymentStatus || "unpaid");
-    const statusOption = PAYMENT_STATUSES.find(s => canonicalStatus(s.value) === k);
-    
-    if (statusOption) {
-      return (
-        <Badge className={`${statusOption.bgColor} ${statusOption.textColor} border-none hover:opacity-80 font-medium capitalize`}>
-          {statusOption.label}
-        </Badge>
-      );
-    }
-    
-    return <Badge variant="outline" className="font-medium capitalize">{paymentStatus || "Unpaid"}</Badge>;
+    const statusOption = getPaymentStatusOptionWithColors(paymentStatus || "unpaid", PAYMENT_STATUSES);
+
+    return (
+      <Badge className={`${statusOption.bgColor} ${statusOption.textColor} border-none hover:opacity-80 font-medium capitalize`}>
+        {statusOption.label || paymentStatus || "Unpaid"}
+      </Badge>
+    );
   };
 
   const handlePendingSort = (column: string) => {

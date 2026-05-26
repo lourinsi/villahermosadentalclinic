@@ -5,6 +5,7 @@ import { Button } from "./ui/button";
 import { Calendar } from "lucide-react";
 import { Appointment } from "../hooks/useAppointments";
 import { getAppointmentTypeName } from "../lib/appointment-types";
+import { getDefaultAppointmentStatusColors } from "@/lib/status-colors";
 
 interface RecentScheduleProps {
   portal: "admin" | "doctor" | "patient";
@@ -116,7 +117,7 @@ export function RecentSchedule({
                         )}
                         <span>{getAppointmentTypeName(appointment.type, appointment.customType)}</span>
                         <span className="h-1 w-1 rounded-full bg-gray-200"></span>
-                        <span className={appointment.status === 'scheduled' ? 'text-emerald-500' : 'text-blue-500'}>
+                        <span className={getDefaultAppointmentStatusColors(appointment.status).textColor}>
                           {appointment.status}
                         </span>
                       </div>

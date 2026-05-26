@@ -40,6 +40,12 @@ import ViewMode from "./viewMode";
 import { useRouter, useSearchParams } from 'next/navigation';
 import { isReservedAppointmentStatus, normalizeAppointmentStatus } from "@/lib/appointment-status";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
+import {
+  getAppointmentCalendarStatusColors,
+  getPaymentStatusBadgeClassName,
+  getStatusBorderColorClass,
+  getStatusSoftBgColorClass,
+} from "@/lib/status-colors";
 
 // Map numeric keys to readable UI labels using APPOINTMENT_STATUSES
 // This will be moved inside the component since we need the hook
@@ -394,20 +400,7 @@ export function CalendarView({
   };
 
   const getColorForType = (type: string) => {
-    // Map string status to colors using APPOINTMENT_STATUSES
-    const status = APPOINTMENT_STATUSES.find(s => normalizeAppointmentStatus(s.value) === normalizeAppointmentStatus(type));
-    
-    // Return colors from status object if available, with fallback
-    if (status?.bgColor && status?.textColor) {
-      return {
-        bg: status.bgColor.replace('100', '50'),    // Convert bg-emerald-100 to bg-emerald-50
-        text: status.textColor,
-        border: status.bgColor.replace('100', '200').replace('bg-', 'border-')  // bg-emerald-100 -> border-emerald-200
-      };
-    }
-    
-    // Fallback colors
-    return { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200" };
+    return getAppointmentCalendarStatusColors(type, APPOINTMENT_STATUSES);
   };
 
   // NOTE: Convert time string to minutes since midnight for easier comparison
@@ -615,7 +608,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
                             <div className="font-semibold text-sm truncate pr-2 flex items-center gap-2">
                               {showPatient ? appointment.patientName : `Dr. ${appointment.doctor}`}
                               {appointment.paymentStatus === 'unpaid' && (
-                                <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-[8px] h-3 px-1 uppercase font-black">Unpaid</Badge>
+                                <Badge className={`${getPaymentStatusBadgeClassName(appointment.paymentStatus)} text-[8px] h-3 px-1 uppercase font-black`}>Unpaid</Badge>
                               )}
                             </div>
                             <div className="text-xs opacity-90 truncate">
@@ -1133,8 +1126,8 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
             </CardTitle>
             <div className="flex items-center gap-4 flex-wrap">
               {APPOINTMENT_STATUSES.map((status) => {
-                const bgColor = status.bgColor?.replace('100', '50') || 'bg-gray-50';
-                const borderColor = status.bgColor?.replace('100', '200').replace('bg-', 'border-') || 'border-gray-200';
+                const bgColor = getStatusSoftBgColorClass(status.bgColor);
+                const borderColor = getStatusBorderColorClass(status.bgColor);
                 return (
                   <div key={status.value} className="flex items-center gap-1.5">
                     <div className={`w-3 h-3 rounded-full ${bgColor} border ${borderColor}`} />
