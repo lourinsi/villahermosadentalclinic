@@ -76,6 +76,10 @@ import {
   getPaymentStatusOptionWithColors,
   normalizePaymentStatus,
 } from "@/lib/status-colors";
+import {
+  buildPatientAppointmentSummary,
+  getPatientAppointments,
+} from "@/lib/patient-aggregates";
 
 export interface Patient {
   id?: string;
@@ -140,12 +144,6 @@ const getInitials = (name?: string) => {
     .toUpperCase();
 };
 
-const getOverdueAppointmentCount = (appointments: Appointment[]) =>
-  appointments.filter((apt: Appointment) => {
-    if ((apt as any).deleted) return false;
-    return String((apt as any).paymentStatus || "").toLowerCase() === "overdue";
-  }).length;
-
 const getPatientStatusTooltip = (status: string, overdueAppointmentCount?: number | null) => {
   switch (status.toLowerCase()) {
     case "overdue": {
@@ -202,10 +200,13 @@ export function PatientDetailsModal({
     .toUpperCase() || "P";
 
   const { refreshTrigger } = useAppointmentModal();
-  const displayedBalance = serverPatient?.balance ?? patient?.balance ?? 0;
-  const displayedStatus = serverPatient?.status ?? patient?.status ?? "active";
+  const [modalAppointmentSummary, setModalAppointmentSummary] =
+    useState<ReturnType<typeof buildPatientAppointmentSummary> | null>(null);
+  const displayedBalance = modalAppointmentSummary?.balance ?? serverPatient?.balance ?? patient?.balance ?? 0;
+  const displayedStatus = modalAppointmentSummary?.status ?? serverPatient?.status ?? patient?.status ?? "active";
   const [modalOverdueAppointmentCount, setModalOverdueAppointmentCount] = useState<number | null>(patient?.overdueAppointmentCount ?? null);
   const displayedOverdueAppointmentCount =
+    modalAppointmentSummary?.overdueAppointmentCount ??
     modalOverdueAppointmentCount ??
     serverPatient?.overdueAppointmentCount ??
     patient?.overdueAppointmentCount;
@@ -235,7 +236,10 @@ export function PatientDetailsModal({
       }
 
       try {
-        const res = await fetch(apiUrl(`/api/patients/${encodeURIComponent(String(patient.id))}`), { credentials: 'include' });
+        const res = await fetch(apiUrl(`/api/patients/${encodeURIComponent(String(patient.id))}`), {
+          headers: getAuthHeaders(),
+          credentials: 'include',
+        });
         const json = await res.json();
         if (mounted && json && json.success && json.data) {
           setServerPatient(json.data as Patient);
@@ -256,6 +260,7 @@ export function PatientDetailsModal({
     const loadOverdueAppointmentCount = async () => {
       if (!open) {
         setModalOverdueAppointmentCount(null);
+        setModalAppointmentSummary(null);
         return;
       }
 
@@ -268,7 +273,10 @@ export function PatientDetailsModal({
         const endpoint = doctorFilter
           ? `/api/appointments?doctor=${encodeURIComponent(doctorFilter)}`
           : `/api/appointments?patientId=${encodeURIComponent(String(patient.id))}`;
-        const res = await fetch(apiUrl(endpoint), { credentials: 'include' });
+        const res = await fetch(apiUrl(endpoint), {
+          headers: getAuthHeaders(),
+          credentials: 'include',
+        });
         const json = await res.json();
 
         if (!mounted) return;
@@ -281,7 +289,12 @@ export function PatientDetailsModal({
               )
             : json.data;
 
-          setModalOverdueAppointmentCount(getOverdueAppointmentCount(patientScopedAppointments));
+          const summary = buildPatientAppointmentSummary(
+            { ...patient, ...(serverPatient || {}) },
+            patientScopedAppointments
+          );
+          setModalAppointmentSummary(summary);
+          setModalOverdueAppointmentCount(summary.overdueAppointmentCount);
         }
       } catch (err) {
         console.warn('Failed to fetch overdue appointment count:', err);
@@ -298,6 +311,7 @@ export function PatientDetailsModal({
     patient?.firstName,
     patient?.lastName,
     patient?.overdueAppointmentCount,
+    serverPatient,
     doctorFilter,
     refreshTrigger,
   ]);
@@ -355,14 +369,14 @@ export function PatientDetailsModal({
                     {patientInitials}
                   </AvatarFallback>
                 </Avatar>
-                <div className={`absolute bottom-0 right-0 h-5 w-5 rounded-full border-2 border-white shadow-sm ${(serverPatient?.status ?? patient?.status) === 'inactive' ? 'bg-slate-300' : 'bg-emerald-500'}`} />
+                <div className={`absolute bottom-0 right-0 h-5 w-5 rounded-full border-2 border-white shadow-sm ${displayedStatus === 'inactive' ? 'bg-slate-300' : 'bg-emerald-500'}`} />
               </div>
               <div className="min-w-0 space-y-1.5">
                 <div className="flex flex-wrap items-center gap-3">
                   <DialogTitle className="text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl">
                     {patientDisplayName}
                   </DialogTitle>
-                  {getStatusBadge(serverPatient?.status ?? patient?.status, displayedOverdueAppointmentCount)}
+                  {getStatusBadge(displayedStatus, displayedOverdueAppointmentCount)}
                 </div>
                 <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 text-sm font-semibold text-slate-500">
                   {patient?.email ? (
@@ -821,6 +835,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     dentalCharts: patient.dentalCharts || []
   });
 
+  const [loadedPatient, setLoadedPatient] = useState<Patient>(patient);
   const [isSaving, setIsSaving] = useState(false);
   const [isPreparingPatientPhoto, setIsPreparingPatientPhoto] = useState(false);
   const [patientAppointments, setPatientAppointments] = useState<Appointment[]>([]);
@@ -1442,7 +1457,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
 
         // 1. If this patient has a parentId, fetch the parent
         if (patient.parentId && patient.parentId !== patient.id) {
-          const parentRes = await fetch(apiUrl(`/api/patients/${patient.parentId}`), { credentials: 'include' });
+          const parentRes = await fetch(apiUrl(`/api/patients/${encodeURIComponent(patient.parentId)}`), {
+            headers: getAuthHeaders(),
+            credentials: 'include',
+          });
           const parentJson = await parentRes.json();
           if (parentJson.success) {
             setParentPatient(parentJson.data);
@@ -1452,7 +1470,10 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         }
 
         // 2. Fetch all dependents (patients where parentId is this patient's id)
-        const familyRes = await fetch(apiUrl(`/api/patients?parentId=${patient.id}`), { credentials: 'include' });
+        const familyRes = await fetch(apiUrl(`/api/patients?parentId=${encodeURIComponent(patient.id)}`), {
+          headers: getAuthHeaders(),
+          credentials: 'include',
+        });
         const familyJson = await familyRes.json();
         if (familyJson.success) {
           // Filter out the current patient from the family list
@@ -1519,14 +1540,19 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         };
         setFormData(initialData);
         setOriginalLoadedData(initialData);
+        setLoadedPatient(patient);
         return;
       }
 
       try {
-        const res = await fetch(apiUrl(`/api/patients/${patient.id}`), { credentials: 'include' });
+        const res = await fetch(apiUrl(`/api/patients/${encodeURIComponent(patient.id)}`), {
+          headers: getAuthHeaders(),
+          credentials: 'include',
+        });
         const json = await res.json();
         if (json?.success && json.data) {
           const p = json.data;
+          setLoadedPatient(p);
           const loadedData = {
             firstName: p.firstName || p.name?.split(' ')[0] || '',
             lastName: p.lastName || p.name?.split(' ').slice(1).join(' ') || '',
@@ -1558,6 +1584,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         }
       } catch (err) {
         console.error("Failed to load full patient data:", err);
+        setLoadedPatient(patient);
       }
     };
 
@@ -1573,14 +1600,14 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           const patientName = patient.name || `${patient.firstName} ${patient.lastName}`;
           const response = await fetch(
             apiUrl(`/api/appointments?doctor=${encodeURIComponent(doctorFilter)}`),
-            { credentials: 'include' }
+            { headers: getAuthHeaders(), credentials: 'include' }
           );
           const result = await response.json();
           if (result.success && result.data) {
             // Filter to only this patient's appointments
-            const filtered = result.data.filter((apt: Appointment) =>
-              apt.patientId === patient.id ||
-              apt.patientName === patientName
+            const filtered = getPatientAppointments<Appointment>(
+              result.data as Appointment[],
+              { ...patient, name: patientName }
             ).sort((a: Appointment, b: Appointment) =>
               parseBackendDateToLocal(b.date).getTime() - parseBackendDateToLocal(a.date).getTime()
             );
@@ -1608,7 +1635,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         try {
           const response = await fetch(
             apiUrl(`/api/appointments?patientId=${encodeURIComponent(patient.id)}`),
-            { credentials: 'include' }
+            { headers: getAuthHeaders(), credentials: 'include' }
           );
           const result = await response.json();
           if (result.success && Array.isArray(result.data)) {
@@ -1628,6 +1655,28 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       fetchPatientAppointments();
     }
   }, [appointments, patient, doctorFilter]);
+
+  useEffect(() => {
+    const summary = buildPatientAppointmentSummary(loadedPatient, patientAppointments);
+
+    setFormData((prev) => {
+      if (prev.balance === summary.balance && prev.status === summary.status) return prev;
+      return {
+        ...prev,
+        balance: summary.balance,
+        status: summary.status,
+      };
+    });
+
+    setOriginalLoadedData((prev) => {
+      if (prev.balance === summary.balance && prev.status === summary.status) return prev;
+      return {
+        ...prev,
+        balance: summary.balance,
+        status: summary.status,
+      };
+    });
+  }, [loadedPatient, patientAppointments]);
 
     // Map patientAppointments into local appointment history shape used for payments
     useEffect(() => {
@@ -2963,7 +3012,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         onOpenAppointment={onOpenBookingModal ? handleOpenSnapshotAppointment : undefined}
         isAppointmentOpen={isSelectedSnapshotAppointmentOpen}
         isHistorical={selectedSnapshotIsHistorical}
-        openedFromBookingModal={true}
+        openedFromBookingModal={false}
       />
       </div>
     </div>

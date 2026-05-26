@@ -133,6 +133,10 @@ export function useNotificationAppointmentSnapshot(appointments: AppointmentSnap
         throw new Error("No appointment snapshot is available for this notification");
       }
 
+      if (isHistorical && !snapshot._isHistorical) {
+        snapshot = { ...snapshot, _isHistorical: true };
+      }
+
       if (!getAppointmentIdFromSnapshot(snapshot)) {
         snapshot = { ...snapshot, id: appointmentId };
       }

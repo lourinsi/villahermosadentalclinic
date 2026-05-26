@@ -332,8 +332,13 @@ export interface RecentTransaction {
   amount: number;
   type: string;
   method: string;
+  transactionId?: string;
   appointmentId?: string;
   appointmentSnapshot?: any;
+  paymentAmount?: number;
+  previousBalance?: number;
+  newBalance?: number;
+  changedBy?: string;
   logDate?: string;
   changedByName?: string;
   changedByAvatar?: string;
@@ -661,9 +666,39 @@ export function FinanceView() {
         snapshot = { ...snapshot, id: resolvedAppointmentId };
       }
 
-      setAppointmentSnapshot(snapshot);
-      setAppointmentSnapshotLogDate(transactionToView.logDate || transactionToView.date || snapshot?.changedAt || snapshot?.updatedAt || "");
-      setAppointmentSnapshotIsHistorical(isHistorical);
+      // Enrich the snapshot with transaction metadata so AppointmentHistoryView
+      // can reliably detect payment logs (SEED-PAY-xxxx) and display paid-in-snapshot values.
+      const paymentTxnId = transactionToView.transactionId || transactionToView.id || snapshot?.transactionId || snapshot?._paymentTransactionId || snapshot?._transactionId;
+
+      const resolvedPreviousBalance = transactionToView.previousBalance ?? snapshot?.previousBalance ?? snapshot?.balance ?? undefined;
+      const resolvedNewBalance = transactionToView.newBalance ?? snapshot?.newBalance ?? undefined;
+      const resolvedPaymentAmount = Number(transactionToView.amount ?? transactionToView.paymentAmount ?? snapshot?.paymentAmount ?? snapshot?.amount ?? 0) || undefined;
+      const resolvedPaymentMethod = transactionToView.method || snapshot?.method || snapshot?.paymentMethod;
+      const resolvedTransactionId = transactionToView.transactionId || transactionToView.id || snapshot?.transactionId || paymentTxnId;
+
+      const enrichedSnapshot = {
+        ...snapshot,
+        transactionId: resolvedTransactionId,
+        _paymentTransactionId: paymentTxnId || snapshot?._paymentTransactionId || snapshot?._transactionId,
+        _transactionId: snapshot?._transactionId || snapshot?.transactionId || paymentTxnId,
+        previousBalance: resolvedPreviousBalance,
+        newBalance: resolvedNewBalance,
+        paymentAmount: resolvedPaymentAmount ?? snapshot?.paymentAmount ?? snapshot?.amount,
+        amount: resolvedPaymentAmount ?? snapshot?.amount,
+        paymentMethod: resolvedPaymentMethod,
+        changedBy: transactionToView.changedBy ?? snapshot?.changedBy,
+        changedByName: transactionToView.changedByName ?? snapshot?.changedByName,
+        // preserve any explicit _isHistorical flag from fetched snapshot; otherwise
+        // derive from the isHistorical value we computed earlier.
+        _isHistorical: Boolean(snapshot?._isHistorical) || Boolean(isHistorical),
+        // mark log/change type when coming from a transaction log
+        logType: snapshot?.logType || (transactionToView.source ? String(transactionToView.source) : undefined) || (isHistorical ? "payment" : snapshot?.logType),
+        changeType: snapshot?.changeType || (isHistorical ? "payment" : snapshot?.changeType),
+      };
+
+      setAppointmentSnapshot(enrichedSnapshot);
+      setAppointmentSnapshotLogDate(transactionToView.logDate || transactionToView.date || enrichedSnapshot?.changedAt || enrichedSnapshot?.updatedAt || "");
+      setAppointmentSnapshotIsHistorical(Boolean(enrichedSnapshot._isHistorical));
       setIsAppointmentHistoryOpen(true);
     } catch (error) {
       console.error("Error loading appointment snapshot:", error);
@@ -1439,7 +1474,7 @@ export function FinanceView() {
         onOpenAppointment={handleOpenAppointment}
         isAppointmentOpen={isSnapshotAppointmentOpen}
         isHistorical={appointmentSnapshotIsHistorical}
-        openedFromBookingModal={true}
+        openedFromBookingModal={false}
       />
     </div>
   );

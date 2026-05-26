@@ -172,6 +172,7 @@ export function NotificationPage({ portal }: NotificationPageProps) {
         actionsDisabled={appointmentSnapshotNotificationDeleted}
         restoreNotificationId={appointmentSnapshotNotificationId}
         onRestoreNotification={handleRestoreNotification}
+        openedFromBookingModal={false}
       />
       <ApproveRejectDialog
         open={isApprovalDialogOpen}

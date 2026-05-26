@@ -275,7 +275,7 @@ const getExplicitSnapshotPaymentAmount = (snapshot: any) =>
   );
 
 const isLogSnapshot = (snapshot: any) =>
-  Boolean(snapshot?.logType || snapshot?.changeType || snapshot?.previousState || snapshot?.newState);
+  Boolean(snapshot?.logType || snapshot?.changeType || snapshot?.previousState || snapshot?.newState || snapshot?._isHistorical);
 
 const isPatientChange = (snapshot: any) => {
   const prev = snapshot?.previousState;
@@ -309,7 +309,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [latestComparisonSnapshot, setLatestComparisonSnapshot] = useState<any | null>(null);
   const { doctors } = useDoctors(undefined, { enabled: open });
   const displayedPatientId = displayedSnapshot?.patientId || displayedSnapshot?.patient?.id || "";
-  const displayedAppointmentId = displayedSnapshot?.id || displayedSnapshot?.appointmentId || "";
+  const displayedAppointmentId = displayedSnapshot?.id || displayedSnapshot?.appointmentId || appointmentSnapshot?.id || appointmentSnapshot?.appointmentId || "";
 
   // Appointment action helpers (approve/reject) using central appointment modal hook
   const { updateAppointment } = useAppointmentModal();
@@ -408,12 +408,12 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     setLatestComparisonSnapshot(null);
 
     const appointmentId = String(displayedAppointmentId || "").trim();
-    if (!open || !appointmentId || snapshotState !== "historical" || !isLogSnapshot(displayedSnapshot)) return;
+    if (!open || !appointmentId) return;
 
     const controller = new AbortController();
     const loadLatestComparisonSnapshot = async () => {
       try {
-        const currentResponse = await fetch(apiUrl(`/api/appointments/${encodeURIComponent(appointmentId)}`), {
+        const currentResponse = await fetch(apiUrl(`/api/appointments/${encodeURIComponent(appointmentId)}?t=${Date.now()}`), {
           credentials: "include",
           headers: getAuthHeaders(),
           signal: controller.signal,
@@ -458,6 +458,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     displayedAppointmentId,
     displayedSnapshot,
     snapshotState,
+    appointmentSnapshot,
   ]);
 
   if (!displayedSnapshot) return null;
@@ -564,19 +565,8 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   // but may represent the most-recent (current) state — those should not be shown as
   // historical. Use `snapshotState` (which prefers `_isHistorical` when available)
   // as the authoritative source.
-  const openedFromLog = isLogSnapshot(displayedSnapshot) && isPastSnapshot;
+  const openedFromLog = isPastSnapshot;
 
-  // Use authoritative snapshotState to determine header label/prefix.
-  // Treat "latest" the same as "current" (show as Current) so the most recent log appears as Current.
-  const stateLabel = isPastSnapshot ? "Log" : "Current";
-
-  const stateBadgeClass = snapshotState === "historical"
-    ? "border-amber-200 bg-amber-50 text-amber-700"
-    : "border-emerald-200 bg-emerald-50 text-emerald-700";
-
-  const StateIcon = snapshotState === "historical" ? History : CheckCircle2;
-
-  const timestampPrefix = snapshotState === "historical" ? "Logged on" : "Current as of";
   const isLogView = isPastSnapshot; // authoritative
   const explicitSnapshotPaymentAmount = getExplicitSnapshotPaymentAmount(displayedSnapshot);
   const snapshotPaymentAmount = isLogView
@@ -584,6 +574,25 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       explicitSnapshotPaymentAmount ?? 0
     : // current view: prefer explicit snapshot payment if present, else fall back to latest payment log amount
       (explicitSnapshotPaymentAmount && explicitSnapshotPaymentAmount > 0 ? explicitSnapshotPaymentAmount : latestPaymentLogAmount ?? 0);
+
+  // Detect payment logs: explicit payment markers, log/change type that mentions "payment",
+  // or transaction identifiers produced by the seeder like `SEED-PAY-0003`.
+  const _txnId = String(
+    displayedSnapshot?._paymentTransactionId ||
+    displayedSnapshot?._transactionId ||
+    displayedSnapshot?.transactionId ||
+    displayedSnapshot?.transaction?.transactionId ||
+    displayedSnapshot?.id ||
+    ""
+  ).trim();
+  const isSeedPaymentId = _txnId ? /^seed-?pay-/i.test(_txnId) : false;
+
+  const isPaymentLogSnapshot = Boolean(
+    (displayedSnapshot?.logType && String(displayedSnapshot.logType).toLowerCase().includes("payment")) ||
+    (displayedSnapshot?.changeType && String(displayedSnapshot.changeType).toLowerCase().includes("payment")) ||
+    (explicitSnapshotPaymentAmount !== null && explicitSnapshotPaymentAmount > 0) ||
+    isSeedPaymentId
+  );
 
   // Compute total paid (price - remaining balance) when possible, fallback to snapshot payment
   const totalPaidAmount = (displayedBalanceNumeric !== null && Number.isFinite(Number(displayedEffectivePrice)))
@@ -594,7 +603,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     ? `₱${Number(displayedBalanceNumeric).toLocaleString()}`
     : (displayedSnapshot.balance !== undefined && displayedSnapshot.balance !== null ? String(displayedSnapshot.balance) : '₱0');
 
-  const latestStateForComparison = openedFromLog ? getComparableSnapshotState(latestComparisonSnapshot) : null;
+  const latestStateForComparison = latestComparisonSnapshot ? getComparableSnapshotState(latestComparisonSnapshot) : null;
   const formatCurrencyLabel = (value: number) => `\u20b1${Number(value).toLocaleString()}`;
   const normalizeNumberComparison = (value: unknown) => {
     const numeric = parseCurrencyNumber(value);
@@ -743,11 +752,41 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     latestNotesComparisonText || "No notes"
   );
 
+  const currentFieldChanges = [
+    statusCurrentChange,
+    paymentStatusCurrentChange,
+    balanceCurrentChange,
+    patientCurrentChange,
+    doctorCurrentChange,
+    dateCurrentChange,
+    timeCurrentChange,
+    serviceCurrentChange,
+    priceCurrentChange,
+    totalPaidCurrentChange,
+    cancellationReasonCurrentChange,
+    notesCurrentChange,
+  ];
+  const hasLaterChanges = Boolean(
+    latestStateForComparison &&
+    snapshotState !== "historical" &&
+    currentFieldChanges.some(Boolean)
+  );
+  const showsLogSnapshotState = isPastSnapshot || hasLaterChanges;
+  const stateLabel = showsLogSnapshotState ? "Log" : "Current";
+  const stateBadgeClass = showsLogSnapshotState
+    ? "border-amber-200 bg-amber-50 text-amber-700"
+    : "border-emerald-200 bg-emerald-50 text-emerald-700";
+  const StateIcon = showsLogSnapshotState ? History : CheckCircle2;
+  const timestampPrefix = showsLogSnapshotState ? "Logged on" : "Current as of";
+  const stateTooltipText = isPastSnapshot
+    ? 'Older log. Use "Latest" for current details.'
+    : 'This log has later changes. Use "Latest" for current details.';
+
   const patientChanged = isPatientChange(displayedSnapshot);
   const changeSuffix = patientChanged ? "Patient Changed" : (changedByName ? `by ${changedByName}` : "");
 
   const appointmentId = displayedAppointmentId;
-  const canOpenAppointment = Boolean(!actionsDisabled && appointmentId && snapshotState === "current" && onOpenAppointment && !isAppointmentOpen);
+  const canOpenAppointment = Boolean(!actionsDisabled && appointmentId && !showsLogSnapshotState && onOpenAppointment && !isAppointmentOpen);
   const canRestoreNotification = Boolean(actionsDisabled && restoreNotificationId && onRestoreNotification);
 
   const viewLatestSnapshot = () => {
@@ -870,7 +909,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
               <DialogTitle className="flex flex-wrap items-center gap-2 text-primary">
                 <Clock className="w-4 h-4 shrink-0" />
                 <span className="text-base tracking-tight font-black">Snapshot</span>
-                {isPastSnapshot ? (
+                {showsLogSnapshotState ? (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider shrink-0 cursor-help ${stateBadgeClass}`}>
@@ -878,8 +917,8 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                         {stateLabel}
                       </span>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom" className="max-w-[200px] text-center bg-amber-50 text-amber-800 border-amber-200">
-                      Older log. Use "Latest" for current details.
+                    <TooltipContent side="bottom" className="max-w-[220px] text-center bg-amber-50 text-amber-800 border-amber-200">
+                      {stateTooltipText}
                     </TooltipContent>
                   </Tooltip>
                 ) : (
@@ -905,7 +944,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                   Open
                 </Button>
               ) : null}
-              {isPastSnapshot ? (
+              {showsLogSnapshotState ? (
                 <Button
                   className="h-8 rounded-xl bg-slate-100 px-3 text-[11px] font-bold text-slate-600 shadow-none hover:bg-slate-200 transition-all active:scale-95"
                   title={appointmentId ? "Open the current appointment snapshot" : "No appointment id available"}
@@ -998,6 +1037,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                   <CurrentChangeIndicator change={patientCurrentChange} />
                 </div>
                 {(() => {
+                  if (!openedFromBookingModal) return null;
                   if (isPastSnapshot && latestStateForComparison) {
                     const logPatient = getPatientIdentity(displayedSnapshot) || patientName;
                     const currentPatient = getPatientIdentity(latestStateForComparison) || latestPatientName;
@@ -1032,7 +1072,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                 <Label className="text-[8px] uppercase text-slate-400 font-black tracking-widest mb-0.5 block">Doctor</Label>
                 <div className="flex min-w-0 items-center gap-1">
                   <p className="font-black text-slate-800 truncate text-[12px] leading-tight tracking-tight">{displayedDoctorName || "Unassigned"}</p>
-                  <CurrentChangeIndicator change={openedFromBookingModal ? doctorCurrentChange : null} />
+                  <CurrentChangeIndicator change={doctorCurrentChange} />
                 </div>
                 {(() => {
                   if (!openedFromBookingModal) return null;
@@ -1125,7 +1165,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                 </div>
               </div>
 
-              {isLogSnapshot(displayedSnapshot) && openedFromBookingModal && (
+              {(((isLogSnapshot(displayedSnapshot) || isPastSnapshot) && openedFromBookingModal) || isPaymentLogSnapshot) && (
                 <div className="flex justify-between items-center py-0.5 border-t border-slate-50 pt-1.5">
                   <span className="text-emerald-500/80 font-black text-[9px] uppercase tracking-wider">Paid in Snapshot</span>
                   <span className="font-black text-emerald-600 text-[12px]">₱{snapshotPaymentAmount.toLocaleString()}</span>
@@ -1174,6 +1214,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
 
         {/* Action Note */}
         {snapshotState === "current" &&
+          !hasLaterChanges &&
           !actionsDisabled &&
           !isAppointmentOpen &&
           (nextStatusNorm === "reserved" || nextStatusNorm === "tbd") && (
@@ -1191,6 +1232,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
         <DialogFooter className="flex flex-col sm:flex-row gap-2 p-5 pt-3 bg-white border-t border-slate-50">
           {/* Accept/Cancel buttons for reserved appointments (current, not historical, and modal not open) */}
           {snapshotState === "current" &&
+            !hasLaterChanges &&
             !actionsDisabled &&
             !isAppointmentOpen &&
             (nextStatusNorm === "reserved" || nextStatusNorm === "tbd") && (

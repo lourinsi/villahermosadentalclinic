@@ -32,10 +32,13 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { PatientDetailsModal, PatientDetailsRef, Patient } from "./PatientDetailsModal";
 import BookingModalWrapper from "./BookingModalWrapper";
 import { Appointment } from "../hooks/useAppointments";
-import { parseBackendDateToLocal, formatDateToYYYYMMDD } from "../lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { getNextAvailableSlot } from "../lib/appointment-utils";
 import { getAuthHeaders } from "@/lib/auth-headers";
+import {
+  buildPatientAppointmentSummary,
+  getPatientAppointments,
+} from "@/lib/patient-aggregates";
 
 // dummy data removed per request
 
@@ -44,12 +47,6 @@ import { getAuthHeaders } from "@/lib/auth-headers";
 interface PatientsViewProps {
   doctorFilter?: string; // When set, only show patients this doctor has seen
 }
-
-const getOverdueAppointmentCount = (appointments: Appointment[]) =>
-  appointments.filter((apt: Appointment) => {
-    if ((apt as any).deleted) return false;
-    return String((apt as any).paymentStatus || "").toLowerCase() === "overdue";
-  }).length;
 
 const getPatientStatusTooltip = (status: string, overdueAppointmentCount?: number | null) => {
   switch (status.toLowerCase()) {
@@ -117,7 +114,10 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
 
     const fetchDoctorAppointments = async () => {
       try {
-        const response = await fetch(apiUrl(`/api/appointments?doctor=${encodeURIComponent(doctorFilter)}`));
+        const response = await fetch(apiUrl(`/api/appointments?doctor=${encodeURIComponent(doctorFilter)}`), {
+          headers: getAuthHeaders(),
+          credentials: "include",
+        });
         const result = await response.json();
         if (result.success && result.data) {
           setDoctorAppointments(result.data);
@@ -153,104 +153,63 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
 
       const q = encodeURIComponent(searchTerm || "");
       const statusParam = statusFilter || "all";
+      const shouldFilterStatusClientSide = statusParam !== "all";
+      const requestPage = shouldFilterStatusClientSide ? 1 : page;
+      const requestLimit = shouldFilterStatusClientSide ? 1000 : itemsPerPage;
       const doctorParam = doctorFilter ? `&doctor=${encodeURIComponent(doctorFilter)}` : "";
-      const res = await fetch(
-        apiUrl(`/api/patients?page=${page}&limit=${itemsPerPage}&search=${q}&status=${statusParam}${doctorParam}`),
-        { signal: controller.signal, credentials: 'include' }
+      const headers = getAuthHeaders();
+      const patientUrl = apiUrl(`/api/patients?page=${requestPage}&limit=${requestLimit}&search=${q}&status=all${doctorParam}`);
+      const appointmentUrl = apiUrl(
+        doctorFilter
+          ? `/api/appointments?doctor=${encodeURIComponent(doctorFilter)}`
+          : "/api/appointments"
       );
+      const [res, appointmentRes] = await Promise.all([
+        fetch(patientUrl, { signal: controller.signal, headers, credentials: "include" }),
+        fetch(appointmentUrl, { signal: controller.signal, headers, credentials: "include" }),
+      ]);
 
-      const result = await res.json();
+      const [result, appointmentResult] = await Promise.all([
+        res.json(),
+        appointmentRes.json().catch(() => null),
+      ]);
 
       if (result && result.success) {
         const data = result.data || [];
-        const meta = result.meta || { total: 0, page, limit: itemsPerPage, totalPages: 1 };
+        const meta = result.meta || { total: 0, page: requestPage, limit: requestLimit, totalPages: 1 };
 
-        const todayStr = formatDateToYYYYMMDD(new Date());
-
-        // Use doctor appointments if available, otherwise use shared appointments
-        const appointmentsToUse = doctorFilter ? doctorAppointments : appointments;
+        const appointmentsToUse =
+          appointmentResult?.success && Array.isArray(appointmentResult.data)
+            ? appointmentResult.data
+            : doctorFilter
+              ? doctorAppointments
+              : appointments;
 
         const transformedPatients = data.map((patient: Patient) => {
-          const patientAppointments = appointmentsToUse.filter(
-            (apt: Appointment) => apt.patientId === patient.id || apt.patientName === `${patient.firstName} ${patient.lastName}`
-          );
-
-          const upcomingAppointments = patientAppointments
-            .filter((apt: Appointment) => apt.date >= todayStr && apt.status !== "completed" && apt.status !== "cancelled")
-            .sort((a: Appointment, b: Appointment) => {
-              if (a.date !== b.date) return a.date.localeCompare(b.date);
-              return a.time.localeCompare(b.time);
-            });
-
-          const completedAppointments = patientAppointments
-            .filter((apt: Appointment) => apt.status === "completed")
-            .sort((a: Appointment, b: Appointment) => parseBackendDateToLocal(b.date).getTime() - parseBackendDateToLocal(a.date).getTime());
-
-          const nextApt = upcomingAppointments.length > 0 ? upcomingAppointments[0].date : null;
-          const lastVisitFromApt = completedAppointments.length > 0 ? completedAppointments[0].date : null;
-          const effectiveLastVisit = lastVisitFromApt || patient.lastVisit || "";
-
-          // Prefer server-provided balance/status if present, otherwise compute locally
-          const serverBalance = (patient as any).balance;
-          const balance = typeof serverBalance === "number" ? serverBalance : patientAppointments.reduce((sum: number, apt: Appointment) => {
-            const b = Number(apt.balance ?? 0) || 0;
-            return sum + b;
-          }, 0);
-
-          // Determine status. We generally prefer server-provided value, but treat
-          // `overdue` as authoritative only when at least one appointment actually
-          // has paymentStatus === 'overdue'. This prevents incorrect labels when
-          // the patient record was set to overdue erroneously.
-          // Only mark overdue when the appointment's paymentStatus is explicitly 'overdue'
-          const overdueAppointmentCount = getOverdueAppointmentCount(patientAppointments);
-          const hasOverdue = overdueAppointmentCount > 0;
-
-          let status = patient.status || "active";
-
-          if (patient.status) {
-            // Server provided a status. If it's 'overdue' ensure there's an actual
-            // overdue appointment; otherwise fall back to active/inactive.
-            if (String(patient.status).toLowerCase() === "overdue" && !hasOverdue) {
-              // re-evaluate inactive based on last visit date, otherwise default to active
-              status = "active";
-              if (effectiveLastVisit) {
-                const lastVisitDate = parseBackendDateToLocal(effectiveLastVisit);
-                const oneYearAgo = new Date();
-                oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-                if (lastVisitDate < oneYearAgo) {
-                  status = "inactive";
-                }
-              }
-            }
-            // else keep server-provided status as-is
-          } else {
-            // No server status: compute locally
-            if (effectiveLastVisit) {
-              const lastVisitDate = parseBackendDateToLocal(effectiveLastVisit);
-              const oneYearAgo = new Date();
-              oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-              if (lastVisitDate < oneYearAgo) {
-                status = "inactive";
-              }
-            }
-
-            if (hasOverdue) status = "overdue";
-          }
+          const patientAppointments = getPatientAppointments(appointmentsToUse, patient);
+          const summary = buildPatientAppointmentSummary(patient, patientAppointments);
 
           return {
             ...patient,
             name: `${patient.firstName} ${patient.lastName}`,
-            lastVisit: effectiveLastVisit,
-            nextAppointment: nextApt,
-            status: status,
-            balance: balance,
-            overdueAppointmentCount,
+            lastVisit: summary.lastVisit,
+            nextAppointment: summary.nextAppointment,
+            status: summary.status,
+            balance: summary.balance,
+            overdueAppointmentCount: summary.overdueAppointmentCount,
           };
         });
+        const filteredPatients = shouldFilterStatusClientSide
+          ? transformedPatients.filter((patient: Patient) => String(patient.status || "").toLowerCase() === statusParam.toLowerCase())
+          : transformedPatients;
+        const patientsForPage = shouldFilterStatusClientSide
+          ? filteredPatients.slice((page - 1) * itemsPerPage, page * itemsPerPage)
+          : filteredPatients;
+        const filteredTotal = shouldFilterStatusClientSide ? filteredPatients.length : meta.total || 0;
 
-        setPaginatedPatients(transformedPatients);
-        setTotalPages(meta.totalPages || 1);
-        setTotalFiltered(meta.total || 0);
+        setPaginatedPatients(patientsForPage);
+        setTotalPages(shouldFilterStatusClientSide ? Math.max(1, Math.ceil(filteredTotal / itemsPerPage)) : meta.totalPages || 1);
+        setTotalFiltered(filteredTotal);
       } else {
         setPaginatedPatients([]);
         setTotalPages(1);
