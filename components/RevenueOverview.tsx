@@ -57,7 +57,7 @@ export function RevenueOverview({ portal, revenueData }: RevenueOverviewProps) {
               contentStyle={{borderRadius: '16px', border: '1px solid #f1f5f9', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.05)', padding: '12px'}}
               itemStyle={{fontSize: '12px', fontWeight: 'bold'}}
               labelStyle={{fontSize: '10px', color: '#94a3b8', marginBottom: '4px', textTransform: 'uppercase', fontWeight: '800'}}
-              formatter={(value: number | string, name: string) => [
+              formatter={(value, name) => [
                 name === 'revenue' ? `₱${Number(value).toLocaleString()}` : value,
                 name === 'revenue' ? 'Revenue' : 'Appointments'
               ]} 

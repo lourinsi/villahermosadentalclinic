@@ -376,7 +376,7 @@ const OrdersContent = () => {
                             </PopoverTrigger>
                             <PopoverContent className="w-auto p-0" align="end">
                                 <CalendarComponent
-                                    initialFocus
+                                    autoFocus
                                     mode="range"
                                     defaultMonth={dateRange?.from}
                                     selected={dateRange}
