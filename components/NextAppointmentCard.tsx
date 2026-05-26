@@ -10,6 +10,7 @@ import { Appointment } from "@/hooks/useAppointments";
 import { getAppointmentTypeName } from "@/lib/appointment-types";
 import { parseBackendDateToLocal } from "@/lib/utils";
 import { apiUrl } from "@/lib/api";
+import { API_BASE_URL } from "@/lib/api";
 
 interface NextAppointmentCardProps {
   appointment: Appointment | null;
@@ -30,6 +31,7 @@ export function NextAppointmentCard({
 }: NextAppointmentCardProps) {
   const router = useRouter();
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [patientRecord, setPatientRecord] = useState<any | null>(null);
   
   // Ensure hooks order remains consistent across renders by calling useDoctors unconditionally.
   const { doctors } = useDoctors(undefined, { enabled: role === "patient" });
@@ -49,6 +51,38 @@ export function NextAppointmentCard({
 
     return () => clearInterval(interval);
   }, [displayAppointments.length]);
+
+  // Fetch patient record to get latest profile picture
+  useEffect(() => {
+    setPatientRecord(null);
+
+    if (!appointment || !appointment.patientId) return;
+
+    const patientId = String(appointment.patientId).trim();
+    if (!patientId || patientId === "Occupied" || patientId === "No patient assigned") {
+      return;
+    }
+
+    const fetchPatientRecord = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/patients/${patientId}`, {
+          credentials: "include",
+          headers: {
+            Authorization: `Bearer ${typeof window !== "undefined" ? localStorage.getItem("authToken") : ""}`,
+          },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setPatientRecord(data.data || null);
+        }
+      } catch (error) {
+        // Silently fail - use appointment data as fallback
+        console.debug("Failed to fetch patient record:", error);
+      }
+    };
+
+    fetchPatientRecord();
+  }, [appointment?.patientId, appointment?.id]);
 
   // If no appointment, show empty state
   if (!appointment) {
@@ -128,7 +162,12 @@ export function NextAppointmentCard({
         (currentAppointment as any)?.patient?.profilePicture,
         (currentAppointment as any)?.patient?.profilePictureUrl,
         (currentAppointment as any)?.patient?.photo,
-        (currentAppointment as any)?.patient?.avatar
+        (currentAppointment as any)?.patient?.avatar,
+        // Fallback to fetched patient record
+        patientRecord?.profilePicture,
+        patientRecord?.profilePictureUrl,
+        patientRecord?.photo,
+        patientRecord?.avatar
       )
     : undefined;
 

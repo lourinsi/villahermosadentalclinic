@@ -491,6 +491,129 @@ const comparePaymentTransactionsDesc = (a: RecentTransaction, b: RecentTransacti
   return getPaymentTransactionKey(b).localeCompare(getPaymentTransactionKey(a));
 };
 
+const normalizeComparableText = (value: unknown) =>
+  String(value ?? "").toLowerCase().trim().replace(/\s+/g, " ");
+
+const normalizeComparableDoctor = (value: unknown) =>
+  normalizeComparableText(value).replace(/^dr\.?\s+/, "");
+
+const normalizeComparableNumber = (value: unknown) => {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value === "number" && Number.isFinite(value)) return Math.round(value * 100) / 100;
+
+  const parsed = Number(String(value).replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(parsed) ? Math.round(parsed * 100) / 100 : null;
+};
+
+const normalizeComparableTime = (value: unknown) => {
+  const raw = String(value ?? "").trim();
+  const match = raw.match(/(\d{1,2}):(\d{2})/);
+  if (!match) return normalizeComparableText(raw);
+
+  return `${match[1].padStart(2, "0")}:${match[2]}`;
+};
+
+const normalizeComparableAppointmentType = (record: any) => {
+  const type = record?.type;
+  const customType = record?.customType;
+  const numericType = typeof type === "number" ? type : typeof type === "string" && type.trim() ? Number(type) : NaN;
+
+  if (Number.isFinite(numericType)) {
+    return normalizeComparableText(getAppointmentTypeName(numericType, customType) || String(type));
+  }
+
+  return normalizeComparableText(type || customType);
+};
+
+const getComparableAppointmentState = (record: any) => {
+  const rawDoctor = typeof record?.doctor === "object"
+    ? record.doctor?.name || record.doctor?.fullName || record.doctor?.username || record.doctor?.id
+    : record?.doctor || record?.doctorName || record?.doctorId;
+  const rawPatientName = record?.patientName ||
+    record?.patient_name ||
+    record?.patient?.name ||
+    record?.patient?.fullName ||
+    [record?.patientFirstName || record?.patient?.firstName, record?.patientLastName || record?.patient?.lastName].filter(Boolean).join(" ");
+
+  return {
+    patientId: normalizeComparableText(record?.patientId || record?.patient?.id),
+    patientName: normalizeComparableText(rawPatientName),
+    date: toDateOnly(record?.date),
+    time: normalizeComparableTime(record?.time || String(record?.date || "").split(" ")[1] || ""),
+    duration: normalizeComparableNumber(record?.duration),
+    type: normalizeComparableAppointmentType(record),
+    doctor: normalizeComparableDoctor(rawDoctor),
+    status: normalizeComparableText(record?.status),
+    paymentStatus: normalizeComparableText(record?.paymentStatus),
+    price: normalizeComparableNumber(record?.price),
+    discount: normalizeComparableNumber(record?.discount),
+    balance: normalizeComparableNumber(record?.balance),
+    totalPaid: normalizeComparableNumber(record?.totalPaid),
+    notes: normalizeComparableText(record?.notes),
+  };
+};
+
+const comparableAppointmentKeys = [
+  "patientId",
+  "patientName",
+  "date",
+  "time",
+  "duration",
+  "type",
+  "doctor",
+  "status",
+  "paymentStatus",
+  "price",
+  "discount",
+  "balance",
+  "totalPaid",
+  "notes",
+] as const;
+
+const hasComparableValue = (value: string | number | null) =>
+  value !== null && String(value).trim() !== "";
+
+const compareAppointmentSnapshotToCurrent = (snapshot: any, currentAppointment: any) => {
+  if (!snapshot || !currentAppointment) return { compared: 0, matches: false };
+
+  const snapshotState = getComparableAppointmentState(snapshot);
+  const currentState = getComparableAppointmentState(currentAppointment);
+  let compared = 0;
+
+  for (const key of comparableAppointmentKeys) {
+    const snapshotValue = snapshotState[key];
+    const currentValue = currentState[key];
+    if (!hasComparableValue(snapshotValue) || !hasComparableValue(currentValue)) continue;
+
+    compared += 1;
+    if (typeof snapshotValue === "number" || typeof currentValue === "number") {
+      if (Math.abs(Number(snapshotValue) - Number(currentValue)) > 0.01) {
+        return { compared, matches: false };
+      }
+      continue;
+    }
+
+    if (snapshotValue !== currentValue) {
+      return { compared, matches: false };
+    }
+  }
+
+  return { compared, matches: compared > 0 };
+};
+
+const isLatestAppointmentLogForAppointment = (appointmentLog: AppointmentLogRow | undefined, appointmentLogs: AppointmentLogRow[]) => {
+  if (!appointmentLog) return true;
+
+  const latestLog = appointmentLogs
+    .filter((log) => String(log.appointmentId || "") === String(appointmentLog.appointmentId || ""))
+    .sort((a, b) => parsePaymentTimestamp(b.changedAt) - parsePaymentTimestamp(a.changedAt))[0];
+
+  if (!latestLog) return true;
+
+  if (appointmentLog.id && latestLog.id) return String(appointmentLog.id) === String(latestLog.id);
+  return parsePaymentTimestamp(appointmentLog.changedAt) === parsePaymentTimestamp(latestLog.changedAt);
+};
+
 const MAX_PATIENT_PHOTO_UPLOAD_BYTES = 8 * 1024 * 1024;
 const TARGET_PATIENT_PHOTO_DATA_URL_LENGTH = 70_000;
 
@@ -745,13 +868,15 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         const appointmentDate = appointment ? String(appointment.date || "") : "";
         const changedAt = log.changedAt || new Date().toISOString();
         const matchingAppointmentLog = findMatchingAppointmentPaymentLog(log, appointmentLogs);
-        const appointmentSnapshot = matchingAppointmentLog?.newState && typeof matchingAppointmentLog.newState === "object"
+        const appointmentSnapshotBase = matchingAppointmentLog?.newState && typeof matchingAppointmentLog.newState === "object"
           ? {
               ...(matchingAppointmentLog.newState || {}),
               id: matchingAppointmentLog.newState?.id || log.appointmentId,
               appointmentId: log.appointmentId,
               logType: "payment",
               changeType: matchingAppointmentLog.changeType || "payment",
+              previousState: matchingAppointmentLog.previousState,
+              newState: matchingAppointmentLog.newState,
               changedAt: matchingAppointmentLog.changedAt || changedAt,
               changedBy: matchingAppointmentLog.changedBy || log.changedBy,
               changedByName: matchingAppointmentLog.changedByName || log.changedByName,
@@ -761,6 +886,17 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
               paymentStatus: log.paymentStatus,
               previousBalance: log.previousBalance,
               newBalance: log.newBalance,
+            }
+          : undefined;
+        const snapshotComparison = appointmentSnapshotBase && appointment
+          ? compareAppointmentSnapshotToCurrent(appointmentSnapshotBase, appointment)
+          : { compared: 0, matches: false };
+        const appointmentSnapshot = appointmentSnapshotBase
+          ? {
+              ...appointmentSnapshotBase,
+              _isHistorical: snapshotComparison.compared > 0
+                ? !snapshotComparison.matches
+                : !isLatestAppointmentLogForAppointment(matchingAppointmentLog, appointmentLogs),
             }
           : undefined;
 
@@ -902,8 +1038,24 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   const isPaymentLogTransaction = React.useCallback((transaction: RecentTransaction) => {
     if (isLegacyPaymentRow(transaction) || !transaction.appointmentId) return false;
 
+    const transactionSnapshot = (transaction as any).appointmentSnapshot;
+    const currentAppointment =
+      mockAppointmentHistoryLocal.find((apt: Appointment) => String(apt.id) === String(transaction.appointmentId)) ||
+      patientAppointments.find((apt: Appointment) => String(apt.id) === String(transaction.appointmentId));
+
+    if (transactionSnapshot && typeof transactionSnapshot === "object") {
+      if (Object.prototype.hasOwnProperty.call(transactionSnapshot, "_isHistorical")) {
+        return Boolean(transactionSnapshot._isHistorical);
+      }
+
+      const snapshotComparison = compareAppointmentSnapshotToCurrent(transactionSnapshot, currentAppointment);
+      if (snapshotComparison.compared > 0) {
+        return !snapshotComparison.matches;
+      }
+    }
+
     return !isLatestPaymentTransaction(transaction);
-  }, [isLatestPaymentTransaction]);
+  }, [isLatestPaymentTransaction, mockAppointmentHistoryLocal, patientAppointments]);
 
   const toggleExpandTransactions = (id: string) => {
     setExpandedTransactions((prev) => {
@@ -923,6 +1075,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
     const transactionSnapshot = transactionRow?.appointmentSnapshot && typeof transactionRow.appointmentSnapshot === "object"
       ? transactionRow.appointmentSnapshot
       : undefined;
+
     const isHistoricalPaymentSnapshot = Boolean(transaction && isPaymentLogTransaction(transaction));
     const snapshotBase = {
       ...(originalAppointment || {}),
@@ -1009,6 +1162,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
       transactionId: transaction?.transactionId,
       previousBalance: transactionRow?.previousBalance ?? snapshotBase.previousBalance,
       newBalance: transactionRow?.newBalance ?? snapshotBase.newBalance,
+      _isHistorical: isHistoricalPaymentSnapshot,
     });
     setSelectedSnapshotIsHistorical(isHistoricalPaymentSnapshot);
     setSnapshotLogDate(logDate);
@@ -2717,6 +2871,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
         onOpenAppointment={onOpenBookingModal ? handleOpenSnapshotAppointment : undefined}
         isAppointmentOpen={isSelectedSnapshotAppointmentOpen}
         isHistorical={selectedSnapshotIsHistorical}
+        openedFromBookingModal={true}
       />
       </div>
     </div>

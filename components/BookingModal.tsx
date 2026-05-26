@@ -2798,6 +2798,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         logDate={snapshotToView?.changedAt || new Date().toISOString()}
         onViewCurrent={viewCurrentAppointment}
         isHistorical={snapshotIsHistorical}
+        openedFromBookingModal={true}
       />
 
       {/* Date Picker Modal */}
@@ -2809,7 +2810,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         doctorName={selectedDoctor}
         selectedTime={selectedTime}
         duration={duration}
-        dateSelectionMode={isPastAppointmentMode ? "past" : "standard"}
+        dateSelectionMode={isEditMode ? "edit" : isPastAppointmentMode ? "past" : "standard"}
         appointmentSource={isPublicBookingMode ? "cache" : "server"}
         cachedAppointments={publicBlockingAppointments as any}
       />
@@ -2826,7 +2827,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         onDateChange={setSelectedDate}
         excludeAppointmentId={appointmentToEdit?.id}
         patientId={selectedPatient}
-        dateSelectionMode={isPastAppointmentMode ? "past" : "standard"}
+        dateSelectionMode={isEditMode ? "edit" : isPastAppointmentMode ? "past" : "standard"}
         appointmentSource={isPublicBookingMode ? "cache" : "server"}
         cachedAppointments={publicBlockingAppointments as any}
       />

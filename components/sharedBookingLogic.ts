@@ -21,7 +21,7 @@ type BookingFlow = 'details-payment' | 'multi-step';
 type BookingStep = 'details' | 'patient' | 'schedule' | 'treatment' | 'doctor' | 'payment';
 type BookingActorRole = 'public' | 'patient' | 'admin' | 'doctor' | '';
 export type BookingMode = 'standard' | 'public';
-export type BookingCreationMode = 'standard' | 'past';
+export type BookingCreationMode = 'standard' | 'past' | 'edit';
 
 export const PAST_APPOINTMENT_STATUS_VALUES = ['tbd', 'cancelled', 'completed'] as const;
 type PastAppointmentStatus = typeof PAST_APPOINTMENT_STATUS_VALUES[number];

@@ -1,6 +1,6 @@
 "use client";
 
-import { apiUrl } from "@/lib/api";
+import { apiUrl, API_BASE_URL } from "@/lib/api";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -84,7 +84,7 @@ const resolveImageSource = (source?: string) => {
   return apiUrl(source);
 };
 
-const getPatientImage = (appointment: any) => {
+const getPatientImage = (appointment: any, patientRecord?: any) => {
   if (!appointment) return undefined;
   return (
     appointment.patientProfile ||
@@ -97,7 +97,12 @@ const getPatientImage = (appointment: any) => {
     appointment.patient?.profilePictureUrl ||
     appointment.patient?.photo ||
     appointment.patient?.photoUrl ||
-    appointment.patient?.avatar
+    appointment.patient?.avatar ||
+    // Fallback to fetched patient record
+    patientRecord?.profilePicture ||
+    patientRecord?.profilePictureUrl ||
+    patientRecord?.photo ||
+    patientRecord?.avatar
   );
 };
 
@@ -125,6 +130,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const [historyTotalPages, setHistoryTotalPages] = useState(1);
   const [historyTotal, setHistoryTotal] = useState(0);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const [patientRecordsCache, setPatientRecordsCache] = useState<Record<string, any>>({});
   const {
     isAppointmentHistoryOpen,
     setIsAppointmentHistoryOpen,
@@ -186,6 +192,42 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       console.log('[RequestsView] Available appointment statuses:', APPOINTMENT_STATUSES.map(s => s.value));
     }
   }, [APPOINTMENT_STATUSES]);
+
+  // Fetch patient records for requests and history
+  useEffect(() => {
+    const allAppointments = [...requests, ...history];
+    const patientIds = Array.from(new Set(allAppointments.map(apt => apt.patientId).filter(Boolean)));
+
+    if (patientIds.length === 0) return;
+
+    const fetchPatientRecords = async () => {
+      const newCache = { ...patientRecordsCache };
+      
+      for (const patientId of patientIds) {
+        // Skip if already cached
+        if (newCache[patientId]) continue;
+
+        try {
+          const response = await fetch(`${API_BASE_URL}/api/patients/${patientId}`, {
+            credentials: "include",
+            headers: {
+              Authorization: `Bearer ${typeof window !== "undefined" ? localStorage.getItem("authToken") : ""}`,
+            },
+          });
+          if (response.ok) {
+            const data = await response.json();
+            newCache[patientId] = data.data || null;
+          }
+        } catch (error) {
+          console.debug(`Failed to fetch patient record ${patientId}:`, error);
+        }
+      }
+
+      setPatientRecordsCache(newCache);
+    };
+
+    fetchPatientRecords();
+  }, [requests, history]);
 
   // Normalize status strings to canonical backend keys for reliable comparisons
   const canonicalStatus = (s?: string) => {
@@ -988,7 +1030,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           <TableCell className="py-4">
                             <div className="flex items-center gap-3">
                               <Avatar className="h-10 w-10 border-2 border-white shadow-sm">
-                                <AvatarImage src={resolveImageSource(getPatientImage(request))} alt={request.patientName} />
+                                <AvatarImage src={resolveImageSource(getPatientImage(request, patientRecordsCache[request.patientId]))} alt={request.patientName} />
                                 <AvatarFallback className="bg-violet-100 text-violet-700 font-bold text-xs uppercase">
                                   {getInitials(request.patientName)}
                                 </AvatarFallback>
@@ -1292,7 +1334,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                           <TableCell className="py-4">
                             <div className="flex items-center gap-3">
                               <Avatar className="h-10 w-10 border-2 border-white shadow-sm">
-                                <AvatarImage src={resolveImageSource(getPatientImage(item))} alt={item.patientName} />
+                                <AvatarImage src={resolveImageSource(getPatientImage(item, patientRecordsCache[item.patientId]))} alt={item.patientName} />
                                 <AvatarFallback className="bg-violet-100 text-violet-700 font-bold text-xs uppercase">
                                   {getInitials(item.patientName)}
                                 </AvatarFallback>

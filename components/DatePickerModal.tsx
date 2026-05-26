@@ -191,6 +191,7 @@ export function DatePickerModal({
   };
 
   const isPastMode = dateSelectionMode === "past";
+  const isEditMode = dateSelectionMode === "edit";
 
   const isPastDate = (date: Date) => {
     const now = new Date();
@@ -231,7 +232,7 @@ export function DatePickerModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>{isPastMode ? "Select Past Date" : "Select Date"}</DialogTitle>
+          <DialogTitle>{isPastMode ? "Select Past Date" : isEditMode ? "Select Date" : "Select Date"}</DialogTitle>
         </DialogHeader>
         
         <div className="flex justify-center py-4">
@@ -275,7 +276,7 @@ export function DatePickerModal({
             <div className="grid grid-cols-3 gap-2 mb-4 text-xs">
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded-full bg-gray-200" />
-                <span className="text-gray-600">{isPastMode ? "Upcoming" : "Past"}</span>
+                <span className="text-gray-600">{isPastMode ? "Upcoming" : isEditMode ? "All Dates" : "Past"}</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded-full bg-emerald-100" />
@@ -305,7 +306,7 @@ export function DatePickerModal({
               {daysInMonth.map((date, i) => {
                 if (!date) return <div key={`empty-${i}`} className="aspect-square" />;
 
-                const isDisabled = isPastMode ? isFutureDate(date) : isPastDate(date);
+                const isDisabled = isEditMode ? false : (isPastMode ? isFutureDate(date) : isPastDate(date));
                 const active = isSelected(date);
                 const today = isToday(date);
                 const dayStatus = getDayStatus(date);
@@ -331,7 +332,7 @@ export function DatePickerModal({
                         : "bg-white text-gray-700 border-gray-300 hover:border-blue-400 hover:bg-blue-50 cursor-pointer"
                     )}
                     title={
-                      isDisabled ? (isPastMode ? "Upcoming date" : "Past date")
+                      isDisabled ? (isPastMode ? "Upcoming date" : isEditMode ? "Not available" : "Past date")
                       : isFullyBooked ? "Fully booked"
                       : dayStatus === 'has-bookings' ? "Has Bookings"
                       : "Available"

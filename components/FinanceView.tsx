@@ -1334,14 +1334,18 @@ export function FinanceView() {
                         ? formatTransactionTimestamp(transaction.logDate)
                         : "";
 
-                      // Resolve avatar src: prefer explicit changedByAvatar, then snapshots, then fetched patient images
+                      // Resolve avatar src: prefer explicit changedByAvatar, then look for admin/user who made the change
+                      // Only fall back to patient image if no changedByName (meaning it's a patient-initiated action)
                       const snap = transaction.appointmentSnapshot as any;
                       const snapPatientId = snap?.patientId || snap?.patient?.id || snap?.patientId;
                       const avatarSrc =
                         transaction.changedByAvatar ||
-                        getAvatarFromSnapshot(snap, transaction.changedByName) ||
-                        getAnyImageFromSnapshot(snap) ||
-                        (snapPatientId ? patientImages[String(snapPatientId)] : undefined);
+                        (transaction.changedByName ? getAvatarFromSnapshot(snap, transaction.changedByName) : undefined) ||
+                        // Only show patient image if no changedByName (patient action) or no snapshot
+                        (!transaction.changedByName ? (
+                          getAnyImageFromSnapshot(snap) ||
+                          (snapPatientId ? patientImages[String(snapPatientId)] : undefined)
+                        ) : undefined);
 
                       return (
                         <div
@@ -1435,6 +1439,7 @@ export function FinanceView() {
         onOpenAppointment={handleOpenAppointment}
         isAppointmentOpen={isSnapshotAppointmentOpen}
         isHistorical={appointmentSnapshotIsHistorical}
+        openedFromBookingModal={true}
       />
     </div>
   );

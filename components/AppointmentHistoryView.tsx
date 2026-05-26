@@ -26,6 +26,7 @@ interface AppointmentHistoryViewProps {
   actionsDisabled?: boolean;
   restoreNotificationId?: string;
   onRestoreNotification?: (notificationId: string) => void | Promise<void>;
+  openedFromBookingModal?: boolean;
 }
 
 type SnapshotState = "historical" | "latest" | "current";
@@ -235,7 +236,7 @@ type DoctorReassignment = {
   currentDoctorName: string;
 };
 
-export default function AppointmentHistoryView({ open, onOpenChange, appointmentSnapshot, logDate, onViewCurrent, onOpenAppointment, isAppointmentOpen, isHistorical, actionsDisabled = false, restoreNotificationId, onRestoreNotification }: AppointmentHistoryViewProps) {
+export default function AppointmentHistoryView({ open, onOpenChange, appointmentSnapshot, logDate, onViewCurrent, onOpenAppointment, isAppointmentOpen, isHistorical, actionsDisabled = false, restoreNotificationId, onRestoreNotification, openedFromBookingModal = false }: AppointmentHistoryViewProps) {
   const [displayedSnapshot, setDisplayedSnapshot] = useState<any | null>(appointmentSnapshot);
   const [snapshotState, setSnapshotState] = useState<SnapshotState>(Boolean(isHistorical) ? "historical" : "current");
   const [isFetchingLogs, setIsFetchingLogs] = useState(false);
@@ -732,7 +733,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
           <div className="mx-6 mt-2 mb-3 p-3 rounded-md bg-amber-50 border border-amber-200 text-amber-900 text-[13px] flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 flex-shrink-0" />
             <div>
-              This is an older payment log. Use "Latest" to open the current appointment details before making decisions.
+              This is an older appointment log. Use "Latest" to open the current appointment details before making decisions.
             </div>
           </div>
         ) : null}
@@ -893,7 +894,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                 )
               )}
             </div>
-            {isLogSnapshot(displayedSnapshot) && (
+            {isLogSnapshot(displayedSnapshot) && openedFromBookingModal && (
               <div className="flex justify-between items-center">
                 <div className="flex items-center gap-2 text-green-600">
                   <CreditCard className="w-4 h-4" />
@@ -925,6 +926,22 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
             </p>
           </div>
         </div>
+
+        {/* Action Note */}
+        {snapshotState === "current" &&
+          !actionsDisabled &&
+          !isAppointmentOpen &&
+          (nextStatusNorm === "reserved" || nextStatusNorm === "tbd") && (
+            <div className="px-6 py-2 bg-amber-50/50 border-t border-b border-amber-100/50">
+              <p className="text-[11px] text-amber-700 font-medium flex items-center justify-center gap-1.5 text-center">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                {nextStatusNorm === "tbd" 
+                  ? "Accept to mark this appointment as completed or cancel it if needed."
+                  : "Accept to confirm this schedule or cancel the appointment request."
+                }
+              </p>
+            </div>
+          )}
 
         <DialogFooter className="gap-2 p-6 pt-2">
           {/* Accept/Cancel buttons for reserved appointments (current, not historical, and modal not open) */}
