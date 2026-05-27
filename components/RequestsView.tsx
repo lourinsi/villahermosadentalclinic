@@ -69,6 +69,7 @@ import {
   getPaymentStatusOptionWithColors,
   normalizePaymentStatus,
 } from "@/lib/status-colors";
+import { getAppointmentPatientDisplayName } from "@/lib/patient-identity";
 
 interface RequestsViewProps {
   doctorFilter?: string;
@@ -305,6 +306,9 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       .substring(0, 2);
   };
 
+  const getCurrentPatientName = (appointment: Appointment) =>
+    getAppointmentPatientDisplayName(appointment, patientRecordsCache[appointment.patientId]);
+
   const sortAppointmentsForColumn = (
     items: Appointment[],
     column: string | null,
@@ -323,8 +327,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
           bVal = new Date(`${b.date}T${b.time}`).getTime();
           break;
         case "patient":
-          aVal = a.patientName.toLowerCase();
-          bVal = b.patientName.toLowerCase();
+          aVal = getCurrentPatientName(a).toLowerCase();
+          bVal = getCurrentPatientName(b).toLowerCase();
           break;
         case "service":
           aVal = getAppointmentTypeName(a.type, a.customType).toLowerCase();
@@ -415,7 +419,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
 
         if (
           search &&
-          !appointment.patientName.toLowerCase().includes(search.toLowerCase()) &&
+          !getCurrentPatientName(appointment).toLowerCase().includes(search.toLowerCase()) &&
           !getAppointmentTypeName(appointment.type, appointment.customType).toLowerCase().includes(search.toLowerCase())
         ) {
           return false;
@@ -546,7 +550,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
 
         if (
           search &&
-          !appointment.patientName.toLowerCase().includes(search.toLowerCase()) &&
+          !getCurrentPatientName(appointment).toLowerCase().includes(search.toLowerCase()) &&
           !getAppointmentTypeName(appointment.type, appointment.customType).toLowerCase().includes(search.toLowerCase())
         ) {
           return false;
@@ -684,7 +688,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
       }
       
       await updateAppointment(pendingApproveAppointment.id, { status: newStatus });
-      toast.success(`Appointment for ${pendingApproveAppointment.patientName} approved`);
+      toast.success(`Appointment for ${getCurrentPatientName(pendingApproveAppointment)} approved`);
       // Refresh notifications to show the new status change notification
       refreshAppointmentLists();
       // Also refresh notifications from NotificationPage context if available
@@ -709,7 +713,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     
     try {
       await updateAppointment(pendingRejectAppointment.id, { status: "cancelled" });
-      toast.success(`Appointment for ${pendingRejectAppointment.patientName} rejected`);
+      toast.success(`Appointment for ${getCurrentPatientName(pendingRejectAppointment)} rejected`);
       // Refresh notifications to show the new status change notification
       refreshAppointmentLists();
       // Also refresh notifications from NotificationPage context if available
@@ -773,7 +777,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
     const { appointment, newStatus } = pendingStatusChange;
     try {
       await updateAppointment(appointment.id, { status: newStatus });
-      toast.success(`Status for ${appointment.patientName} updated to ${newStatus}`);
+      toast.success(`Status for ${getCurrentPatientName(appointment)} updated to ${newStatus}`);
       // Refresh appointments and notifications to show the new status change notification
       refreshAppointmentLists();
       // Also refresh notifications from NotificationPage context if available
@@ -1024,18 +1028,20 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      sortedRequests.map((request) => (
+                      sortedRequests.map((request) => {
+                        const patientName = getCurrentPatientName(request);
+                        return (
                         <TableRow key={request.id} className="hover:bg-violet-50/30 transition-colors border-b border-gray-50">
                           <TableCell className="py-4">
                             <div className="flex items-center gap-3">
                               <Avatar className="h-10 w-10 border-2 border-white shadow-sm">
-                                <AvatarImage src={resolveImageSource(getPatientImage(request, patientRecordsCache[request.patientId]))} alt={request.patientName} />
+                                <AvatarImage src={resolveImageSource(getPatientImage(request, patientRecordsCache[request.patientId]))} alt={patientName} />
                                 <AvatarFallback className="bg-violet-100 text-violet-700 font-bold text-xs uppercase">
-                                  {getInitials(request.patientName)}
+                                  {getInitials(patientName)}
                                 </AvatarFallback>
                               </Avatar>
                               <div>
-                                <div className="font-bold text-gray-900">{request.patientName}</div>
+                                <div className="font-bold text-gray-900">{patientName}</div>
                                 <div className="text-[10px] text-gray-500 font-medium uppercase tracking-tight">ID: {request.id.slice(0, 8)}</div>
                               </div>
                             </div>
@@ -1140,7 +1146,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                             </div>
                           </TableCell>
                         </TableRow>
-                      ))
+                        );
+                      })
                     )}
                   </TableBody>
                 </Table>
@@ -1328,18 +1335,20 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      sortedHistory.map((item) => (
+                      sortedHistory.map((item) => {
+                        const patientName = getCurrentPatientName(item);
+                        return (
                         <TableRow key={item.id} className="hover:bg-gray-50 transition-colors border-b border-gray-50">
                           <TableCell className="py-4">
                             <div className="flex items-center gap-3">
                               <Avatar className="h-10 w-10 border-2 border-white shadow-sm">
-                                <AvatarImage src={resolveImageSource(getPatientImage(item, patientRecordsCache[item.patientId]))} alt={item.patientName} />
+                                <AvatarImage src={resolveImageSource(getPatientImage(item, patientRecordsCache[item.patientId]))} alt={patientName} />
                                 <AvatarFallback className="bg-violet-100 text-violet-700 font-bold text-xs uppercase">
-                                  {getInitials(item.patientName)}
+                                  {getInitials(patientName)}
                                 </AvatarFallback>
                               </Avatar>
                               <div>
-                                <div className="font-bold text-gray-900">{item.patientName}</div>
+                                <div className="font-bold text-gray-900">{patientName}</div>
                                 <div className="text-[10px] text-gray-500 font-medium uppercase tracking-tight">ID: {item.id.slice(0, 8)}</div>
                               </div>
                             </div>
@@ -1420,7 +1429,8 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
                             </Button>
                           </TableCell>
                         </TableRow>
-                      ))
+                        );
+                      })
                     )}
                   </TableBody>
                 </Table>
@@ -1463,7 +1473,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
           <AlertDialogHeader>
             <AlertDialogTitle className="text-2xl font-black text-gray-900 uppercase tracking-tight">Confirm Status Change</AlertDialogTitle>
             <AlertDialogDescription className="text-gray-500 font-medium">
-              Are you sure you want to update the status of this appointment for <strong>{pendingStatusChange?.appointment.patientName}</strong>?
+              Are you sure you want to update the status of this appointment for <strong>{pendingStatusChange ? getCurrentPatientName(pendingStatusChange.appointment) : "this patient"}</strong>?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="gap-2">
@@ -1498,6 +1508,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
         onOpenAppointment={handleOpenSnapshotAppointment}
         isAppointmentOpen={isSnapshotAppointmentOpen}
         isHistorical={appointmentSnapshotIsHistorical}
+        showPreviousInputChanges={false}
       />
 
       <ApproveRejectDialog

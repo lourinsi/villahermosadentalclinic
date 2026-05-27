@@ -1218,6 +1218,7 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
         onOpenAppointment={handleOpenSnapshotAppointment}
         isAppointmentOpen={isSnapshotAppointmentOpen}
         isHistorical={appointmentSnapshotIsHistorical}
+        showPreviousInputChanges={false}
       />
     </div>
   );

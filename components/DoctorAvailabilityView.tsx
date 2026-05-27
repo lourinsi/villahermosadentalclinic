@@ -32,6 +32,7 @@ import { getCachedPublicBlockingAppointments } from "@/lib/publicBookingCache";
 import { isCartAppointmentStatus, isReservedAppointmentStatus } from "@/lib/appointment-status";
 import AppointmentHistoryView from "@/components/AppointmentHistoryView";
 import { useNotificationAppointmentSnapshot } from "@/hooks/useNotificationAppointmentSnapshot";
+import { findDoctorForValue, formatDoctorDisplayName, normalizeDoctorIdentity } from "@/lib/doctor-identity";
 
 interface DoctorAvailabilityViewProps {
   doctorName: string;
@@ -69,22 +70,27 @@ export function DoctorAvailabilityView({
   } = useNotificationAppointmentSnapshot(appointments);
 
   const doctor = useMemo(() => {
-    return doctors.find(d => d.name === doctorName);
+    return findDoctorForValue(doctors, doctorName);
   }, [doctors, doctorName]);
+  const resolvedDoctorName = String(doctor?.name || doctorName || "").trim();
+  const resolvedDoctorLabel = formatDoctorDisplayName(resolvedDoctorName);
 
   const doctorsListPath = portal === "admin" ? "/admin/doctors" : portal === "patient" ? "/patient/doctors" : "/doctors";
 
-  const normalizeDoctorName = (name?: string) =>
-    String(name || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim();
+  const isSameDoctor = useCallback((value?: string) => {
+    const matchedDoctor = findDoctorForValue(doctors, value);
+    if (doctor?.id && matchedDoctor?.id) return String(doctor.id) === String(matchedDoctor.id);
+    return normalizeDoctorIdentity(value) === normalizeDoctorIdentity(resolvedDoctorName);
+  }, [doctor?.id, doctors, resolvedDoctorName]);
 
   const handleBookSlot = useCallback((date?: Date, time?: string) => {
     if (onBookSlot) {
-      onBookSlot(date, time, doctorName);
+      onBookSlot(date, time, resolvedDoctorName);
       return;
     }
 
-    openPatientBookingModal(date, time, doctorName);
-  }, [doctorName, onBookSlot, openPatientBookingModal]);
+    openPatientBookingModal(date, time, resolvedDoctorName);
+  }, [resolvedDoctorName, onBookSlot, openPatientBookingModal]);
   const handleOpenSnapshotAppointment = useCallback((appointmentId: string) => {
     const appointment = appointments.find((item) => String(item.id) === String(appointmentId));
     setIsAppointmentHistoryOpen(false);
@@ -136,10 +142,11 @@ export function DoctorAvailabilityView({
       if (!doctorName) return;
       try {
         setIsLoadingAvailability(true);
+        const doctorQuery = resolvedDoctorName || doctorName;
         
         let url = portal === "public"
-          ? apiUrl(`/api/appointments/public-availability?doctor=${encodeURIComponent(doctorName)}&startDate=${dateRange.start}&endDate=${dateRange.end}`)
-          : apiUrl(`/api/appointments?doctor=${encodeURIComponent(doctorName)}&startDate=${dateRange.start}&endDate=${dateRange.end}&includeUnpaid=true`);
+          ? apiUrl(`/api/appointments/public-availability?doctor=${encodeURIComponent(doctorQuery)}&startDate=${dateRange.start}&endDate=${dateRange.end}`)
+          : apiUrl(`/api/appointments?doctor=${encodeURIComponent(doctorQuery)}&startDate=${dateRange.start}&endDate=${dateRange.end}&includeUnpaid=true`);
         
         // If we have a patientId (logged in patient), include it in the query with OR logic
         // This will return appointments for THIS doctor OR for THIS patient (any doctor)
@@ -158,7 +165,7 @@ export function DoctorAvailabilityView({
         const publicCacheAppointments = portal === "public"
           ? getCachedPublicBlockingAppointments().filter((appointment) => {
               if (appointment.date < dateRange.start || appointment.date > dateRange.end) return false;
-              return normalizeDoctorName(appointment.doctor) === normalizeDoctorName(doctorName);
+              return isSameDoctor(appointment.doctor);
             })
           : [];
 
@@ -171,7 +178,7 @@ export function DoctorAvailabilityView({
           setAppointments(
             getCachedPublicBlockingAppointments().filter((appointment) => {
               if (appointment.date < dateRange.start || appointment.date > dateRange.end) return false;
-              return normalizeDoctorName(appointment.doctor) === normalizeDoctorName(doctorName);
+              return isSameDoctor(appointment.doctor);
             }) as Appointment[]
           );
         }
@@ -194,7 +201,7 @@ export function DoctorAvailabilityView({
     return () => {
       window.removeEventListener('appointments:updated', handler as EventListener);
     };
-  }, [dateRange, doctorName, portal, user]);
+  }, [dateRange, doctorName, isSameDoctor, portal, resolvedDoctorName, user]);
 
   const getDaySlots = useCallback((date: Date) => {
     const dateStr = formatDateToYYYYMMDD(date);
@@ -267,12 +274,7 @@ export function DoctorAvailabilityView({
         isBooked = true;
         slotAppointment = blockingAppointment;
 
-        // Check if this appointment is with a different doctor
-        // Normalize names for comparison (remove "Dr. " prefix)
-        const currentDocNormalized = doctorName.replace(/^Dr\.\s+/i, "").toLowerCase();
-        const aptDocNormalized = blockingAppointment.doctor.replace(/^Dr\.\s+/i, "").toLowerCase();
-        
-        if (aptDocNormalized !== currentDocNormalized) {
+        if (!isSameDoctor(blockingAppointment.doctor)) {
           isOtherDoctor = true;
         }
 
@@ -312,7 +314,7 @@ export function DoctorAvailabilityView({
         appointment: slotAppointment || cancelledAppointment
       };
     });
-  }, [appointments, doctorName, isOwnAppointment, user]);
+  }, [appointments, isOwnAppointment, isSameDoctor, user]);
 
   const handleSlotClick = async (slot: any) => {
     // If slot is available (including slots with cart appointments that can be overridden),
@@ -741,7 +743,7 @@ export function DoctorAvailabilityView({
               <ChevronLeft className="h-5 w-5" />
             </Button>
             <div>
-              <h1 className="text-2xl font-black text-gray-900 leading-none">Book with Dr. {doctor?.name}</h1>
+              <h1 className="text-2xl font-black text-gray-900 leading-none">Book with {resolvedDoctorLabel || "Doctor"}</h1>
               <p className="text-sm text-gray-500 mt-1 font-medium">{doctor?.specialization} Specialist</p>
             </div>
           </div>
@@ -796,16 +798,16 @@ export function DoctorAvailabilityView({
               <div className="relative h-48 bg-gradient-to-b from-blue-500 to-blue-600">
                 {doctor?.profilePicture && (
                   <Avatar className="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-1/2 h-24 w-24 border-4 border-white shadow-xl">
-                    <AvatarImage src={doctor.profilePicture} alt={doctor.name} className="object-cover" />
+                    <AvatarImage src={doctor.profilePicture} alt={resolvedDoctorName || "Doctor"} className="object-cover" />
                     <AvatarFallback className="bg-blue-100 text-blue-700 text-xl font-bold">
-                      {doctor?.name?.charAt(0)}
+                      {resolvedDoctorName.charAt(0) || "D"}
                     </AvatarFallback>
                   </Avatar>
                 )}
               </div>
               <CardContent className="p-6 space-y-6 pt-16">
                 <div>
-                  <h2 className="text-xl font-black text-gray-900">{doctor?.name}</h2>
+                  <h2 className="text-xl font-black text-gray-900">{resolvedDoctorName || "Doctor"}</h2>
                   <p className="text-sm text-gray-500 font-medium">{doctor?.specialization}</p>
                 </div>
 

@@ -9,6 +9,10 @@ export interface Appointment {
   patientId: string;
   email?: string;
   phone?: string;
+  patientFirstName?: string;
+  patientLastName?: string;
+  patientEmail?: string;
+  patientPhone?: string;
   date: string;
   time: string;
   type: number;
@@ -16,6 +20,8 @@ export interface Appointment {
   price?: number;
   discount?: number;
   doctor: string;
+  doctorId?: string;
+  doctorName?: string;
   duration?: number;
   notes: string;
   serviceType?: string;
@@ -26,7 +32,19 @@ export interface Appointment {
   balance?: number;
   totalPaid?: number;
   patientProfile?: string;
+  patientProfilePicture?: string;
   doctorProfile?: string;
+  doctorProfilePicture?: string;
+  patient?: {
+    id?: string;
+    name?: string;
+    firstName?: string;
+    lastName?: string;
+    email?: string;
+    phone?: string;
+    profilePicture?: string;
+    profilePictureUrl?: string;
+  };
   transactions?: RecentTransaction[];
   createdAt?: string;
   updatedAt?: string;
