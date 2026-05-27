@@ -602,6 +602,7 @@ export function Dashboard({ portal }: { portal?: string }) {
         onOpenAppointment={handleOpenSnapshotAppointment}
         isAppointmentOpen={isSnapshotAppointmentOpen}
         isHistorical={appointmentSnapshotIsHistorical}
+        showPreviousInputChanges={false}
       />
 
       {bookingModalOpen && (

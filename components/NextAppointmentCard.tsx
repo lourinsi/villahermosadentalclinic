@@ -11,6 +11,8 @@ import { getAppointmentTypeName } from "@/lib/appointment-types";
 import { parseBackendDateToLocal } from "@/lib/utils";
 import { apiUrl } from "@/lib/api";
 import { API_BASE_URL } from "@/lib/api";
+import { findDoctorForValue, formatDoctorDisplayName } from "@/lib/doctor-identity";
+import { getAppointmentPatientDisplayName } from "@/lib/patient-identity";
 
 interface NextAppointmentCardProps {
   appointment: Appointment | null;
@@ -36,6 +38,8 @@ export function NextAppointmentCard({
   // Ensure hooks order remains consistent across renders by calling useDoctors unconditionally.
   const { doctors } = useDoctors(undefined, { enabled: role === "patient" });
   const displayAppointments = appointment ? [appointment, ...sameTimeAppointments] : [];
+  const displayedPatientId = String(displayAppointments[currentIndex]?.patientId || appointment?.patientId || "").trim();
+  const displayedAppointmentId = displayAppointments[currentIndex]?.id || appointment?.id || "";
   const doctorsRoute =
     role === "patient" ? "/patient/doctors" :
     role === "admin" ? "/admin/doctors" :
@@ -52,13 +56,13 @@ export function NextAppointmentCard({
     return () => clearInterval(interval);
   }, [displayAppointments.length]);
 
-  // Fetch patient record to get latest profile picture
+  // Fetch patient record to get latest profile/name data.
   useEffect(() => {
     setPatientRecord(null);
 
-    if (!appointment || !appointment.patientId) return;
+    if (!displayedPatientId) return;
 
-    const patientId = String(appointment.patientId).trim();
+    const patientId = displayedPatientId;
     if (!patientId || patientId === "Occupied" || patientId === "No patient assigned") {
       return;
     }
@@ -82,7 +86,7 @@ export function NextAppointmentCard({
     };
 
     fetchPatientRecord();
-  }, [appointment?.patientId, appointment?.id]);
+  }, [displayedPatientId, displayedAppointmentId]);
 
   // If no appointment, show empty state
   if (!appointment) {
@@ -131,8 +135,17 @@ export function NextAppointmentCard({
     return emptyContent;
   }
 
-  const currentAppointment = displayAppointments[currentIndex];
+  const currentAppointment = displayAppointments[currentIndex] || displayAppointments[0];
   const hasMultiple = displayAppointments.length > 1;
+  const currentPatientName = getAppointmentPatientDisplayName(currentAppointment, patientRecord);
+  const currentDoctorRecord = findDoctorForValue(
+    doctors,
+    (currentAppointment as any)?.doctorId ||
+      (currentAppointment as any)?.doctorName ||
+      currentAppointment.doctor
+  );
+  const currentDoctorName = String(currentDoctorRecord?.name || currentAppointment.doctor || "").trim();
+  const currentDoctorLabel = formatDoctorDisplayName(currentDoctorName);
 
   const resolveImageSource = (source?: string) => {
     if (!source) return undefined;
@@ -182,9 +195,8 @@ export function NextAppointmentCard({
         (currentAppointment as any)?.doctorImage,
         (currentAppointment as any)?.doctor?.profilePicture,
         (currentAppointment as any)?.doctor?.profilePictureUrl,
-        // try to find in loaded doctors list
-        doctors?.find((d: any) => String(d.name) === String(currentAppointment.doctor) || String(d.id) === String(currentAppointment.doctor))?.profilePicture,
-        doctors?.find((d: any) => String(d.name) === String(currentAppointment.doctor) || String(d.id) === String(currentAppointment.doctor))?.profilePictureUrl
+        currentDoctorRecord?.profilePicture,
+        (currentDoctorRecord as any)?.profilePictureUrl
       )
     : undefined;
 
@@ -214,7 +226,7 @@ export function NextAppointmentCard({
                 <span>Next Appointment</span>
               </div>
               <h3 className="text-3xl font-black text-gray-900 tracking-tight mt-2">
-                {currentAppointment.patientName}
+                {currentPatientName}
               </h3>
               <p className="text-gray-500 font-bold text-lg">
                 {getAppointmentTypeName(currentAppointment.type, currentAppointment.customType)}
@@ -223,10 +235,10 @@ export function NextAppointmentCard({
             
             <Avatar className="h-20 w-20 rounded-2xl bg-emerald-50 flex items-center justify-center border-2 border-emerald-100/50 shadow-inner group-hover:rotate-3 transition-transform duration-500 overflow-hidden">
               {resolvedPatientImage ? (
-                <AvatarImage src={resolvedPatientImage} alt={`${currentAppointment.patientName} photo`} className="object-cover" />
+                <AvatarImage src={resolvedPatientImage} alt={`${currentPatientName} photo`} className="object-cover" />
               ) : (
                 <AvatarFallback className="bg-emerald-50 text-center">
-                  <div className="text-2xl font-black text-emerald-700">{getInitials(currentAppointment.patientName)}</div>
+                  <div className="text-2xl font-black text-emerald-700">{getInitials(currentPatientName)}</div>
                   <div className="text-[8px] font-black uppercase tracking-widest text-emerald-600/70 mt-0.5">Patient</div>
                 </AvatarFallback>
               )}
@@ -317,12 +329,12 @@ export function NextAppointmentCard({
             <h3 className="text-3xl font-black text-gray-900 tracking-tight mt-2">
               {getAppointmentTypeName(currentAppointment.type, currentAppointment.customType)}
             </h3>
-            <p className="text-gray-500 font-bold text-lg">with Dr. {currentAppointment.doctor}</p>
+            <p className="text-gray-500 font-bold text-lg">with {currentDoctorLabel || "Doctor"}</p>
           </div>
           
           <Avatar className="h-20 w-20 rounded-2xl bg-violet-50 flex items-center justify-center border-2 border-violet-100/50 shadow-inner group-hover:-rotate-3 transition-transform duration-500 overflow-hidden">
             {resolvedDoctorImage ? (
-              <AvatarImage src={resolvedDoctorImage} alt={String(currentAppointment.doctor || '')} className="object-cover" />
+              <AvatarImage src={resolvedDoctorImage} alt={currentDoctorName || "Doctor"} className="object-cover" />
             ) : (
               <AvatarFallback className="bg-violet-50 text-center">
                 <Calendar className="h-10 w-10 text-violet-400 opacity-60" />

@@ -130,11 +130,9 @@ export function Dashboard({ portal }: DashboardProps) {
     }
 
     // For patient portal, only show their appointments
-    if (portal === "patient" && user?.username) {
-      const emailPrefix = user.username.split('@')[0];
+    if (portal === "patient" && user?.patientId) {
       filtered = filtered.filter((apt: Appointment) =>
-        apt.patientName.toLowerCase().includes(emailPrefix.toLowerCase()) ||
-        apt.patientName.toLowerCase() === user.username.toLowerCase()
+        String(apt.patientId).trim() === String(user.patientId).trim()
       );
     }
 
@@ -183,10 +181,8 @@ export function Dashboard({ portal }: DashboardProps) {
       if (portal === "doctor" && user?.username) {
         return apt.doctor.toLowerCase() === user.username.toLowerCase();
       }
-      if (portal === "patient" && user?.username) {
-        const emailPrefix = user.username.split('@')[0];
-        return apt.patientName.toLowerCase().includes(emailPrefix.toLowerCase()) ||
-               apt.patientName.toLowerCase() === user.username.toLowerCase();
+      if (portal === "patient" && user?.patientId) {
+        return String(apt.patientId).trim() === String(user.patientId).trim();
       }
       return true;
     });
@@ -211,9 +207,9 @@ export function Dashboard({ portal }: DashboardProps) {
         apt.doctor.toLowerCase() === user.username.toLowerCase()
       );
     }
-    if (portal === "patient" && user?.username) {
+    if (portal === "patient" && user?.patientId) {
       filtered = filtered.filter((apt: Appointment) =>
-        apt.patientName.toLowerCase() === user.username.toLowerCase()
+        String(apt.patientId).trim() === String(user.patientId).trim()
       );
     }
     return filtered.filter(apt => ["reserved", "to-pay", "tbd"].includes(normalizeAppointmentStatus(apt.status))).length;
@@ -362,6 +358,7 @@ export function Dashboard({ portal }: DashboardProps) {
         onOpenAppointment={handleOpenSnapshotAppointment}
         isAppointmentOpen={isSnapshotAppointmentOpen}
         isHistorical={appointmentSnapshotIsHistorical}
+        showPreviousInputChanges={false}
       />
     </div>
   );

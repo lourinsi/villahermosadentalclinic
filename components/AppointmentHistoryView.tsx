@@ -15,6 +15,8 @@ import { useDoctors } from "@/hooks/useDoctors";
 import { useAppointmentModal } from "@/hooks/useAppointmentModal";
 import { formatBookingHistoryStatusLabel, normalizeBookingHistoryStatus, isSignificantBookingPaymentStatus } from "./sharedBookingLogic";
 import { getDefaultAppointmentStatusColors, getDefaultPaymentStatusColors } from "@/lib/status-colors";
+import { findDoctorForSnapshot, normalizeDoctorIdentity } from "@/lib/doctor-identity";
+import { getAppointmentPatientDisplayName } from "@/lib/patient-identity";
 
 interface AppointmentHistoryViewProps {
   open: boolean;
@@ -29,6 +31,7 @@ interface AppointmentHistoryViewProps {
   restoreNotificationId?: string;
   onRestoreNotification?: (notificationId: string) => void | Promise<void>;
   openedFromBookingModal?: boolean;
+  showPreviousInputChanges?: boolean;
 }
 
 type SnapshotState = "historical" | "latest" | "current";
@@ -111,7 +114,7 @@ const resolveDoctorName = (doctor: any) => {
 };
 
 const normalizeDoctorName = (doctor: any) => {
-  const normalized = resolveDoctorName(doctor).replace(/^Dr\.\s+/i, "").toLowerCase().trim();
+  const normalized = normalizeDoctorIdentity(resolveDoctorName(doctor));
   return /^(none|null|undefined|unassigned|no doctor assigned)$/.test(normalized) ? "" : normalized;
 };
 
@@ -300,14 +303,14 @@ const isPatientChange = (snapshot: any) => {
   return Boolean(pPrev && pNext && pPrev !== pNext);
 };
 
-export default function AppointmentHistoryView({ open, onOpenChange, appointmentSnapshot, logDate, onViewCurrent, onOpenAppointment, isAppointmentOpen, isHistorical, actionsDisabled = false, restoreNotificationId, onRestoreNotification, openedFromBookingModal = false }: AppointmentHistoryViewProps) {
+export default function AppointmentHistoryView({ open, onOpenChange, appointmentSnapshot, logDate, onViewCurrent, onOpenAppointment, isAppointmentOpen, isHistorical, actionsDisabled = false, restoreNotificationId, onRestoreNotification, openedFromBookingModal = false, showPreviousInputChanges = true }: AppointmentHistoryViewProps) {
   const [displayedSnapshot, setDisplayedSnapshot] = useState<any | null>(appointmentSnapshot);
   const [snapshotState, setSnapshotState] = useState<SnapshotState>(Boolean(isHistorical) ? "historical" : "current");
   const [isFetchingLogs, setIsFetchingLogs] = useState(false);
   const [patientRecord, setPatientRecord] = useState<any | null>(null);
   const [latestPaymentLogAmount, setLatestPaymentLogAmount] = useState<number | null>(null);
   const [latestComparisonSnapshot, setLatestComparisonSnapshot] = useState<any | null>(null);
-  const { doctors } = useDoctors(undefined, { enabled: open });
+  const { doctors } = useDoctors(open ? 1 : undefined, { enabled: open });
   const displayedPatientId = displayedSnapshot?.patientId || displayedSnapshot?.patient?.id || "";
   const displayedAppointmentId = displayedSnapshot?.id || displayedSnapshot?.appointmentId || appointmentSnapshot?.id || appointmentSnapshot?.appointmentId || "";
 
@@ -317,6 +320,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
   const [isRejectConfirmOpen, setIsRejectConfirmOpen] = useState(false);
   const [pendingActionSnapshot, setPendingActionSnapshot] = useState<any | null>(null);
   const [isProcessingAction, setIsProcessingAction] = useState(false);
+  const shouldShowPreviousInputChanges = openedFromBookingModal || showPreviousInputChanges;
 
   useEffect(() => {
     setDisplayedSnapshot(appointmentSnapshot);
@@ -480,15 +484,17 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
       ? parsedLogDate.toLocaleDateString()
       : parsedLogDate.toLocaleString();
   const typeName = resolveAppointmentTypeName(displayedSnapshot.type, displayedSnapshot.customType);
-  const patientName = resolvePatientName(displayedSnapshot);
+  const patientName = getAppointmentPatientDisplayName(displayedSnapshot, patientRecord);
   const resolvedPatientImage = resolveImageSource(getPatientProfilePicture(displayedSnapshot, patientRecord));
   const rawDisplayedDoctorName = resolveDoctorName(displayedSnapshot.doctor || displayedSnapshot.doctorName || displayedSnapshot.doctorId);
-  const displayedDoctorName = normalizeDoctorName(rawDisplayedDoctorName) ? rawDisplayedDoctorName : "";
-  const doctorRecord = doctors.find((doctor: any) =>
-    String(doctor.id) === String(displayedSnapshot.doctorId || displayedDoctorName) ||
-    String(doctor.name) === String(displayedDoctorName) ||
-    normalizeDoctorName(doctor.name) === normalizeDoctorName(displayedDoctorName)
+  const doctorRecord = findDoctorForSnapshot(doctors, displayedSnapshot) || doctors.find((doctor: any) =>
+    String(doctor.id) === String(displayedSnapshot.doctorId || rawDisplayedDoctorName) ||
+    String(doctor.name) === String(rawDisplayedDoctorName) ||
+    normalizeDoctorName(doctor.name) === normalizeDoctorName(rawDisplayedDoctorName)
   );
+  const displayedDoctorName = normalizeDoctorName(rawDisplayedDoctorName)
+    ? resolveDoctorName(doctorRecord?.name || rawDisplayedDoctorName)
+    : "";
   const doctorImage =
     displayedSnapshot.doctorProfile ||
     displayedSnapshot.doctorProfilePicture ||
@@ -628,7 +634,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
     const normalizedRawName = normalizeDoctorName(rawName);
     if (!normalizedRawName) return "";
 
-    const matchedDoctor = doctors.find((doctor: any) =>
+    const matchedDoctor = findDoctorForSnapshot(doctors, snapshot) || doctors.find((doctor: any) =>
       String(doctor.id) === String(snapshot?.doctorId || rawName) ||
       String(doctor.name) === String(rawName) ||
       normalizeDoctorName(doctor.name) === normalizedRawName
@@ -1037,7 +1043,7 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                   <CurrentChangeIndicator change={patientCurrentChange} />
                 </div>
                 {(() => {
-                  if (!openedFromBookingModal) return null;
+                  if (!shouldShowPreviousInputChanges) return null;
                   if (isPastSnapshot && latestStateForComparison) {
                     const logPatient = getPatientIdentity(displayedSnapshot) || patientName;
                     const currentPatient = getPatientIdentity(latestStateForComparison) || latestPatientName;
@@ -1075,9 +1081,9 @@ export default function AppointmentHistoryView({ open, onOpenChange, appointment
                   <CurrentChangeIndicator change={doctorCurrentChange} />
                 </div>
                 {(() => {
-                  if (!openedFromBookingModal) return null;
-                  const prevDoc = prevState ? resolveDoctorName(prevState?.doctor || prevState?.doctorName || prevState?.doctorId) : "";
-                  const nextDoc = nextState ? resolveDoctorName(nextState?.doctor || nextState?.doctorName || nextState?.doctorId) : "";
+                  if (!shouldShowPreviousInputChanges) return null;
+                  const prevDoc = prevState ? resolveDoctorDisplayNameFromSnapshot(prevState) : "";
+                  const nextDoc = nextState ? resolveDoctorDisplayNameFromSnapshot(nextState) : "";
                   const prevDocNorm = prevDoc ? normalizeDoctorName(prevDoc) : "";
                   const nextDocNorm = nextDoc ? normalizeDoctorName(nextDoc) : "";
                   if (!prevState || !nextState || !prevDocNorm || !nextDocNorm || prevDocNorm === nextDocNorm) return null;
