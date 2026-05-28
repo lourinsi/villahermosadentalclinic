@@ -16,7 +16,10 @@ export function QuickActions({
   openAddPatientModal
 }: QuickActionsProps) {
   return (
-    <Card className="border border-gray-100 shadow-sm bg-white rounded-3xl overflow-hidden flex flex-col h-full">
+    <Card
+      data-tour-id={portal === "admin" ? "admin-quick-actions" : `${portal}-quick-actions`}
+      className="border border-gray-100 shadow-sm bg-white rounded-3xl overflow-hidden flex flex-col h-full"
+    >
       <CardHeader className="border-b border-gray-50 p-8">
         <CardTitle className="text-xl font-black text-gray-900 tracking-tight">Quick Actions</CardTitle>
         <p className="text-sm font-medium text-gray-500 mt-1">Common tasks</p>
@@ -27,6 +30,7 @@ export function QuickActions({
             <>
               <Button
                 variant="outline"
+                data-tour-id="admin-quick-schedule"
                 className="group flex items-center justify-between p-8 h-auto border-gray-100 hover:border-blue-100 hover:bg-blue-50/30 rounded-3xl transition-all duration-300"
                 onClick={openCreateModal}
               >
@@ -41,6 +45,7 @@ export function QuickActions({
                 </div>
               </Button>
               <Button
+                data-tour-id="admin-quick-add-patient"
                 className="group flex items-center justify-between p-8 h-auto bg-violet-600 hover:bg-violet-700 text-white rounded-3xl transition-all shadow-xl shadow-violet-100"
                 onClick={openAddPatientModal}
               >

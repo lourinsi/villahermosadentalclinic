@@ -23,6 +23,7 @@ interface DatePickerModalProps {
   dateSelectionMode?: BookingCreationMode;
   appointmentSource?: "server" | "cache";
   cachedAppointments?: Appointment[];
+  selectionDisabled?: boolean;
 }
 
 const getAppointmentFetchOptions = (): RequestInit => {
@@ -50,6 +51,7 @@ export function DatePickerModal({
   dateSelectionMode = "standard",
   appointmentSource = "server",
   cachedAppointments = [],
+  selectionDisabled = false,
 }: DatePickerModalProps) {
   const [viewDate, setViewDate] = useState<Date>(new Date(selectedDate));
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -92,6 +94,8 @@ export function DatePickerModal({
   };
 
   const handleDateSelect = (date: Date) => {
+    if (selectionDisabled) return;
+
     // If a time is selected, check if it's available on the new date
     if (selectedTime && duration) {
       const hasConflict = checkTimeConflict(date);
@@ -230,7 +234,7 @@ export function DatePickerModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent data-tour-id="booking-date-picker" className="max-w-md">
         <DialogHeader>
           <DialogTitle>{isPastMode ? "Select Past Date" : isEditMode ? "Select Date" : "Select Date"}</DialogTitle>
         </DialogHeader>
@@ -315,11 +319,13 @@ export function DatePickerModal({
                 return (
                   <button
                     key={date.toISOString()}
-                    disabled={isDisabled || isFullyBooked}
-                    onClick={() => !isDisabled && !isFullyBooked && handleDateSelect(date)}
+                    disabled={selectionDisabled || isDisabled || isFullyBooked}
+                    onClick={() => !selectionDisabled && !isDisabled && !isFullyBooked && handleDateSelect(date)}
                     className={cn(
                       "aspect-square flex items-center justify-center rounded-lg text-sm font-medium transition-all border",
-                      isDisabled
+                      selectionDisabled
+                        ? "bg-gray-50 text-gray-300 border-gray-100 cursor-not-allowed"
+                        : isDisabled
                         ? "bg-gray-50 text-gray-300 border-gray-100 cursor-not-allowed"
                         : isFullyBooked
                         ? "bg-red-50 text-red-400 border-red-200 cursor-not-allowed hover:bg-red-50"
@@ -332,7 +338,8 @@ export function DatePickerModal({
                         : "bg-white text-gray-700 border-gray-300 hover:border-blue-400 hover:bg-blue-50 cursor-pointer"
                     )}
                     title={
-                      isDisabled ? (isPastMode ? "Upcoming date" : isEditMode ? "Not available" : "Past date")
+                      selectionDisabled ? "Date selection is disabled during this tour step"
+                      : isDisabled ? (isPastMode ? "Upcoming date" : isEditMode ? "Not available" : "Past date")
                       : isFullyBooked ? "Fully booked"
                       : dayStatus === 'has-bookings' ? "Has Bookings"
                       : "Available"

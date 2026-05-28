@@ -266,7 +266,7 @@ export function Dashboard({ portal }: DashboardProps) {
   );
 
   return (
-    <div className="p-8 space-y-10 bg-[#f8fafc] min-h-screen">
+    <div data-tour-id={`${portal}-dashboard-page`} className="p-8 space-y-10 bg-[#f8fafc] min-h-screen">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div className="space-y-1">
           <h1 className="text-4xl font-black text-gray-900 tracking-tight">{headerText.title}</h1>
@@ -294,15 +294,17 @@ export function Dashboard({ portal }: DashboardProps) {
       </div>
 
       {/* Stats Cards */}
-      <DashboardStats
-        portal={portal}
-        viewMode={viewMode}
-        appointments={appointments}
-        filteredAppointments={filteredAppointments}
-        totalPatients={totalPatients}
-        pendingAppointmentsCount={pendingAppointmentsCount}
-        user={user}
-      />
+      <div data-tour-id={portal === "admin" ? "admin-dashboard-stats" : `${portal}-dashboard-stats`}>
+        <DashboardStats
+          portal={portal}
+          viewMode={viewMode}
+          appointments={appointments}
+          filteredAppointments={filteredAppointments}
+          totalPatients={totalPatients}
+          pendingAppointmentsCount={pendingAppointmentsCount}
+          user={user}
+        />
+      </div>
 
       {/* Next Appointment Section (Full Width) */}
       <NextAppointmentCard

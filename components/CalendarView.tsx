@@ -1088,21 +1088,19 @@ const isMinuteOccupied: boolean[] = new Array(24 * 60).fill(false);
               )}
 
               {/* View Mode Buttons and Status Badge - always on right */}
-              <div className="flex items-center gap-3">
-                {/* View Mode Buttons - only for patient */}
-                {(portal === 'patient' || portal === 'public') && (
-                  <div className="flex items-center gap-2">
-                    {(['month','week','day'] as const).map(mode => (
-                      <button
-                        key={mode}
-                        onClick={() => setViewMode(mode)}
-                        className={`px-4 py-2 text-xs font-black uppercase tracking-wider rounded-lg transition-all ${viewMode === mode ? 'text-violet-600' : 'text-gray-500 hover:text-gray-700'}`}
-                      >
-                        {mode}
-                      </button>
-                    ))}
-                  </div>
-                )}
+              <div className="flex items-center gap-3" data-tour-id="calendar-view-toggle">
+                <div className="flex items-center gap-2">
+                  {(['month','week','day'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      data-tour-id={`calendar-view-${mode}`}
+                      onClick={() => setViewMode(mode)}
+                      className={`px-4 py-2 text-xs font-black uppercase tracking-wider rounded-lg transition-all ${viewMode === mode ? 'text-violet-600' : 'text-gray-500 hover:text-gray-700'}`}
+                    >
+                      {mode}
+                    </button>
+                  ))}
+                </div>
 
                 <Badge variant="secondary" className="bg-violet-50 text-violet-700 border-violet-100 h-10 px-4 rounded-lg font-semibold flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full bg-violet-600 animate-pulse" />

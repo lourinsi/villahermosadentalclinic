@@ -21,7 +21,20 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   const router = useRouter();
   const { logout, user } = useAuth();
   const { mode, toggleMode } = useBookingModalMode();
-  const { notifications, markAsRead, markAsUnread, deleteNotification, deleteNotificationWithResult, markAllAsRead, deleteAllNotifications, refreshNotifications } = useNotifications();
+  const {
+    notifications,
+    markAsRead,
+    markAsUnread,
+    deleteNotification,
+    deleteNotificationWithResult,
+    markAllAsRead,
+    deleteAllNotifications,
+    refreshNotifications,
+    loadMoreNotifications,
+    hasMore,
+    isLoadingMore,
+    unreadCount: serverUnreadCount,
+  } = useNotifications();
   const { 
     appointments, 
     openEditModalById,
@@ -46,7 +59,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
     resetAppointmentSnapshot,
   } = useNotificationAppointmentSnapshot(appointments);
 
-  const unreadCount = notifications.filter(n => !n.isRead).length;
+  const unreadCount = serverUnreadCount ?? notifications.filter(n => !n.isRead).length;
   const isBookingModalOpen = isEditModalOpen || isCreateModalOpen;
   const {
     approvalDialogAppointment,
@@ -104,9 +117,12 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
     { href: "/admin/settings", label: "Settings", icon: Settings },
   ];
 
+  const getNavTourId = (label: string) =>
+    `admin-nav-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+
   return (
     <div className="flex h-screen bg-gray-100">
-      <aside className="w-64 bg-blue-900 text-white flex-shrink-0 flex flex-col">
+      <aside data-tour-id="admin-sidebar" className="w-64 bg-blue-900 text-white flex-shrink-0 flex flex-col">
         <div className="p-4 text-2xl font-bold border-b border-blue-800">Admin</div>
         <nav className="flex-1 py-4">
           <ul className="space-y-1">
@@ -118,6 +134,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
                   <Link
                     href={item.href}
                     prefetch={false}
+                    data-tour-id={getNavTourId(item.label)}
                     className={`flex items-center gap-3 px-4 py-3 mx-2 rounded-lg transition-colors ${
                       isActive
                         ? "bg-blue-950 text-white"
@@ -154,27 +171,33 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
               onClick={toggleMode}
               variant="outline"
               size="sm"
+              data-tour-id="admin-mode-toggle"
               className="text-xs"
               title={`Switch to ${mode === 'simple' ? 'Pro' : 'Simple'} mode`}
             >
               {mode === 'simple' ? '📱 Simple' : '⭐ Pro'}
             </Button>
           </div>
-          <NotificationsOpened 
-            notifications={notifications} 
-            unreadCount={unreadCount} 
-            portal="admin" 
-            onUpdateAppointmentStatus={openApprovalDialog}
-            onMarkAsRead={markAsRead}
-            onMarkAsUnread={markAsUnread}
-            onDelete={deleteNotification}
-            onDeleteWithResult={deleteNotificationWithResult}
-            onMarkAllAsRead={markAllAsRead}
-            onDeleteAll={deleteAllNotifications}
-            onRefresh={refreshNotifications}
-            onEditAppointment={handleEditAppointment}
-            onViewAppointmentSnapshot={handleViewAppointmentSnapshot}
-          />
+          <div data-tour-id="admin-notifications">
+            <NotificationsOpened
+              notifications={notifications}
+              unreadCount={unreadCount}
+              portal="admin"
+              onUpdateAppointmentStatus={openApprovalDialog}
+              onMarkAsRead={markAsRead}
+              onMarkAsUnread={markAsUnread}
+              onDelete={deleteNotification}
+              onDeleteWithResult={deleteNotificationWithResult}
+              onMarkAllAsRead={markAllAsRead}
+              onDeleteAll={deleteAllNotifications}
+              onRefresh={refreshNotifications}
+              hasMore={hasMore}
+              isLoadingMore={isLoadingMore}
+              onLoadMore={loadMoreNotifications}
+              onEditAppointment={handleEditAppointment}
+              onViewAppointmentSnapshot={handleViewAppointmentSnapshot}
+            />
+          </div>
         </header>
         <main className="flex-1 p-6 overflow-auto bg-gray-50">{children}</main>
         <AppointmentHistoryView

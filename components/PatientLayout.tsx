@@ -18,7 +18,20 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
   const router = useRouter();
   const { logout, user } = useAuth();
   const { mode, toggleMode } = useBookingModalMode();
-  const { notifications, refreshNotifications, markAsRead, markAsUnread, deleteNotification, deleteNotificationWithResult, markAllAsRead, deleteAllNotifications } = useNotifications();
+  const {
+    notifications,
+    refreshNotifications,
+    markAsRead,
+    markAsUnread,
+    deleteNotification,
+    deleteNotificationWithResult,
+    markAllAsRead,
+    deleteAllNotifications,
+    loadMoreNotifications,
+    hasMore,
+    isLoadingMore,
+    unreadCount: serverUnreadCount,
+  } = useNotifications();
   const { 
     appointments, 
     openEditModal, 
@@ -47,7 +60,7 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
     resetAppointmentSnapshot,
   } = useNotificationAppointmentSnapshot(appointments);
 
-  const unreadCount = notifications.filter(n => !n.isRead).length;
+  const unreadCount = serverUnreadCount ?? notifications.filter(n => !n.isRead).length;
   const isBookingModalOpen = isEditModalOpen || isCreateModalOpen;
 
   const handleReschedule = async (appointmentId: string) => {
@@ -178,6 +191,9 @@ const PatientLayout = ({ children }: { children: React.ReactNode }) => {
             onDeleteWithResult={deleteNotificationWithResult}
             onMarkAllAsRead={markAllAsRead}
             onDeleteAll={deleteAllNotifications}
+            hasMore={hasMore}
+            isLoadingMore={isLoadingMore}
+            onLoadMore={loadMoreNotifications}
             onReschedule={handleReschedule}
             onCancelAppointment={handleCancelAppointment}
             onEditAppointment={handleReschedule}

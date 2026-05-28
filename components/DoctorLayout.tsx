@@ -20,7 +20,20 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
   const router = useRouter();
   const { logout, user } = useAuth();
   const { mode, toggleMode } = useBookingModalMode();
-  const { notifications, markAsRead, markAsUnread, deleteNotification, deleteNotificationWithResult, markAllAsRead, deleteAllNotifications, refreshNotifications } = useNotifications();
+  const {
+    notifications,
+    markAsRead,
+    markAsUnread,
+    deleteNotification,
+    deleteNotificationWithResult,
+    markAllAsRead,
+    deleteAllNotifications,
+    refreshNotifications,
+    loadMoreNotifications,
+    hasMore,
+    isLoadingMore,
+    unreadCount: serverUnreadCount,
+  } = useNotifications();
   const { 
     appointments, 
     openEditModalById,
@@ -46,7 +59,7 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
     resetAppointmentSnapshot,
   } = useNotificationAppointmentSnapshot(appointments);
 
-  const unreadCount = notifications.filter(n => !n.isRead).length;
+  const unreadCount = serverUnreadCount ?? notifications.filter(n => !n.isRead).length;
   const isBookingModalOpen = isEditModalOpen || isCreateModalOpen;
   const {
     approvalDialogAppointment,
@@ -174,6 +187,9 @@ const DoctorLayout = ({ children }: { children: React.ReactNode }) => {
             onMarkAllAsRead={markAllAsRead}
             onDeleteAll={deleteAllNotifications}
             onRefresh={refreshNotifications}
+            hasMore={hasMore}
+            isLoadingMore={isLoadingMore}
+            onLoadMore={loadMoreNotifications}
             onEditAppointment={handleEditAppointment}
             onViewAppointmentSnapshot={handleViewAppointmentSnapshot}
           />

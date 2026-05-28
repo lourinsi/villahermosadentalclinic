@@ -716,7 +716,7 @@ export function FinanceView() {
   const profitChange = previousMonth.profit > 0 ? ((currentMonth.profit - previousMonth.profit) / previousMonth.profit * 100).toFixed(1) : "0.0";
 
   return (
-    <div className="p-6 space-y-6">
+    <div data-tour-id="finance-page" className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Financial Overview</h1>

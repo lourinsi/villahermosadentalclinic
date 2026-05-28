@@ -11,6 +11,7 @@ import { AddPatientModal } from "@/components/AddPatientModal";
 import { PaymentModal } from "@/components/PaymentModal";
 import { PatientPaymentModal } from "@/components/PatientPaymentModal";
 import { GlobalBookingModalWrapper } from "@/components/GlobalBookingModalWrapper";
+import { UserTour } from "@/components/UserTour";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -48,6 +49,7 @@ export default function RootLayout({
                 <GlobalBookingModalWrapper />
                 <PaymentModal />
                 <PatientPaymentModal />
+                <UserTour />
               </PaymentModalProvider>
             </AppointmentModalProvider>
           </BookingModalModeProvider>

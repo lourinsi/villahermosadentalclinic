@@ -26,8 +26,11 @@ export function NotificationPage({ portal }: NotificationPageProps) {
     markAllAsRead,
     deleteAllNotifications,
     refreshNotifications,
-    restoreNotification
-  } = useNotifications({ includeDeleted: true });
+    restoreNotification,
+    hasMore,
+    isLoadingMore,
+    loadMoreNotifications
+  } = useNotifications({ includeDeleted: true, limit: 30 });
 
   const { 
     updateAppointment, 
@@ -116,7 +119,7 @@ export function NotificationPage({ portal }: NotificationPageProps) {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
+      <div data-tour-id={`${portal}-notifications-page`} className="flex items-center justify-center min-h-[400px]">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
       </div>
     );
@@ -140,7 +143,7 @@ export function NotificationPage({ portal }: NotificationPageProps) {
   };
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div data-tour-id={`${portal}-notifications-page`} className="max-w-4xl mx-auto">
       <NotificationView 
         notifications={notifications}
         isLoading={notificationsLoading}
@@ -152,6 +155,9 @@ export function NotificationPage({ portal }: NotificationPageProps) {
         onRestore={handleRestoreNotification}
         onMarkAllAsRead={markAllAsRead}
         onDeleteAll={deleteAllNotifications}
+        hasMore={hasMore}
+        isLoadingMore={isLoadingMore}
+        onLoadMore={loadMoreNotifications}
         portal={portal}
         {...portalProps[portal]}
       />

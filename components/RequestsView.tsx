@@ -852,7 +852,7 @@ export function RequestsView({ doctorFilter }: RequestsViewProps = {}) {
   const historyColumnCount = doctorFilter ? 7 : 8;
 
   return (
-    <div className="p-6 max-w-[1600px] mx-auto space-y-6">
+    <div data-tour-id="requests-page" className="p-6 max-w-[1600px] mx-auto space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-black text-gray-900 tracking-tight uppercase italic">

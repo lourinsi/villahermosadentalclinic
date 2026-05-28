@@ -200,6 +200,7 @@ export default function PatientLoginPage() {
                 <div className="flex gap-2 flex-wrap">
                   <Link
                     href="/admin/login"
+                    data-tour-id="patient-login-admin-link"
                     className="flex-1 text-center text-xs text-blue-600 hover:text-blue-700 font-medium py-2 rounded hover:bg-blue-50 transition-colors"
                   >
                     Admin Login
