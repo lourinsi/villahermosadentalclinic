@@ -20,6 +20,12 @@ export default function AdminLoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
+  const fillDemoCredentials = () => {
+    setUsername("admin");
+    setPassword("password");
+    setShowPassword(true);
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -101,6 +107,7 @@ export default function AdminLoginPage() {
                 <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <Input
                   id="username"
+                  data-tour-id="admin-login-username"
                   type="text"
                   placeholder="Enter your username"
                   value={username}
@@ -121,6 +128,7 @@ export default function AdminLoginPage() {
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <Input
                   id="password"
+                  data-tour-id="admin-login-password"
                   type={showPassword ? "text" : "password"}
                   placeholder="Enter your password"
                   value={password}
@@ -152,6 +160,7 @@ export default function AdminLoginPage() {
             {/* Login Button */}
             <Button
               type="submit"
+              data-tour-id="admin-login-submit"
               disabled={isLoading || isSubmitting}
               className="w-full h-10 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-medium rounded-lg transition-all duration-200 mt-6"
             >
@@ -192,12 +201,24 @@ export default function AdminLoginPage() {
             </div>
 
             {/* Demo Credentials */}
-            <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+            <div
+              data-tour-id="admin-login-demo-card"
+              className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200"
+            >
               <p className="text-xs font-semibold text-blue-900 mb-2">Demo Credentials:</p>
               <p className="text-xs text-blue-800 font-mono">
                 <strong>Username:</strong> admin<br />
                 <strong>Password:</strong> password
               </p>
+              <Button
+                type="button"
+                variant="outline"
+                data-tour-id="admin-demo-fill"
+                onClick={fillDemoCredentials}
+                className="mt-3 h-9 w-full border-blue-200 bg-white text-xs font-bold text-blue-700 hover:bg-blue-50"
+              >
+                Use demo credentials
+              </Button>
             </div>
 
             {/* Footer */}

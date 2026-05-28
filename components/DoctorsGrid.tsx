@@ -66,7 +66,7 @@ export function DoctorsGrid({ portal, onDoctorSelect }: DoctorsGridProps) {
   }
 
   return (
-    <div className="space-y-8 p-4 md:p-8 max-w-7xl mx-auto">
+    <div data-tour-id={portal === 'admin' ? 'admin-doctors-page' : portal === 'patient' ? 'patient-doctors-page' : 'public-doctors-page'} className="space-y-8 p-4 md:p-8 max-w-7xl mx-auto">
       <div className="flex flex-col gap-4">
         <h1 className="text-3xl font-bold tracking-tight">Our Dental Specialists</h1>
         <p className="text-muted-foreground text-lg">{getDescription()}</p>
@@ -137,6 +137,7 @@ export function DoctorsGrid({ portal, onDoctorSelect }: DoctorsGridProps) {
               </CardContent>
               <CardFooter className="pt-2 border-t bg-muted/5 flex flex-col gap-2">
                 <Button
+                  data-tour-id="doctor-card-button"
                   onClick={() => handleDoctorClick(doctor)}
                   className="w-full gap-2 bg-blue-600 hover:bg-blue-700"
                 >

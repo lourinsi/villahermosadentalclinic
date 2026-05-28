@@ -62,6 +62,9 @@ const getPatientStatusTooltip = (status: string, overdueAppointmentCount?: numbe
   }
 };
 
+const isTourDemoPatient = (patient: Patient) =>
+  String(patient.id || "").toUpperCase().includes("ENT_TEST");
+
 export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -379,7 +382,10 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
   };
 
   return (
-    <div className="p-4 md:p-8 max-w-[1600px] mx-auto space-y-8 bg-[#fdfdff] min-h-screen">
+    <div
+      data-tour-id={doctorFilter ? "doctor-patients-page" : "patients-page"}
+      className="p-4 md:p-8 max-w-[1600px] mx-auto space-y-8 bg-[#fdfdff] min-h-screen"
+    >
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-slate-900">
@@ -392,7 +398,12 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="brand" onClick={handleAddPatient} className="shadow-sm">
+          <Button
+            variant="brand"
+            data-tour-id="patients-new-button"
+            onClick={handleAddPatient}
+            className="shadow-sm"
+          >
             <Plus className="h-4 w-4 mr-2" />
             New Patient
           </Button>
@@ -483,7 +494,11 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
                 </TableHeader>
                 <TableBody>
                   {paginatedPatients.map((patient) => (
-                    <TableRow key={patient.id} className="group hover:bg-slate-50/50 transition-colors border-slate-100">
+                    <TableRow
+                      key={patient.id}
+                      data-tour-id={isTourDemoPatient(patient) ? "patients-demo-row" : undefined}
+                      className="group hover:bg-slate-50/50 transition-colors border-slate-100"
+                    >
                       <TableCell className="py-4">
                         <div className="flex items-center gap-3">
                           <Avatar className="h-10 w-10 border border-slate-200 shadow-sm">
@@ -552,12 +567,22 @@ export function PatientsView({ doctorFilter }: PatientsViewProps = {}) {
                       <TableCell className="text-right pr-6">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-900">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              data-tour-id={isTourDemoPatient(patient) ? "patients-demo-actions" : undefined}
+                              className="h-8 w-8 text-slate-400 hover:text-slate-900"
+                            >
                               <MoreVertical className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-48">
+                          <DropdownMenuContent
+                            align="end"
+                            data-tour-id={isTourDemoPatient(patient) ? "patients-demo-actions-menu" : undefined}
+                            className="w-48"
+                          >
                             <DropdownMenuItem
+                              data-tour-id={isTourDemoPatient(patient) ? "patients-demo-view-details" : undefined}
                               className="gap-2"
                               onClick={() => {
                                 setSelectedPatient(patient);

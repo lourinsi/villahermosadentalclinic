@@ -10,37 +10,57 @@ interface UseNotificationsOptions {
   limit?: number;
 }
 
+interface NotificationsMeta {
+  total?: number;
+  unreadCount?: number;
+  limit?: number | null;
+  offset?: number;
+  hasMore?: boolean;
+}
+
 export const useNotifications = (options?: UseNotificationsOptions) => {
   const { user } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [meta, setMeta] = useState<NotificationsMeta>({});
+  const [nextOffset, setNextOffset] = useState(0);
   const enabled = options?.enabled ?? true;
   const includeDeleted = options?.includeDeleted ?? false;
   const limit = options?.limit ?? (includeDeleted ? undefined : 20);
 
   const userId = user?.patientId || user?.staffId || user?.username;
 
-  const fetchNotifications = useCallback(async () => {
+  const fetchNotificationsPage = useCallback(async (offset = 0, append = false) => {
     if (!enabled) {
       setIsLoading(false);
+      setIsLoadingMore(false);
       return;
     }
 
     // Don't proceed if userId is not available
     if (!userId) {
       setIsLoading(false);
+      setIsLoadingMore(false);
       setError(null);
       setNotifications([]);
+      setMeta({});
+      setNextOffset(0);
       return;
     }
 
     try {
-      setIsLoading(true);
+      if (append) {
+        setIsLoadingMore(true);
+      } else {
+        setIsLoading(true);
+      }
       setError(null);
       const params = new URLSearchParams({ userId });
       if (includeDeleted) params.set("includeDeleted", "true");
       if (limit) params.set("limit", String(limit));
+      if (limit && offset > 0) params.set("offset", String(offset));
 
       const response = await fetch(apiUrl(`/api/notifications?${params.toString()}`), { credentials: 'include' });
       if (!response.ok) {
@@ -51,7 +71,30 @@ export const useNotifications = (options?: UseNotificationsOptions) => {
 
       const data = await response.json();
       if (data.success) {
-        setNotifications(data.data);
+        const incoming = Array.isArray(data.data) ? data.data : [];
+        setNotifications(prev => {
+          if (!append) return incoming;
+
+          const seen = new Set(prev.map(notification => notification.id));
+          const merged = [...prev];
+          incoming.forEach((notification: Notification) => {
+            if (!seen.has(notification.id)) {
+              seen.add(notification.id);
+              merged.push(notification);
+            }
+          });
+          return merged;
+        });
+
+        const responseMeta: NotificationsMeta = data.meta || {};
+        const fallbackHasMore = Boolean(limit && incoming.length === limit);
+        setMeta({
+          ...responseMeta,
+          hasMore: responseMeta.hasMore ?? fallbackHasMore,
+          unreadCount: responseMeta.unreadCount,
+          total: responseMeta.total,
+        });
+        setNextOffset(offset + incoming.length);
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to load notifications";
@@ -59,9 +102,22 @@ export const useNotifications = (options?: UseNotificationsOptions) => {
       setError(errorMessage);
       toast.error("Failed to load notifications");
     } finally {
-      setIsLoading(false);
+      if (append) {
+        setIsLoadingMore(false);
+      } else {
+        setIsLoading(false);
+      }
     }
   }, [enabled, includeDeleted, limit, userId]);
+
+  const fetchNotifications = useCallback(async () => {
+    await fetchNotificationsPage(0, false);
+  }, [fetchNotificationsPage]);
+
+  const loadMoreNotifications = useCallback(async () => {
+    if (!limit || isLoading || isLoadingMore || !meta.hasMore) return;
+    await fetchNotificationsPage(nextOffset, true);
+  }, [fetchNotificationsPage, isLoading, isLoadingMore, limit, meta.hasMore, nextOffset]);
 
   // Listen for global notification changes (from other hook instances) and refetch
   useEffect(() => {
@@ -93,6 +149,7 @@ export const useNotifications = (options?: UseNotificationsOptions) => {
 
   const markAsRead = async (id: string) => {
     try {
+      const wasUnread = notifications.some(n => n.id === id && !n.isRead && !n.deleted);
       const response = await fetch(apiUrl(`/api/notifications/${id}`), {
         method: "PUT",
         credentials: 'include',
@@ -103,6 +160,12 @@ export const useNotifications = (options?: UseNotificationsOptions) => {
       if (!response.ok) throw new Error("Failed to mark notification as read");
       
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
+      setMeta(prev => ({
+        ...prev,
+        unreadCount: wasUnread
+          ? Math.max(0, (prev.unreadCount ?? notifications.filter(n => !n.isRead && !n.deleted).length) - 1)
+          : prev.unreadCount,
+      }));
   // notify other hook instances
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore
@@ -115,6 +178,7 @@ export const useNotifications = (options?: UseNotificationsOptions) => {
 
   const markAsUnread = async (id: string) => {
     try {
+      const wasRead = notifications.some(n => n.id === id && n.isRead && !n.deleted);
       const response = await fetch(apiUrl(`/api/notifications/${id}`), {
         method: "PUT",
         credentials: 'include',
@@ -125,6 +189,12 @@ export const useNotifications = (options?: UseNotificationsOptions) => {
       if (!response.ok) throw new Error("Failed to mark notification as unread");
       
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: false } : n));
+      setMeta(prev => ({
+        ...prev,
+        unreadCount: wasRead
+          ? (prev.unreadCount ?? notifications.filter(n => !n.isRead && !n.deleted).length) + 1
+          : prev.unreadCount,
+      }));
       toast.success("Marked as unread");
     // notify other hook instances
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -138,6 +208,7 @@ export const useNotifications = (options?: UseNotificationsOptions) => {
 
   const deleteNotification = async (id: string) => {
     try {
+      const wasUnread = notifications.some(n => n.id === id && !n.isRead && !n.deleted);
       const response = await fetch(apiUrl(`/api/notifications/${id}`), {
         method: "DELETE",
         credentials: 'include',
@@ -146,6 +217,13 @@ export const useNotifications = (options?: UseNotificationsOptions) => {
       if (!response.ok) throw new Error("Failed to delete notification");
       
       setNotifications(prev => prev.filter(n => n.id !== id));
+      setMeta(prev => ({
+        ...prev,
+        total: prev.total !== undefined && !includeDeleted ? Math.max(0, prev.total - 1) : prev.total,
+        unreadCount: wasUnread
+          ? Math.max(0, (prev.unreadCount ?? notifications.filter(n => !n.isRead && !n.deleted).length) - 1)
+          : prev.unreadCount,
+      }));
       toast.success("Notification deleted");
     // notify other hook instances
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -169,6 +247,7 @@ export const useNotifications = (options?: UseNotificationsOptions) => {
       if (!response.ok) throw new Error("Failed to mark all as read");
       
       setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+      setMeta(prev => ({ ...prev, unreadCount: 0 }));
       toast.success("All notifications marked as read");
     // notify other hook instances
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -192,6 +271,8 @@ export const useNotifications = (options?: UseNotificationsOptions) => {
       if (!response.ok) throw new Error("Failed to delete all notifications");
       
       setNotifications([]);
+      setMeta(prev => ({ ...prev, total: 0, unreadCount: 0, hasMore: false }));
+      setNextOffset(0);
       toast.success("All notifications cleared");
     // notify other hook instances
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -213,6 +294,10 @@ export const useNotifications = (options?: UseNotificationsOptions) => {
       if (!response.ok) throw new Error("Failed to restore notification");
       
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, deleted: false, deletedAt: undefined } : n));
+      setMeta(prev => ({
+        ...prev,
+        total: prev.total !== undefined && !includeDeleted ? prev.total + 1 : prev.total,
+      }));
       toast.success("Notification restored");
     // notify other hook instances
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -227,6 +312,7 @@ export const useNotifications = (options?: UseNotificationsOptions) => {
   // Return boolean success so callers can perform optimistic UI and rollback on failure
   const deleteNotificationWithResult = async (id: string): Promise<boolean> => {
     try {
+      const wasUnread = notifications.some(n => n.id === id && !n.isRead && !n.deleted);
       const response = await fetch(apiUrl(`/api/notifications/${id}`), {
         method: "DELETE",
         credentials: 'include',
@@ -240,6 +326,13 @@ export const useNotifications = (options?: UseNotificationsOptions) => {
       }
 
   setNotifications(prev => prev.filter(n => n.id !== id));
+      setMeta(prev => ({
+        ...prev,
+        total: prev.total !== undefined && !includeDeleted ? Math.max(0, prev.total - 1) : prev.total,
+        unreadCount: wasUnread
+          ? Math.max(0, (prev.unreadCount ?? notifications.filter(n => !n.isRead && !n.deleted).length) - 1)
+          : prev.unreadCount,
+      }));
       toast.success("Notification deleted");
   // notify other hook instances
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -256,7 +349,11 @@ export const useNotifications = (options?: UseNotificationsOptions) => {
   return {
     notifications,
     isLoading,
+    isLoadingMore,
     error,
+    hasMore: Boolean(meta.hasMore),
+    totalCount: meta.total,
+    unreadCount: meta.unreadCount,
     markAsRead,
     markAsUnread,
     deleteNotification,
@@ -265,5 +362,6 @@ export const useNotifications = (options?: UseNotificationsOptions) => {
     deleteAllNotifications,
     restoreNotification,
     refreshNotifications: fetchNotifications,
+    loadMoreNotifications,
   };
 };

@@ -327,6 +327,26 @@ const getPersonInitials = (name?: string) => {
   return initials || "?";
 };
 
+const getFirstDoctorById = (doctors: Array<{ id?: string; name?: string }> = []) => {
+  return [...doctors]
+    .filter((doctor) => String(doctor.name || "").trim())
+    .sort((a, b) => {
+      const aId = String(a.id || "").trim();
+      const bId = String(b.id || "").trim();
+      if (!aId && bId) return 1;
+      if (aId && !bId) return -1;
+      return aId.localeCompare(bId, undefined, { numeric: true, sensitivity: "base" });
+    })[0];
+};
+
+const DEFAULT_BOOKING_TREATMENT = "Routine Cleaning";
+const TOUR_STEP_CHANGE_EVENT = "villahermosa-tour:step-change";
+
+const getCurrentTourStepId = () => {
+  if (typeof window === "undefined") return "";
+  return (window as Window & { __villahermosaTourStepId?: string }).__villahermosaTourStepId || "";
+};
+
 interface BookingModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -385,11 +405,17 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   const [isRescheduling, setIsRescheduling] = useState(false);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [isTimePickerOpen, setIsTimePickerOpen] = useState(false);
+  const [activeTourStepId, setActiveTourStepId] = useState(getCurrentTourStepId);
   const [dailyAppointments, setDailyAppointments] = useState<any[]>([]);
   const [patientConflict, setPatientConflict] = useState("");
   const [patientAppointments, setPatientAppointments] = useState<any[]>([]);
   const lastHandledAddedPatientAtRef = useRef<number | null>(null);
   const appliedDefaultScheduleKeyRef = useRef<string | null>(null);
+  const autoPreselectRequestIdRef = useRef(0);
+  const autoPreselectSearchKeyRef = useRef<string | null>(null);
+  const selectedDateRef = useRef(selectedDate);
+  const selectedTimeRef = useRef(selectedTime);
+  const selectedDoctorRef = useRef(selectedDoctor);
 
   const toDate = (value: any): Date => {
     if (!value) return new Date();
@@ -412,8 +438,36 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
   useEffect(() => {
     if (!open) {
       appliedDefaultScheduleKeyRef.current = null;
+      autoPreselectRequestIdRef.current += 1;
+      autoPreselectSearchKeyRef.current = null;
     }
   }, [open]);
+
+  useEffect(() => {
+    const handleTourStepChange = (event: Event) => {
+      const stepId = (event as CustomEvent<{ stepId?: string }>).detail?.stepId || "";
+      setActiveTourStepId(stepId);
+    };
+
+    setActiveTourStepId(getCurrentTourStepId());
+    window.addEventListener(TOUR_STEP_CHANGE_EVENT, handleTourStepChange);
+
+    return () => {
+      window.removeEventListener(TOUR_STEP_CHANGE_EVENT, handleTourStepChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    selectedDateRef.current = selectedDate;
+  }, [selectedDate]);
+
+  useEffect(() => {
+    selectedTimeRef.current = selectedTime;
+  }, [selectedTime]);
+
+  useEffect(() => {
+    selectedDoctorRef.current = selectedDoctor;
+  }, [selectedDoctor]);
 
   const {
     isPublicBookingMode,
@@ -428,6 +482,8 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     bookingMode,
     isEditing: Boolean(appointmentToEdit),
   });
+  const isTourPatientNextStep = activeTourStepId === "booking-patient-next";
+  const isTourScheduleSelectionLocked = activeTourStepId === "booking-schedule";
   const publicBlockingAppointments = useMemo(
     () => (isPublicBookingMode ? getCachedPublicBlockingAppointments() : []),
     [
@@ -1091,15 +1147,23 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     }
   }, [open, user?.role, doctors, selectedDoctor, appointmentToEdit?.doctor, doctorName]);
 
-  // Centralized auto-preselect/validation runner — callable on open and after patients load
+  const getAutoPreselectDoctor = useCallback(() => {
+    if (selectedDoctor) return selectedDoctor;
+    if (doctorName) return doctorName;
+    if (user?.role === 'doctor') return user.username || (user as any)?.name || "";
+    return getFirstDoctorById(doctors)?.name || "";
+  }, [selectedDoctor, doctorName, user, doctors]);
+
+  // Centralized auto-preselect/validation runner for the schedule step.
   const runAutoPreselect = useCallback(async (patientId?: string) => {
+    const doctorToPreselect = getAutoPreselectDoctor();
     const autoPreselect = getBookingAutoPreselectConfig({
       isEditing: Boolean(appointmentToEdit),
       defaultDate,
       defaultTime,
       selectedTime,
       appointmentType,
-      selectedDoctor,
+      selectedDoctor: doctorToPreselect,
       selectedPatient,
       defaultPatientId,
       patientId,
@@ -1117,9 +1181,26 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       return;
     }
 
-    if (isPublicBookingMode) {
+    if (doctorToPreselect && !selectedDoctor) {
+      console.log('[BookingModal] Auto-preselecting doctor before schedule search:', doctorToPreselect);
+      setSelectedDoctor(doctorToPreselect);
+    }
+
+    const searchKey = [
+      autoPreselect.doctorToSearch,
+      autoPreselect.durationToSearch,
+      autoPreselect.patientToSearch || "",
+      isPublicBookingMode ? "public" : "standard",
+    ].join("|");
+
+    if (autoPreselectSearchKeyRef.current === searchKey) {
       return;
     }
+
+    autoPreselectSearchKeyRef.current = searchKey;
+    const requestId = autoPreselectRequestIdRef.current + 1;
+    autoPreselectRequestIdRef.current = requestId;
+    const selectedDateAtSearchStart = formatDateToYYYYMMDD(selectedDateRef.current);
 
     const nextSlot = await findNextAvailableBookingSlot({
       startDate: new Date(),
@@ -1127,20 +1208,35 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       durationToCheck: autoPreselect.durationToSearch,
       patientToCheck: autoPreselect.patientToSearch,
       timeSlots: TIME_SLOTS,
+      availabilityMode: isPublicBookingMode ? "public" : "authenticated",
+      localBlockingAppointments: isPublicBookingMode ? publicBlockingAppointments : [],
     });
 
+    if (requestId !== autoPreselectRequestIdRef.current) return;
+    if (selectedTimeRef.current) return;
+    if (formatDateToYYYYMMDD(selectedDateRef.current) !== selectedDateAtSearchStart) return;
+
+    const currentDoctor = selectedDoctorRef.current || doctorToPreselect;
+    if (normalizeDoctorName(currentDoctor) !== normalizeDoctorName(autoPreselect.doctorToSearch)) return;
+
     if (nextSlot) {
-      console.log('[BookingModal] ✅ Found next available slot (on open):', { date: formatDateToYYYYMMDD(nextSlot.date), time: nextSlot.time });
+      console.log('[BookingModal] Found next available slot after patient selection:', { date: formatDateToYYYYMMDD(nextSlot.date), time: nextSlot.time });
       setSelectedDate(nextSlot.date);
       setSelectedTime(nextSlot.time);
     }
-  }, [appointmentToEdit, defaultDate, defaultTime, appointmentType, selectedDoctor, selectedPatient, defaultPatientId, selectedTime, isPublicBookingMode]);
-
-  const runAutoPreselectRef = useRef(runAutoPreselect);
-
-  useEffect(() => {
-    runAutoPreselectRef.current = runAutoPreselect;
-  }, [runAutoPreselect]);
+  }, [
+    appointmentToEdit,
+    defaultDate,
+    defaultTime,
+    appointmentType,
+    selectedDoctor,
+    selectedPatient,
+    defaultPatientId,
+    selectedTime,
+    isPublicBookingMode,
+    publicBlockingAppointments,
+    getAutoPreselectDoctor,
+  ]);
 
   // Auto-preselect date, time, and appointment type for all portals
   useEffect(() => {
@@ -1165,7 +1261,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
         });
       }
 
-      if (!appointmentType) setAppointmentType("Routine Cleaning");
+      if (!appointmentType) setAppointmentType(DEFAULT_BOOKING_TREATMENT);
 
       if (defaultScheduleAction.shouldApplySchedule) {
         setSelectedDate(defaultScheduleAction.date);
@@ -1184,12 +1280,19 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     // Preselect first appointment type
     if (!appointmentType) {
       console.log('[BookingModal] 📋 Preselecting appointment type: Routine Cleaning');
-      setAppointmentType("Routine Cleaning");
+      setAppointmentType(DEFAULT_BOOKING_TREATMENT);
     }
     
-    // Delegate to centralized runner only while no schedule has been chosen.
-    runAutoPreselect();
-  }, [open, appointmentToEdit, defaultDate, defaultTime, doctorName, selectedTime, runAutoPreselect, appointmentType]);
+  }, [open, appointmentToEdit, defaultDate, defaultTime, doctorName, selectedTime, appointmentType]);
+
+  useEffect(() => {
+    if (!open || appointmentToEdit || modalStep !== 'schedule') return;
+    if (!selectedPatient || selectedTime) return;
+
+    runAutoPreselect(selectedPatient).catch((err) => {
+      console.warn('[BookingModal] Failed to auto-preselect schedule after patient selection:', err);
+    });
+  }, [open, appointmentToEdit, modalStep, selectedPatient, selectedTime, runAutoPreselect]);
 
   // Price calculations - handle custom types
   // finalPrice is the base price (before discount) - used in payment calculations
@@ -1296,12 +1399,6 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
           if (chosenPatientId) {
             setSelectedPatient(chosenPatientId);
-            if (!appointmentToEdit) {
-              // Trigger auto-preselect validation now that we have a selected patient.
-              runAutoPreselectRef.current(chosenPatientId).catch((err) => {
-                console.warn('[BookingModal] Failed to validate schedule after patient load:', err);
-              });
-            }
           }
         } else {
           console.warn('BookingModal: empty or failed response', json);
@@ -1385,7 +1482,7 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
       // Reset form when creating new appointment
       // If a defaultPatientId was provided (e.g., user clicked Schedule on a patient), prefer it
       setSelectedPatient(defaultPatientId ? String(defaultPatientId) : '');
-      setAppointmentType('');
+      setAppointmentType(DEFAULT_BOOKING_TREATMENT);
       setCustomAppointmentTypeName('');
       setDuration('30');
       setDiscount('0');
@@ -1597,6 +1694,66 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
     // Use the shared next-step helper: if already at payment, this will open the summary
     await handleNextStep();
   };
+
+  useEffect(() => {
+    const handleGuidedNext = async () => {
+      if (!open || isBooking) return;
+
+      if (isTimePickerOpen) {
+        setIsTimePickerOpen(false);
+      }
+      if (isDatePickerOpen) {
+        setIsDatePickerOpen(false);
+      }
+
+      if (modalStep === "payment") {
+        await handleConfirmPayment();
+        return;
+      }
+
+      if (modalStep === "doctor" && !selectedDoctor) {
+        const firstAvailableDoctor = visibleDoctors.find((doctor) => !hasDoctorScheduleConflict(doctor.name));
+        if (firstAvailableDoctor) {
+          setSelectedDoctor(firstAvailableDoctor.name);
+          setModalStep("treatment");
+        }
+        return;
+      }
+
+      await handleConfirmBooking();
+    };
+
+    const handleGuidedPrev = () => {
+      if (!open || isBooking) return;
+      handlePrevStep();
+    };
+
+    window.addEventListener("villahermosa-tour:booking-next", handleGuidedNext);
+    window.addEventListener("villahermosa-tour:booking-prev", handleGuidedPrev);
+
+    return () => {
+      window.removeEventListener("villahermosa-tour:booking-next", handleGuidedNext);
+      window.removeEventListener("villahermosa-tour:booking-prev", handleGuidedPrev);
+    };
+  }, [
+    handleConfirmBooking,
+    handlePrevStep,
+    isBooking,
+    modalStep,
+    open,
+    selectedDoctor,
+    visibleDoctors,
+  ]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    window.dispatchEvent(
+      new CustomEvent("villahermosa-tour:booking-step-change", {
+        detail: { step: modalStep },
+      })
+    );
+  }, [modalStep, open]);
 
   // Calculate what the final status will be for display in summary
   const getProjectedStatus = () => {
@@ -2099,8 +2256,10 @@ export default function BookingModal({ open, onOpenChange, defaultDate, defaultT
 
 return (
     <>
-      <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); else onOpenChange(true); }}>
-        <DialogContent className="max-w-full sm:max-w-5xl max-h-[95vh] p-0 overflow-hidden border-none shadow-2xl">
+      <Dialog open={open} onOpenChange={(v) => {
+          if (!v) handleClose(); else onOpenChange(true);
+        }}>
+        <DialogContent data-tour-id="booking-modal-shell" className="max-w-full sm:max-w-5xl max-h-[95vh] p-0 overflow-hidden border-none shadow-2xl">
           <DialogHeader className="p-6 bg-white border-b sticky top-0 z-20 shadow-sm">
             <div className="flex items-center justify-between mb-2">
               {modalStep !== 'patient' ? (
@@ -2192,7 +2351,7 @@ return (
               
               {/* STEP 1: PATIENT */}
               {modalStep === 'patient' && (
-                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+                <div data-tour-id="booking-patient-step" className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
                   <div className="flex items-center gap-5 mb-10">
                     <div className="flex h-14 w-14 items-center justify-center rounded-[1.25rem] bg-blue-600 text-white shadow-xl shadow-blue-100 ring-4 ring-blue-50">
                       <Stethoscope className="h-7 w-7" />
@@ -2206,8 +2365,13 @@ return (
                         type="button"
                         variant="outline"
                         size="sm"
-                        onClick={() => openAddPatientModal({ publicBooking: isPublicBookingMode })}
-                        className="ml-auto h-12 px-5 gap-2 rounded-2xl text-[11px] font-black uppercase tracking-widest border-2 hover:bg-gray-50 hover:border-gray-200 transition-all shadow-sm"
+                        data-tour-id="booking-new-patient"
+                        disabled={isTourPatientNextStep}
+                        onClick={() => {
+                          if (isTourPatientNextStep) return;
+                          openAddPatientModal({ publicBooking: isPublicBookingMode });
+                        }}
+                        className="ml-auto h-12 px-5 gap-2 rounded-2xl text-[11px] font-black uppercase tracking-widest border-2 hover:bg-gray-50 hover:border-gray-200 transition-all shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         <Plus className="h-4 w-4" />
                         New patient
@@ -2215,10 +2379,10 @@ return (
                     )}
                   </div>
                   <Select value={selectedPatient} onValueChange={setSelectedPatient}>
-                    <SelectTrigger className="h-20 rounded-[2rem] border-2 border-gray-100 bg-white px-8 text-lg font-bold shadow-sm hover:border-blue-200 transition-all">
+                    <SelectTrigger data-tour-id="booking-patient-select" className="h-20 rounded-[2rem] border-2 border-gray-100 bg-white px-8 text-lg font-bold shadow-sm hover:border-blue-200 transition-all">
                       <SelectValue placeholder="Search or choose a patient" />
                     </SelectTrigger>
-                    <SelectContent className="rounded-2xl border-none shadow-2xl">
+                    <SelectContent data-tour-id="booking-patient-options" className="rounded-2xl border-none shadow-2xl">
                       {patients.map(p => (
                         <SelectItem key={p.id} value={p.id} className="rounded-xl my-1 mx-2">{p.name}</SelectItem>
                       ))}
@@ -2229,7 +2393,7 @@ return (
 
               {/* STEP 2: SCHEDULE */}
               {modalStep === 'schedule' && (
-                <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
+                <div data-tour-id="booking-schedule-step" className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
                   <div className="flex items-center gap-5 mb-10">
                     <div className="flex h-14 w-14 items-center justify-center rounded-[1.25rem] bg-blue-600 text-white shadow-xl shadow-blue-100 ring-4 ring-blue-50">
                       <CalendarIcon className="h-7 w-7" />
@@ -2265,6 +2429,7 @@ return (
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <button 
+                      data-tour-id="booking-date-card"
                       onClick={() => setIsDatePickerOpen(true)} 
                       className="flex flex-col gap-6 p-8 bg-white rounded-[2.5rem] border-2 border-gray-100 hover:border-blue-500 transition-all text-left shadow-sm hover:shadow-xl hover:shadow-blue-50 group"
                     >
@@ -2278,6 +2443,7 @@ return (
                       </div>
                     </button>
                     <button 
+                      data-tour-id="booking-time-card"
                       onClick={() => setIsTimePickerOpen(true)} 
                       className="flex flex-col gap-6 p-8 bg-white rounded-[2.5rem] border-2 border-gray-100 hover:border-blue-500 transition-all text-left shadow-sm hover:shadow-xl hover:shadow-blue-50 group"
                     >
@@ -2296,7 +2462,7 @@ return (
 
               {/* STEP 3: DOCTOR */}
               {modalStep === 'doctor' && showDoctorStep && (
-                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+                <div data-tour-id="booking-doctor-step" className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
                   <div className="flex items-center gap-5 mb-10">
                     <div className="flex h-14 w-14 items-center justify-center rounded-[1.25rem] bg-blue-600 text-white shadow-xl shadow-blue-100 ring-4 ring-blue-50">
                       <Award className="h-7 w-7" />
@@ -2327,6 +2493,7 @@ return (
                         return (
                           <button
                             key={doctor.id}
+                            data-tour-id="booking-doctor-option"
                             type="button"
                             onClick={() => !unavailable && setSelectedDoctor(doctor.name)}
                             disabled={unavailable}
@@ -2377,7 +2544,7 @@ return (
 
               {/* STEP 4: CHOOSE TREATMENT & FINANCIALS */}
               {modalStep === 'treatment' && (
-                <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4">
+                <div data-tour-id="booking-treatment-step" className="space-y-10 animate-in fade-in slide-in-from-bottom-4">
                   {/* Treatment Selection */}
                   <div className="space-y-6">
                     <div className="flex items-center gap-5 mb-10">
@@ -2401,6 +2568,7 @@ return (
                       ].map((t) => (
                         <button
                           key={t.name}
+                          data-tour-id={t.name === "Routine Cleaning" ? "booking-routine-cleaning" : undefined}
                           type="button"
                           onClick={() => setAppointmentType(t.name)}
                           className={`p-4 rounded-[2rem] border-2 transition-all flex flex-col items-center justify-center gap-3 shadow-sm ${appointmentType === t.name ? 'border-blue-600 bg-blue-50/50 shadow-blue-100 scale-105' : 'border-white bg-white hover:border-gray-200 hover:-translate-y-1'}`}
@@ -2530,7 +2698,7 @@ return (
 
               {/* FINAL STEP: PAYMENT & STATUS */}
               {modalStep === 'payment' && (
-                <div className="mx-auto max-w-4xl space-y-8 py-2 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div data-tour-id="booking-payment-step" className="mx-auto max-w-4xl space-y-8 py-2 animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="flex items-center gap-6 p-6 bg-gray-50/50 rounded-[2rem] border border-gray-100/50">
                     <div className="flex h-16 w-16 items-center justify-center rounded-[1.25rem] bg-emerald-500 text-white shadow-xl shadow-emerald-200 ring-4 ring-emerald-50 shrink-0">
                       <CreditCard className="h-8 w-8" />
@@ -2670,7 +2838,9 @@ return (
                   </Button>
                 )}
                 <Button
-                  onClick={() => {
+                  type="button"
+                  onClick={(event) => {
+                    event.preventDefault();
                     if (isBooking) return;
                     const overpayNow = modalStep === 'payment' && isOverpay;
                     if (overpayNow) {
@@ -2688,6 +2858,7 @@ return (
                   }}
                   aria-disabled={modalStep === 'payment' && isOverpay}
                   disabled={isBooking}
+                  data-tour-id="booking-next-button"
                   className={`h-12 w-full sm:min-w-[200px] rounded-2xl bg-blue-600 px-8 font-black uppercase tracking-widest text-white shadow-lg shadow-blue-200 hover:bg-blue-700 hover:shadow-blue-300 transition-all sm:w-auto ${modalStep === 'payment' && isOverpay ? 'opacity-80 cursor-pointer' : ''} ${overpayPulse ? 'ring-2 ring-red-400 animate-pulse' : ''}`}
                 >
                   {isBooking ? <Loader2 className="h-5 w-5 animate-spin" /> : (
@@ -2802,7 +2973,7 @@ return (
 
       {/* Summary confirmation dialog */}
       <Dialog open={isConfirmSummaryOpen} onOpenChange={setIsConfirmSummaryOpen}>
-        <DialogContent className="w-[calc(100vw-2rem)] max-w-2xl gap-0 overflow-hidden rounded-[2rem] border-none p-0 shadow-2xl sm:max-w-2xl">
+        <DialogContent data-tour-id="booking-summary-modal" className="w-[calc(100vw-2rem)] max-w-2xl gap-0 overflow-hidden rounded-[2rem] border-none p-0 shadow-2xl sm:max-w-2xl">
           <DialogHeader className="border-b bg-gray-50 px-6 py-5">
             <div className="flex items-center gap-4">
               <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-100">
@@ -3007,7 +3178,7 @@ return (
           )}
 
           <DialogFooter className="flex gap-3 border-t bg-gray-50/60 p-6">
-            <Button variant="outline" onClick={() => setIsConfirmSummaryOpen(false)} disabled={isBooking} className="h-12 flex-1 rounded-2xl border-2 font-bold">
+            <Button data-tour-id="booking-summary-back" variant="outline" onClick={() => setIsConfirmSummaryOpen(false)} disabled={isBooking} className="h-12 flex-1 rounded-2xl border-2 font-bold">
               Back to Edit
             </Button>
             <Button className="h-12 flex-1 rounded-2xl bg-blue-600 font-black uppercase tracking-widest text-white shadow-lg shadow-blue-100 hover:bg-blue-700" onClick={handleConfirmSummary} disabled={isBooking}>
@@ -3034,8 +3205,8 @@ return (
         openedFromBookingModal={true}
       />
 
-      <DatePickerModal open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen} selectedDate={selectedDate} onDateSelect={setSelectedDate} doctorName={selectedDoctor} selectedTime={selectedTime} duration={duration} dateSelectionMode={isEditMode ? "edit" : isPastAppointmentMode ? "past" : "standard"} appointmentSource={isPublicBookingMode ? "cache" : "server"} cachedAppointments={publicBlockingAppointments as any} />
-      <TimePickerModal open={isTimePickerOpen} onOpenChange={setIsTimePickerOpen} selectedDate={selectedDate} selectedTime={selectedTime} doctorName={selectedDoctor} duration={duration} onTimeSelect={setSelectedTime} onDateChange={setSelectedDate} excludeAppointmentId={appointmentToEdit?.id} patientId={selectedPatient} dateSelectionMode={isEditMode ? "edit" : isPastAppointmentMode ? "past" : "standard"} appointmentSource={isPublicBookingMode ? "cache" : "server"} cachedAppointments={publicBlockingAppointments as any} />
+      <DatePickerModal open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen} selectedDate={selectedDate} onDateSelect={setSelectedDate} doctorName={selectedDoctor} selectedTime={selectedTime} duration={duration} dateSelectionMode={isEditMode ? "edit" : isPastAppointmentMode ? "past" : "standard"} appointmentSource={isPublicBookingMode ? "cache" : "server"} cachedAppointments={publicBlockingAppointments as any} selectionDisabled={isTourScheduleSelectionLocked} />
+      <TimePickerModal open={isTimePickerOpen} onOpenChange={setIsTimePickerOpen} selectedDate={selectedDate} selectedTime={selectedTime} doctorName={selectedDoctor} duration={duration} onTimeSelect={setSelectedTime} onDateChange={setSelectedDate} excludeAppointmentId={appointmentToEdit?.id} patientId={selectedPatient} dateSelectionMode={isEditMode ? "edit" : isPastAppointmentMode ? "past" : "standard"} appointmentSource={isPublicBookingMode ? "cache" : "server"} cachedAppointments={publicBlockingAppointments as any} selectionDisabled={isTourScheduleSelectionLocked} />
     </>
   );
  }

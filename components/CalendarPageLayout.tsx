@@ -118,7 +118,7 @@ export function CalendarPageLayout({ portal, doctorName, defaultStatusFilter }: 
   const { title, buttonText, buttonColor, onClick } = getTitleAndAction();
 
   return (
-    <div className="p-6 space-y-6">
+    <div data-tour-id={`${portal}-calendar-page`} className="p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">{title}</h1>
@@ -131,6 +131,7 @@ export function CalendarPageLayout({ portal, doctorName, defaultStatusFilter }: 
           )}
           <Button 
             onClick={onClick}
+            data-tour-id={`${portal}-calendar-new-appointment`}
             className={`text-white gap-2 rounded-xl ${buttonColor}`}
           >
             <Plus className="h-4 w-4" />

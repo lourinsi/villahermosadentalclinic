@@ -354,6 +354,7 @@ export function PatientDetailsModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
+        data-tour-id="patient-details-modal"
         title={`Patient Details - ${patientDisplayName}`}
         className="flex h-[min(96vh,1080px)] w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] flex-col gap-0 overflow-hidden rounded-2xl border-none bg-[#fdfdff] p-0 shadow-2xl ring-1 ring-slate-200 duration-200 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 sm:w-[calc(100vw-2rem)] sm:max-w-[calc(100vw-2rem)] 2xl:max-w-[1800px]"
       >
@@ -434,7 +435,7 @@ export function PatientDetailsModal({
         {patient ? (
           <div className="flex flex-1 flex-col overflow-hidden">
             {/* Quick Summary Bar - High Visibility Redesign */}
-            <div className="border-b border-slate-200 bg-slate-50/70 px-5 py-4 sm:px-7 lg:px-8">
+            <div data-tour-id="patient-details-summary" className="border-b border-slate-200 bg-slate-50/70 px-5 py-4 sm:px-7 lg:px-8">
               <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(185px,1fr))]">
                 <div className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
                   <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Account Status</span>
@@ -2023,7 +2024,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
   return (
     <div className="flex-1 overflow-hidden bg-slate-50/50">
       <div className="h-full flex flex-col">
-        <Tabs defaultValue="info" className="flex-1 flex flex-col overflow-hidden">
+        <Tabs defaultValue="info" data-tour-id="patient-details-tabs" className="flex-1 flex flex-col overflow-hidden">
           {/* Modern Navigation Tabs */}
           <div className="shrink-0 border-b border-slate-200 bg-white px-4 sm:px-6 lg:px-8">
             <TabsList className="flex h-auto min-h-14 w-full justify-start gap-2 overflow-x-auto overflow-y-hidden rounded-none border-none bg-transparent p-0">
@@ -2038,6 +2039,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
                 <TabsTrigger
                   key={tab.value}
                   value={tab.value}
+                  data-tour-id={`patient-details-${tab.value}-tab`}
                   className="group relative h-14 shrink-0 rounded-none border-b-2 border-transparent bg-transparent px-3 pb-1 pt-1 text-sm font-bold text-slate-500 transition-all data-[state=active]:border-violet-600 data-[state=active]:bg-transparent data-[state=active]:text-violet-600 hover:text-slate-800 sm:px-4"
                 >
                   <div className="flex items-center gap-2">
@@ -2049,8 +2051,8 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
             </TabsList>
           </div>
 
-          <div className="flex-1 overflow-y-auto custom-scrollbar p-4 sm:p-6 lg:p-8">
-            <TabsContent value="info" className="mt-0 outline-none">
+          <div data-tour-id="patient-details-scroll-area" className="flex-1 overflow-y-auto custom-scrollbar p-4 sm:p-6 lg:p-8">
+            <TabsContent value="info" data-tour-id="patient-details-info-content" className="mt-0 outline-none">
                 <div className="mx-auto grid max-w-[1680px] grid-cols-1 gap-6 xl:grid-cols-[320px_minmax(0,1fr)] xl:gap-8 2xl:gap-10">
                 {/* Left Column: Profile Insight Card */}
                 <div className="min-w-0 space-y-6 xl:space-y-8">
@@ -2363,7 +2365,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
             </TabsContent>
 
             {/* Family & Relations Tab */}
-            <TabsContent value="family" className="mt-0 outline-none">
+            <TabsContent value="family" data-tour-id="patient-details-family-content" className="mt-0 outline-none">
               <div className="mx-auto max-w-[1180px] space-y-8 py-2 sm:py-4">
                 <div className="flex flex-col items-start justify-between gap-4 overflow-hidden rounded-lg bg-violet-600 p-5 text-white shadow-xl shadow-violet-100 sm:p-7 md:flex-row md:items-center">
                   <div className="relative z-10">
@@ -2485,7 +2487,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
               </div>
             </TabsContent>
 
-        <TabsContent value="records" className="mx-auto max-w-[1180px] space-y-4">
+        <TabsContent value="records" data-tour-id="patient-details-records-content" className="mx-auto max-w-[1180px] space-y-4">
           <Card className={cardClass}>
             <CardHeader className={cardHeaderClass}>
               <CardTitle className="text-base font-semibold text-slate-900">Dental Records & Treatment Notes</CardTitle>
@@ -2511,7 +2513,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           </Card>
         </TabsContent>
 
-        <TabsContent value="chart" className="mx-auto max-w-[1680px] space-y-4">
+        <TabsContent value="chart" data-tour-id="patient-details-chart-content" className="mx-auto max-w-[1680px] space-y-4">
           <DentalChart
             records={formData.dentalCharts}
             onSaveRecords={(updatedRecords) => {
@@ -2522,7 +2524,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           />
         </TabsContent>
 
-        <TabsContent value="history" className="mx-auto max-w-[1680px] space-y-4">
+        <TabsContent value="history" data-tour-id="patient-details-history-content" className="mx-auto max-w-[1680px] space-y-4">
           <Card className={cardClass}>
             <CardHeader>
                 <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
@@ -2759,7 +2761,7 @@ const PatientDetails = React.forwardRef<PatientDetailsRef, {
           </Card>
         </TabsContent>
 
-        <TabsContent value="payments" className="mx-auto max-w-[1680px] space-y-4">
+        <TabsContent value="payments" data-tour-id="patient-details-payments-content" className="mx-auto max-w-[1680px] space-y-4">
           <Card className={cardClass}>
             <CardHeader>
                 <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">

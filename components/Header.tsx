@@ -219,6 +219,7 @@ export function Header({
                 </Button>
                 <Button 
                   variant="outline" 
+                  data-tour-id="landing-login"
                   onClick={() => router.push("/login")}
                   className="h-11 rounded-full border-primary px-5 font-semibold text-primary hover:bg-primary/5"
                 >

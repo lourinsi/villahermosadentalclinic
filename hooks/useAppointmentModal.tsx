@@ -100,7 +100,7 @@ export const AppointmentModalProvider = ({ children }: { children: ReactNode }) 
   const openCreateModal = useCallback((date?: Date, time?: string, doctorName?: string) => {
     setNewAppointmentDate(date);
     setNewAppointmentTime(time);
-    if (doctorName !== undefined) setNewAppointmentDoctorName(doctorName ?? "");
+    setNewAppointmentDoctorName(doctorName ?? "");
     // If a date is provided and it's a past date, open the modal in 'past' creation mode.
     try {
       const creationMode: BookingCreationMode = isPastAppointmentDate(date) ? "past" : "standard";

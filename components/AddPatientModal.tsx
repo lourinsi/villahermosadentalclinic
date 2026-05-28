@@ -141,7 +141,7 @@ export function AddPatientModal() {
 
   return (
     <Dialog open={isAddPatientModalOpen} onOpenChange={handleCancel}>
-      <DialogContent className="max-w-md">
+      <DialogContent data-tour-id="add-patient-modal" className="max-w-md">
         <DialogHeader>
           <DialogTitle>Add New Patient</DialogTitle>
         </DialogHeader>
@@ -161,6 +161,7 @@ export function AddPatientModal() {
               <Label>First Name *</Label>
               <Input 
                 ref={firstNameRef}
+                data-tour-id="add-patient-first-name"
                 value={formData.firstName} 
                 onChange={(e) => setFormData(prev => ({ ...prev, firstName: e.target.value }))} 
                 placeholder="Enter first name"
@@ -171,6 +172,7 @@ export function AddPatientModal() {
             <div className="space-y-2">
               <Label>Last Name *</Label>
               <Input 
+                data-tour-id="add-patient-last-name"
                 value={formData.lastName} 
                 onChange={(e) => setFormData(prev => ({ ...prev, lastName: e.target.value }))} 
                 placeholder="Enter last name"
@@ -182,6 +184,7 @@ export function AddPatientModal() {
               <Label>Email *</Label>
               <Input 
                 type="email"
+                data-tour-id="add-patient-email"
                 value={formData.email} 
                 onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))} 
                 placeholder="Enter email"
@@ -193,6 +196,7 @@ export function AddPatientModal() {
               <Label>Phone Number *</Label>
               <Input 
                 type="tel"
+                data-tour-id="add-patient-phone"
                 value={formData.phone} 
                 onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))} 
                 placeholder="Enter phone number"
@@ -204,6 +208,7 @@ export function AddPatientModal() {
               <Label>Date of Birth *</Label>
               <Input 
                 type="date"
+                data-tour-id="add-patient-date-of-birth"
                 value={formData.dateOfBirth} 
                 onChange={(e) => setFormData(prev => ({ ...prev, dateOfBirth: e.target.value }))} 
                 required 
@@ -221,6 +226,7 @@ export function AddPatientModal() {
               </Button>
               <Button 
                 type="button" 
+                data-tour-id="add-patient-review"
                 onClick={handleReview} 
                 disabled={isLoading}
               >
@@ -261,6 +267,7 @@ export function AddPatientModal() {
                 <Button 
                   variant="outline"
                   type="button" 
+                  data-tour-id="add-patient-summary-back"
                   onClick={() => setShowSummary(false)} 
                   disabled={isLoading}
                 >
@@ -268,6 +275,7 @@ export function AddPatientModal() {
                 </Button>
                 <Button 
                   type="button" 
+                  data-tour-id="add-patient-confirm"
                   onClick={handleSubmit} 
                   disabled={isLoading}
                 >

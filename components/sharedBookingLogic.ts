@@ -565,6 +565,8 @@ export async function findNextAvailableBookingSlot({
   timeSlots,
   maxDaysToCheck = 30,
   logPrefix = "BookingModal",
+  availabilityMode = "authenticated",
+  localBlockingAppointments = [],
 }: {
   startDate: Date;
   doctorToCheck: string;
@@ -573,46 +575,69 @@ export async function findNextAvailableBookingSlot({
   timeSlots: string[];
   maxDaysToCheck?: number;
   logPrefix?: string;
+  availabilityMode?: "authenticated" | "public";
+  localBlockingAppointments?: any[];
 }): Promise<BookingSlot | null> {
   if (!doctorToCheck) return null;
 
   const durationMins = normalizeBookingDuration(durationToCheck);
   const start = parseLocalDateOnly(startDate) ?? new Date();
+  const normalizeDoctor = (doctor?: string) =>
+    String(doctor || "").replace(/^Dr\.\s+/i, "").toLowerCase().trim();
+  const targetDoctor = normalizeDoctor(doctorToCheck);
 
   const getSlotsForDate = async (date: Date) => {
     try {
       const dateStr = formatBookingDateKey(date);
       if (!dateStr) return [];
 
+      const endpoint =
+        availabilityMode === "public"
+          ? `/api/appointments/public-availability?doctor=${encodeURIComponent(doctorToCheck)}&startDate=${dateStr}&endDate=${dateStr}`
+          : `/api/appointments?doctor=${encodeURIComponent(doctorToCheck)}&startDate=${dateStr}&endDate=${dateStr}&includeUnpaid=true`;
       const response = await fetch(
-        apiUrl(`/api/appointments?doctor=${encodeURIComponent(doctorToCheck)}&startDate=${dateStr}&endDate=${dateStr}&includeUnpaid=true`),
+        apiUrl(endpoint),
         { credentials: "include" }
       );
 
-      if (!response.ok) return [];
+      if (!response.ok && availabilityMode !== "public") return [];
 
-      const json = await response.json();
-      const appointments = Array.isArray(json.data) ? json.data : [];
+      const json = response.ok ? await response.json() : { data: [] };
+      const remoteAppointments = Array.isArray(json.data) ? json.data : [];
+      const localAppointmentsForDate = localBlockingAppointments.filter((appointment) => {
+        if (appointment.date !== dateStr) return false;
+        if (!targetDoctor) return true;
+        return normalizeDoctor(appointment.doctorId || appointment.doctorName || appointment.doctor) === targetDoctor;
+      });
+      const appointments = [...remoteAppointments, ...localAppointmentsForDate];
       console.log(`[${logPrefix}] findNextAvailableSlot fetched appointments for`, dateStr, {
         doctorToCheck,
         appointmentsCount: appointments.length,
       });
 
-      let patientAppointmentsForDate: any[] = [];
+      const localPatientAppointmentsForDate = localBlockingAppointments.filter(
+        (appointment) => appointment.date === dateStr && patientToCheck && String(appointment.patientId) === String(patientToCheck)
+      );
+      let patientAppointmentsForDate: any[] = localPatientAppointmentsForDate;
       if (patientToCheck) {
         try {
-          const patientResponse = await fetch(
-            apiUrl(`/api/appointments?patientId=${encodeURIComponent(patientToCheck)}&startDate=${dateStr}&endDate=${dateStr}&includeUnpaid=true`),
-            { credentials: "include" }
-          );
+          if (availabilityMode !== "public") {
+            const patientResponse = await fetch(
+              apiUrl(`/api/appointments?patientId=${encodeURIComponent(patientToCheck)}&startDate=${dateStr}&endDate=${dateStr}&includeUnpaid=true`),
+              { credentials: "include" }
+            );
 
-          if (patientResponse.ok) {
-            const patientJson = await patientResponse.json();
-            patientAppointmentsForDate = Array.isArray(patientJson.data) ? patientJson.data : [];
+            if (patientResponse.ok) {
+              const patientJson = await patientResponse.json();
+              patientAppointmentsForDate = [
+                ...patientAppointmentsForDate,
+                ...(Array.isArray(patientJson.data) ? patientJson.data : []),
+              ];
+            }
           }
         } catch (err) {
           console.warn(`[${logPrefix}] Failed to fetch patient appointments for auto-search`, err);
-          patientAppointmentsForDate = [];
+          patientAppointmentsForDate = localPatientAppointmentsForDate;
         }
 
         console.log(`[${logPrefix}] findNextAvailableSlot fetched patient appointments for`, dateStr, {

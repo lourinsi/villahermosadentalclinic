@@ -26,6 +26,7 @@ interface TimePickerModalProps {
   dateSelectionMode?: BookingCreationMode;
   appointmentSource?: "server" | "cache";
   cachedAppointments?: Appointment[];
+  selectionDisabled?: boolean;
 }
 
 const getAppointmentFetchOptions = (): RequestInit => {
@@ -56,6 +57,7 @@ export function TimePickerModal({
   dateSelectionMode = "standard",
   appointmentSource = "server",
   cachedAppointments = [],
+  selectionDisabled = false,
 }: TimePickerModalProps) {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -162,7 +164,7 @@ export function TimePickerModal({
     newDate.setDate(viewDate.getDate() + (direction === 'next' ? 1 : -1));
     if (!isEditMode && isPastMode && isAfterToday(newDate)) return;
     setViewDate(newDate);
-    if (onDateChange) {
+    if (onDateChange && !selectionDisabled) {
       onDateChange(newDate);
     }
     fetchAppointments(newDate);
@@ -259,13 +261,15 @@ export function TimePickerModal({
   }, [appointments, viewDate, selectedDate, selectedTime, excludeAppointmentId, duration, doctorName, patientId, isPastMode]);
 
   const handleTimeSelect = (time: string) => {
+    if (selectionDisabled) return;
+
     onTimeSelect(time);
     onOpenChange(false);
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent data-tour-id="booking-time-picker" className="max-w-md">
         <DialogHeader>
           <DialogTitle>{isPastMode ? "Select Past Time" : isEditMode ? "Select Time" : "Select Time"}</DialogTitle>
         </DialogHeader>
@@ -308,6 +312,7 @@ export function TimePickerModal({
                 <button
                   key={slot.time}
                   onClick={() => {
+                    if (selectionDisabled) return;
                     if (slot.isAvailable) {
                       handleTimeSelect(slot.time);
                     } else if (slot.appointment) {
@@ -315,10 +320,12 @@ export function TimePickerModal({
                       setSnapshotOpen(true);
                     }
                   }}
-                  disabled={slot.isBlockedByDateMode && !slot.appointment}
+                  disabled={selectionDisabled || (slot.isBlockedByDateMode && !slot.appointment)}
                   className={cn(
                     "px-2 py-2 rounded-lg font-semibold text-xs transition-all border",
-                    slot.isPatientConflict && !slot.isPending
+                    selectionDisabled
+                      ? "bg-gray-50 text-gray-400 border-gray-200 cursor-not-allowed"
+                    : slot.isPatientConflict && !slot.isPending
                       ? "bg-purple-50 text-purple-700 border-purple-200 cursor-pointer"
                     : slot.isSelected && slot.isAvailable
                       ? "bg-blue-600 text-white border-blue-700 shadow-md"
@@ -333,7 +340,8 @@ export function TimePickerModal({
                       : "bg-red-50 text-red-700 border-red-200 cursor-pointer"
                   ) }
                   title={
-                    slot.isBlockedByDateMode && slot.isFuture && !slot.appointment ? "Upcoming time"
+                    selectionDisabled ? "Time selection is disabled during this tour step"
+                    : slot.isBlockedByDateMode && slot.isFuture && !slot.appointment ? "Upcoming time"
                     : slot.isBlockedByDateMode && slot.isPast && !slot.appointment ? "Past time"
                     : slot.isPatientConflict ? "Patient is busy (Click to view details)"
                     : slot.isTentative ? "Reserved (Click to view details)"

@@ -30,8 +30,11 @@ interface NotificationViewProps {
   onRestore?: (id: string) => void;
   portal?: 'admin' | 'doctor' | 'patient';
   isLoading?: boolean;
+  isLoadingMore?: boolean;
+  hasMore?: boolean;
   error?: string | null;
   onDeleteWithResult?: (id: string) => Promise<boolean>;
+  onLoadMore?: () => void | Promise<void>;
 }
 
 export function NotificationView({ 
@@ -50,10 +53,16 @@ export function NotificationView({
   onRestore,
   portal = 'admin',
   isLoading = false,
-  error = null
+  isLoadingMore = false,
+  hasMore = false,
+  error = null,
+  onLoadMore
 }: NotificationViewProps) {
   const [activeTab, setActiveTab] = useState('notifications');
   const [localNotifications, setLocalNotifications] = useState<Notification[]>([]);
+  const scrollRootRef = useRef<HTMLDivElement | null>(null);
+  const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
+  const loadMoreInFlightRef = useRef(false);
   // Track IDs we've optimistically marked deleted so parent prop updates don't overwrite them
   const optimisticDeletedRef = React.useRef<Set<string>>(new Set());
 
@@ -180,6 +189,55 @@ export function NotificationView({
     />
   );
 
+  const handleLoadMore = React.useCallback(async () => {
+    if (!hasMore || isLoadingMore || !onLoadMore || loadMoreInFlightRef.current) return;
+
+    loadMoreInFlightRef.current = true;
+    try {
+      await onLoadMore();
+    } finally {
+      loadMoreInFlightRef.current = false;
+    }
+  }, [hasMore, isLoadingMore, onLoadMore]);
+
+  useEffect(() => {
+    if (!hasMore || isLoadingMore || !onLoadMore) return;
+
+    const root = scrollRootRef.current;
+    const sentinel = loadMoreSentinelRef.current;
+    if (!root || !sentinel) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          void handleLoadMore();
+        }
+      },
+      { root, rootMargin: '120px 0px', threshold: 0.1 }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [
+    activeTab,
+    deletedNotifications.length,
+    filteredNotifications.length,
+    handleLoadMore,
+    hasMore,
+    isLoadingMore,
+    onLoadMore,
+  ]);
+
+  const renderLoadMoreSentinel = () => {
+    if (!hasMore && !isLoadingMore) return null;
+
+    return (
+      <div ref={loadMoreSentinelRef} className="flex h-10 items-center justify-center py-2">
+        {isLoadingMore && <Loader className="h-5 w-5 animate-spin text-violet-600" />}
+      </div>
+    );
+  };
+
   // Show loading state
   if (isLoading) {
     return (
@@ -302,7 +360,11 @@ export function NotificationView({
           )}
         </div>
 
-        <TabsContent value="notifications" className="p-2 overflow-y-auto max-h-[calc(100vh-200px)]">
+        <TabsContent
+          value="notifications"
+          ref={activeTab === 'notifications' ? scrollRootRef : undefined}
+          className="p-2 overflow-y-auto max-h-[calc(100vh-200px)]"
+        >
           {filteredNotifications.length === 0 ? (
             <div className="p-12 text-center">
               <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gray-100 mb-4">
@@ -339,9 +401,14 @@ export function NotificationView({
               )}
             </div>
           )}
+          {activeTab === 'notifications' && renderLoadMoreSentinel()}
         </TabsContent>
 
-        <TabsContent value="deleted" className="p-2 overflow-y-auto max-h-[calc(100vh-200px)]">
+        <TabsContent
+          value="deleted"
+          ref={activeTab === 'deleted' ? scrollRootRef : undefined}
+          className="p-2 overflow-y-auto max-h-[calc(100vh-200px)]"
+        >
           {deletedNotifications.length === 0 ? (
             <div className="p-12 text-center">
               <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gray-100 mb-4">
@@ -375,6 +442,7 @@ export function NotificationView({
               )}
             </div>
           )}
+          {activeTab === 'deleted' && renderLoadMoreSentinel()}
         </TabsContent>
       </Tabs>
     </div>
